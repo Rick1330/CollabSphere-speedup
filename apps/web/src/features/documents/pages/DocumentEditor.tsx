@@ -430,6 +430,7 @@ const DocumentEditorPage = () => {
               folderName: pending.folderName,
               content: pending.contentHTML,
               createdBy: { id: CURRENT_USER_ID, fullName: "Elshaday Tesfaye" },
+              templateId: pending.templateId,
             }
           : { ...FALLBACK_DOC, id: documentId || "untitled" };
       // Keep the seed around for retries within this tab, but clear once we
