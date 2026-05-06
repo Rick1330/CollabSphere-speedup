@@ -29,6 +29,9 @@ import {
   Quote,
   Minus,
   Type,
+  Table as TableIcon,
+  Workflow,
+  Sigma,
 } from "lucide-react";
 
 interface EditorSlashCommandProps {
@@ -132,6 +135,33 @@ const ITEMS: SlashItem[] = [
     Icon: Minus,
     keywords: ["divider", "hr", "rule", "separator"],
     run: (e) => e.chain().focus().setHorizontalRule().run(),
+  },
+  {
+    id: "table",
+    label: "Table",
+    hint: "3×3 with header row",
+    Icon: TableIcon,
+    keywords: ["table", "grid", "matrix"],
+    run: (e) =>
+      (e.chain().focus() as any)
+        .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
+        .run(),
+  },
+  {
+    id: "mermaid",
+    label: "Diagram",
+    hint: "Mermaid (flow, sequence…)",
+    Icon: Workflow,
+    keywords: ["diagram", "mermaid", "flow", "sequence", "graph"],
+    run: (e) => (e.chain().focus() as any).insertMermaidBlock().run(),
+  },
+  {
+    id: "math",
+    label: "Equation",
+    hint: "LaTeX (KaTeX)",
+    Icon: Sigma,
+    keywords: ["math", "equation", "latex", "katex", "formula"],
+    run: (e) => (e.chain().focus() as any).insertMathBlock().run(),
   },
 ];
 

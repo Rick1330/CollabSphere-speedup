@@ -1121,3 +1121,87 @@
     }
   }
 }
+
+/* ─── Document editor — print stylesheet ──────────────────────────────────
+ * Producing high-fidelity PDFs from the editor (Cmd/Ctrl+P → Save as PDF)
+ * is the OSS path to "Export as PDF" without a paid Tiptap Pro extension.
+ * Rules:
+ *   • Hide everything except the writing canvas (toolbars, rails, headers).
+ *   • Reset the canvas to a clean A4 page with comfortable margins.
+ *   • Force light theme, full-width content, and avoid clipping at page
+ *     boundaries for tables, code blocks, diagrams, and equations.
+ * ───────────────────────────────────────────────────────────────────────── */
+@media print {
+  /* Hide editor chrome */
+  [role="toolbar"],
+  [aria-label="Document context"],
+  [aria-label="Document outline"],
+  [aria-label*="comments rail" i],
+  header[role="banner"],
+  .editor-print-hide {
+    display: none !important;
+  }
+
+  /* Page setup */
+  @page {
+    size: A4;
+    margin: 18mm 16mm;
+  }
+
+  html, body {
+    background: #ffffff !important;
+    color: #111 !important;
+  }
+
+  /* Writing canvas */
+  main {
+    overflow: visible !important;
+  }
+  .tiptap {
+    max-width: 100% !important;
+    padding: 0 !important;
+    color: #111 !important;
+  }
+
+  /* Block-level elements should not split mid-block when avoidable */
+  .tiptap h1, .tiptap h2, .tiptap h3, .tiptap h4 {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+  .tiptap pre,
+  .tiptap table,
+  .tiptap blockquote,
+  [data-type="mermaid-block"],
+  [data-type="math-block"] {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* Code blocks: invert to print-safe greys (saves ink, stays legible) */
+  .tiptap pre {
+    background: #f5f5f4 !important;
+    color: #111 !important;
+    border: 1px solid #e7e5e4;
+  }
+
+  /* Mermaid + math: source textareas are editor-only; show preview only */
+  [data-type="mermaid-block"] textarea,
+  [data-type="math-block"] textarea,
+  [data-type="mermaid-block"] > div:first-child,
+  [data-type="math-block"] > div:first-child {
+    display: none !important;
+  }
+
+  /* Tables: force visible borders */
+  .tiptap table th,
+  .tiptap table td {
+    border: 1px solid #d6d3d1 !important;
+  }
+
+  /* Links: print URL after text for context */
+  .tiptap a[href]::after {
+    content: " (" attr(href) ")";
+    font-size: 0.85em;
+    color: #555;
+  }
+}

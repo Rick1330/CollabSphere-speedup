@@ -27,6 +27,10 @@ import {
   type SaveStatus,
 } from "@/features/documents/components/editor/editor-status-bar";
 import type { PresenceUser } from "@/features/documents/components/editor/editor-presence";
+import { EditorContextRail } from "@/features/documents/components/editor/editor-context-rail";
+import { useDocumentOutline } from "@/features/documents/hooks/use-document-outline";
+import { useDocumentReadiness } from "@/features/documents/hooks/use-document-readiness";
+import { getTemplateContract } from "@/features/documents/template-schema";
 import { DocumentTreePanel } from "@/features/documents/components/tree/document-tree-panel";
 import { TreeCreateDialog } from "@/features/documents/components/tree-create-dialog";
 import { DocumentCommentsRail } from "@/features/documents/components/comments/document-comments-rail";
@@ -76,6 +80,8 @@ interface MockWorkspace {
 interface MockDocument extends EditorDocument {
   content: string;
   createdBy: { id: string; fullName: string };
+  /** Optional template-contract id (see template-schema.ts). */
+  templateId?: string | null;
 }
 
 const CURRENT_USER_ID = "user-jane";
@@ -133,6 +139,7 @@ const DOCUMENTS: Record<string, MockDocument> = {
     folderName: "Product",
     content: "<h1>PRD v2</h1><p>Draft requirements for the next release.</p>",
     createdBy: { id: "user-bob", fullName: "Eyob Bekele" },
+    templateId: "doc-prd",
   },
   "d-survey": {
     id: "d-survey",
@@ -142,6 +149,7 @@ const DOCUMENTS: Record<string, MockDocument> = {
     folderName: "Research",
     content: "<h1>User survey results</h1><p>Highlights from the latest round.</p>",
     createdBy: { id: CURRENT_USER_ID, fullName: "Elshaday Tesfaye" },
+    templateId: "doc-research-brief",
   },
   "d-api": {
     id: "d-api",
@@ -151,6 +159,7 @@ const DOCUMENTS: Record<string, MockDocument> = {
     folderName: "Architecture",
     content: "<h1>API Design</h1><p>REST envelope conventions.</p>",
     createdBy: { id: CURRENT_USER_ID, fullName: "Elshaday Tesfaye" },
+    templateId: "doc-rfc",
   },
   "d-adr": {
     id: "d-adr",
@@ -160,6 +169,7 @@ const DOCUMENTS: Record<string, MockDocument> = {
     folderName: "Architecture",
     content: "<h1>ADR-003 Prisma</h1><p>We will adopt Prisma for the data layer.</p>",
     createdBy: { id: "user-bob", fullName: "Eyob Bekele" },
+    templateId: "doc-adr",
   },
   "d-retro": {
     id: "d-retro",
@@ -169,6 +179,7 @@ const DOCUMENTS: Record<string, MockDocument> = {
     folderName: "Meetings",
     content: "<h1>Sprint Retro Week 12</h1><p>What went well, what didn't.</p>",
     createdBy: { id: CURRENT_USER_ID, fullName: "Elshaday Tesfaye" },
+    templateId: "doc-meeting-notes",
   },
   "d-readme": {
     id: "d-readme",
@@ -423,6 +434,7 @@ const DocumentEditorPage = () => {
               folderName: pending.folderName,
               content: pending.contentHTML,
               createdBy: { id: CURRENT_USER_ID, fullName: "Elshaday Tesfaye" },
+              templateId: pending.templateId,
             }
           : { ...FALLBACK_DOC, id: documentId || "untitled" };
       // Keep the seed around for retries within this tab, but clear once we
@@ -480,6 +492,14 @@ const DocumentEditorPage = () => {
       setSaveStatus("unsaved");
     },
   });
+
+  // ─────── Outline + readiness (right rail data) ───────
+  const outline = useDocumentOutline(editor);
+  const templateContract = useMemo(
+    () => getTemplateContract(mergedDoc?.templateId),
+    [mergedDoc?.templateId],
+  );
+  const readiness = useDocumentReadiness(editor, templateContract);
 
   // Auto "save" simulation
   useEffect(() => {
@@ -845,6 +865,17 @@ const DocumentEditorPage = () => {
   const docHasContent =
     !!editor && editor.getText().trim().length > 5;
 
+  // Template-contract gate: when the contract enforces structure, prevent
+  // submission until the readiness engine reports `blocksSubmit === false`.
+  // Advisory contracts (and missing contracts) never gate.
+  const readinessBlocks = !!readiness && readiness.blocksSubmit;
+  const canSubmitNow = docHasContent && !readinessBlocks;
+  const submitBlockReason = !docHasContent
+    ? "This document is empty. Add some content before submitting."
+    : readinessBlocks && readiness?.blockingReason
+      ? readiness.blockingReason
+      : undefined;
+
   // ── Submission handlers ──
 
   const nextVersionLabel = () => {
@@ -1016,6 +1047,26 @@ const DocumentEditorPage = () => {
         />
       </main>
 
+      {/* Right-side context rail: Outline + Readiness.
+          Hidden in focus mode and on viewports below lg. The comments rail
+          (xl+) sits to the right of this when both are visible. */}
+      <div
+        className={cn(
+          "hidden lg:flex flex-shrink-0 transition-[width] duration-300 ease-out overflow-hidden",
+          focusMode ? "w-0" : "w-[280px]",
+        )}
+        aria-hidden={focusMode}
+      >
+        <div className="w-[280px] h-full">
+          <EditorContextRail
+            editor={editor}
+            outline={outline}
+            contract={templateContract}
+            readiness={readiness}
+          />
+        </div>
+      </div>
+
       {/* Floating selection-based comment trigger */}
       <DocumentInlineCommentTrigger
         editor={editor}
@@ -1134,12 +1185,8 @@ const DocumentEditorPage = () => {
           onOpenChange={setSubmitDialogOpen}
           documentTitle={mergedDoc.title}
           isResubmission={isResubmission}
-          canSubmit={docHasContent}
-          blockReason={
-            !docHasContent
-              ? "This document is empty. Add some content before submitting."
-              : undefined
-          }
+          canSubmit={canSubmitNow}
+          blockReason={submitBlockReason}
           onConfirm={handleConfirmSubmit}
         />
       )}
