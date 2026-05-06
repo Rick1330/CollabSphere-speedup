@@ -1,0 +1,60 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "globalDependencies": [
+    "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
+    "scripts/build-bootstrap-app.ts",
+    "tsconfig.base.json",
+    "packages/shared/src/**",
+    "packages/shared/package.json",
+    "packages/shared/tsconfig.json",
+    "packages/ui/src/**",
+    "packages/ui/package.json",
+    "packages/ui/tsconfig.json"
+  ],
+  "tasks": {
+    "//#lint": {
+      "cache": false
+    },
+    "//#typecheck": {
+      "cache": false
+    },
+    "//#test:unit": {
+      "cache": false
+    },
+    "//#test:integration": {
+      "cache": false
+    },
+    "build": {
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        "dist/**",
+        ".next/**"
+      ]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "lint": {
+      "dependsOn": [
+        "^lint"
+      ]
+    },
+    "typecheck": {
+      "dependsOn": [
+        "^typecheck"
+      ]
+    },
+    "test": {
+      "dependsOn": [
+        "^test"
+      ],
+      "outputs": [
+        "coverage/**"
+      ]
+    }
+  }
+}

@@ -1,0 +1,330 @@
+name: Review Router
+
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - edited
+      - synchronize
+      - ready_for_review
+      - converted_to_draft
+      - labeled
+      - unlabeled
+  pull_request_review:
+    types:
+      - submitted
+      - dismissed
+      - edited
+  issue_comment:
+    types:
+      - created
+      - edited
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: review-router-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: false
+
+env:
+  DEVIN_REVIEW_ENABLED: ${{ vars.DEVIN_REVIEW_ENABLED }}
+  CODESCENE_ENABLED: ${{ vars.CODESCENE_ENABLED }}
+  REQUIRE_HUMAN_APPROVAL_FOR_CRITICAL: ${{ vars.REQUIRE_HUMAN_APPROVAL_FOR_CRITICAL }}
+
+jobs:
+  route:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Route review expectations
+        uses: actions/github-script@v8
+        with:
+          script: |
+            let pr = context.payload.pull_request;
+            if (!pr && context.payload.issue?.pull_request) {
+              const response = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.payload.issue.number,
+              });
+              pr = response.data;
+            }
+
+            if (!pr) {
+              core.info("No pull request context found. Skipping review router.");
+              return;
+            }
+
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issueRefPattern = /(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|ref(?:s|erences)?)\s+#(\d+)/gi;
+            const body = pr.body || "";
+            const issueNumbers = [...new Set([...body.matchAll(issueRefPattern)].map((match) => Number(match[1])).filter(Boolean))];
+
+            if (issueNumbers.length === 0) {
+              core.setFailed("PR body must reference at least one GitHub issue using Closes/Fixes/Resolves/Refs #<number>.");
+              return;
+            }
+
+            const reviewPriority = {
+              "review:standard": 1,
+              "review:elevated": 2,
+              "review:critical": 3,
+            };
+            const executableTypes = new Set([
+              "type:task",
+              "type:validation",
+              "type:bug",
+              "type:dependency",
+              "type:docs",
+              "type:ops",
+              "type:incident",
+              "type:investigation",
+              "type:chore",
+            ]);
+
+            const linkedIssues = [];
+            let requiredReviewLabel = "review:standard";
+            let requiredReviewValue = reviewPriority[requiredReviewLabel];
+
+            for (const issueNumber of issueNumbers) {
+              const { data: issue } = await github.rest.issues.get({
+                owner,
+                repo,
+                issue_number: issueNumber,
+              });
+
+              if (issue.pull_request) {
+                core.info(`Skipping #${issueNumber} because it is a pull request.`);
+                continue;
+              }
+
+              const labels = issue.labels
+                .map((label) => typeof label === "string" ? label : label.name)
+                .filter(Boolean);
+              const isExecutable = labels.some((label) => executableTypes.has(label));
+              const reviewLabels = labels.filter((label) => label.startsWith("review:"));
+
+              if (!isExecutable) {
+                core.info(`Skipping non-executable issue #${issueNumber} for review-tier enforcement.`);
+                continue;
+              }
+
+              if (reviewLabels.length === 0) {
+                core.setFailed(`Linked issue #${issueNumber} is missing a review:* label.`);
+                return;
+              }
+
+              if (reviewLabels.length > 1) {
+                core.setFailed(`Linked issue #${issueNumber} has multiple review:* labels: ${reviewLabels.join(", ")}`);
+                return;
+              }
+
+              const reviewLabel = reviewLabels[0];
+              const priority = reviewPriority[reviewLabel];
+              if (!priority) {
+                core.setFailed(`Linked issue #${issueNumber} has unsupported review label ${reviewLabel}.`);
+                return;
+              }
+
+              if (priority > requiredReviewValue) {
+                requiredReviewLabel = reviewLabel;
+                requiredReviewValue = priority;
+              }
+
+              linkedIssues.push({
+                number: issueNumber,
+                title: issue.title,
+                reviewLabel,
+              });
+            }
+
+            if (linkedIssues.length === 0) {
+              core.setFailed("No linked issues remained after evaluation.");
+              return;
+            }
+
+            const { data: latestPr } = await github.rest.pulls.get({
+              owner,
+              repo,
+              pull_number: pr.number,
+            });
+            const currentPrLabels = latestPr.labels
+              .map((label) => typeof label === "string" ? label : label.name)
+              .filter(Boolean);
+            const syncedPrLabels = [
+              ...currentPrLabels.filter((label) => !label.startsWith("review:")),
+              requiredReviewLabel,
+            ].sort((left, right) => left.localeCompare(right));
+
+            const sortedCurrentPrLabels = [...currentPrLabels].sort((left, right) => left.localeCompare(right));
+            const labelsChanged =
+              syncedPrLabels.length !== sortedCurrentPrLabels.length ||
+              syncedPrLabels.some((label, index) => sortedCurrentPrLabels[index] !== label);
+
+            if (labelsChanged) {
+              await github.rest.issues.setLabels({
+                owner,
+                repo,
+                issue_number: pr.number,
+                labels: syncedPrLabels,
+              });
+              core.info(`Synced PR #${pr.number} to ${requiredReviewLabel}.`);
+            } else {
+              core.info(`PR #${pr.number} already has ${requiredReviewLabel}.`);
+            }
+
+            const reviews = await github.paginate(github.rest.pulls.listReviews, {
+              owner,
+              repo,
+              pull_number: pr.number,
+              per_page: 100,
+            });
+
+            const latestReviewByUser = new Map();
+            for (const review of reviews) {
+              const reviewer = review.user?.login;
+              const reviewerType = review.user?.type;
+              if (!reviewer || reviewer === pr.user.login || reviewerType !== "User") {
+                continue;
+              }
+              if (
+                review.state === "APPROVED" ||
+                review.state === "CHANGES_REQUESTED" ||
+                review.state === "DISMISSED"
+              ) {
+                latestReviewByUser.set(reviewer, review.state);
+                continue;
+              }
+
+              if (review.state === "COMMENTED") {
+                const existing = latestReviewByUser.get(reviewer);
+                if (existing === "APPROVED" || existing === "CHANGES_REQUESTED") {
+                  continue;
+                }
+                latestReviewByUser.set(reviewer, review.state);
+              }
+            }
+
+            const approvalCount = [...latestReviewByUser.values()].filter((state) => state === "APPROVED").length;
+            const approvalReviewers = [...latestReviewByUser.entries()]
+              .filter(([, state]) => state === "APPROVED")
+              .map(([reviewer]) => reviewer)
+              .sort((left, right) => left.localeCompare(right));
+            const humanReviewStates = [...latestReviewByUser.entries()]
+              .map(([reviewer, state]) => `${reviewer} (${state.toLowerCase()})`)
+              .sort((left, right) => left.localeCompare(right));
+            const devinEnabled = String(process.env.DEVIN_REVIEW_ENABLED || "").toLowerCase() === "true";
+            const codesceneEnabled = String(process.env.CODESCENE_ENABLED || "").toLowerCase() === "true";
+            const requireHumanApproval =
+              String(process.env.REQUIRE_HUMAN_APPROVAL_FOR_CRITICAL || "").toLowerCase() !== "false";
+
+            const issueComments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number: pr.number,
+              per_page: 100,
+            });
+            const reviewComments = await github.paginate(github.rest.pulls.listReviewComments, {
+              owner,
+              repo,
+              pull_number: pr.number,
+              per_page: 100,
+            });
+            const reviewCommentAuthors = new Set([
+              ...issueComments.map((comment) => comment.user?.login),
+              ...reviewComments.map((comment) => comment.user?.login),
+              ...reviews.map((review) => review.user?.login),
+            ].filter(Boolean));
+
+            const detectedAutomations = [
+              { name: "Devin Review", actors: ["devin-ai-integration[bot]", "devin-ai-integration"] },
+              { name: "CodeScene", actors: ["codescene-delta-analysis[bot]", "codescene-delta-analysis"] },
+              { name: "CodeRabbit", actors: ["coderabbitai[bot]", "coderabbitai"] },
+              { name: "Qodo", actors: ["qodo-code-review[bot]", "qodo-code-review"] },
+              { name: "Codex", actors: ["chatgpt-codex-connector[bot]", "chatgpt-codex-connector"] },
+            ].map((integration) => ({
+              ...integration,
+              detected: integration.actors.some((actor) => reviewCommentAuthors.has(actor)),
+            }));
+
+            const detectedAutomationNames = detectedAutomations
+              .filter((integration) => integration.detected)
+              .map((integration) => integration.name)
+              .sort((left, right) => left.localeCompare(right));
+
+            const marker = "<!-- review-router -->";
+            const tierPolicy = {
+              "review:standard": [
+                "Standard: at least one additional review source is expected before merge.",
+                "Allowed sources: human reviewer, local IDE review agent, Devin Review, or CodeScene.",
+              ],
+              "review:elevated": [
+                "Elevated: deeper independent review is expected before merge.",
+                "Recommended: at least two review passes, with at least one pass independent from the working agent.",
+              ],
+              "review:critical": [
+                "Critical: human approval is required before merge.",
+                "Automated review comments do not replace human approval for this tier.",
+              ],
+            };
+
+            const lines = [
+              marker,
+              "## Review Router",
+              "",
+              `Required review tier: \`${requiredReviewLabel}\``,
+              "",
+              "Linked issues:",
+              ...linkedIssues.map((issue) => `- #${issue.number} ${issue.title} (${issue.reviewLabel})`),
+              "",
+              "Configured integrations:",
+              `- Devin auto-review configured: ${devinEnabled ? "yes" : "no"}`,
+              `- CodeScene auto-review configured: ${codesceneEnabled ? "yes" : "no"}`,
+              "",
+              "Observed review activity on this PR:",
+              `- Human approvals recorded: ${approvalCount}${approvalReviewers.length > 0 ? ` (${approvalReviewers.join(", ")})` : ""}`,
+              `- Human review states: ${humanReviewStates.length > 0 ? humanReviewStates.join("; ") : "none"}`,
+              `- Automated review sources detected: ${detectedAutomationNames.length > 0 ? detectedAutomationNames.join(", ") : "none"}`,
+              "",
+              "Policy:",
+              ...tierPolicy[requiredReviewLabel].map((line) => `- ${line}`),
+            ];
+
+            if (requiredReviewLabel === "review:critical") {
+              lines.push(`- Human approval enforced by router: ${requireHumanApproval ? "yes" : "no"}`);
+            }
+
+            const commentBody = `${lines.join("\n")}\n`;
+            const existingComment = issueComments.find((comment) => comment.body?.includes(marker));
+
+            if (existingComment) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existingComment.id,
+                body: commentBody,
+              });
+              core.info("Updated existing review-router comment.");
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: pr.number,
+                body: commentBody,
+              });
+              core.info("Created review-router comment.");
+            }
+
+            if (
+              requiredReviewLabel === "review:critical" &&
+              requireHumanApproval &&
+              !latestPr.draft &&
+              approvalCount < 1
+            ) {
+              core.setFailed("review:critical PRs require at least one non-author approval before merge.");
+            }
