@@ -11,10 +11,13 @@ import {
   MoreHorizontal,
   Quote,
   Redo,
+  Sigma,
   Strikethrough,
+  Table as TableIcon,
   TerminalSquare,
   Underline as UnderlineIcon,
   Undo,
+  Workflow,
   type LucideIcon,
 } from "lucide-react";
 import type { Editor } from "@tiptap/react";
@@ -187,6 +190,34 @@ export const EditorToolbar = ({ editor, isReadOnly }: EditorToolbarProps) => {
           label="Insert link (⌘⇧K)"
           isActive={isActive("link")}
           onClick={handleInsertLink}
+          disabled={isReadOnly}
+        />
+
+        <ToolbarSep />
+
+        <ToolbarBtn
+          icon={TableIcon}
+          label="Insert table"
+          isActive={isActive("table")}
+          onClick={() =>
+            (editor?.chain().focus() as any)
+              ?.insertTable({ rows: 3, cols: 3, withHeaderRow: true })
+              .run()
+          }
+          disabled={isReadOnly}
+        />
+        <ToolbarBtn
+          icon={Workflow}
+          label="Insert diagram (Mermaid)"
+          isActive={isActive("mermaidBlock")}
+          onClick={() => (editor?.chain().focus() as any)?.insertMermaidBlock().run()}
+          disabled={isReadOnly}
+        />
+        <ToolbarBtn
+          icon={Sigma}
+          label="Insert equation (LaTeX)"
+          isActive={isActive("mathBlock")}
+          onClick={() => (editor?.chain().focus() as any)?.insertMathBlock().run()}
           disabled={isReadOnly}
         />
 
