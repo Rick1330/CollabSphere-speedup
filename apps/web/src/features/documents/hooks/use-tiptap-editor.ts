@@ -3,6 +3,12 @@ import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
 import Link from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
+import Table from "@tiptap/extension-table";
+import TableRow from "@tiptap/extension-table-row";
+import TableHeader from "@tiptap/extension-table-header";
+import TableCell from "@tiptap/extension-table-cell";
+import { MermaidBlock } from "@/features/documents/editor-extensions/mermaid-block";
+import { MathBlock } from "@/features/documents/editor-extensions/math-block";
 
 interface UseTiptapEditorProps {
   content: string;
@@ -40,6 +46,27 @@ export function useTiptapEditor({
             return "Start writing, or press / for commands…";
           },
         }),
+        (Table as any).configure({
+          resizable: true,
+          HTMLAttributes: {
+            class:
+              "w-full border-collapse my-4 text-sm rounded-md overflow-hidden",
+          },
+        }),
+        TableRow as any,
+        (TableHeader as any).configure({
+          HTMLAttributes: {
+            class:
+              "bg-stone-100 text-left font-semibold text-stone-800 px-3 py-2 border border-stone-200",
+          },
+        }),
+        (TableCell as any).configure({
+          HTMLAttributes: {
+            class: "px-3 py-2 border border-stone-200 align-top",
+          },
+        }),
+        MermaidBlock,
+        MathBlock,
       ],
       content,
       editable,
