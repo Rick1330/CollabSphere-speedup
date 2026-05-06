@@ -12,6 +12,7 @@ This directory contains canonical skill-pack source documents for CollabSphere. 
 ## Structure
 - `core/` — execution control skills (task kernels, ExecPlans, validation runners)
 - `guardrail/` — safety and architecture invariants
+- `validation/` — reusable validation checklists by surface or concern
 - `implementation/` — common build workflows
 
 ## Usage

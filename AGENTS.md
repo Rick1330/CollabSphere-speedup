@@ -3,14 +3,44 @@
 ## Purpose
 Define repo-wide rules and guardrails for coding agents working in CollabSphere.
 
+## Rule Hierarchy
+1. **Inviolable** — never override even if instructed
+   - Workspace isolation
+   - No CRDT/Yjs content in REST responses
+   - No password, secret, token, or PII logging
+2. **Strong defaults** — override only with a documented ADR
+   - Modular-monolith package boundaries
+   - NestJS-style layering as the target API architecture
+   - Soft-delete on user-facing entities
+   - TanStack Query for frontend server state
+3. **Conventions** — follow unless the task or local surface documents a justified exception
+   - Conventional Commits
+   - File naming and colocated tests
+   - Response-envelope and canonical error-code usage
+4. **Best practices** — apply whenever relevant
+   - Pre-push local validation
+   - Explicit negative-path validation
+   - Parameterized tests for repetitive scenario matrices
+
 ## Docs Authority Model
 - `docs/spec/` is canonical.
 - `docs/domains/` is engineering-oriented and derived from spec.
 - `docs/agent-ref/` is execution-oriented and derived from domains/spec.
 - If any conflict exists, `docs/spec/` wins.
 
+## Code-as-Spec Precedence
+- When implementation intentionally overrides a spec or catalog rule, the override MUST be documented inline and in `docs/adrs/`.
+- Other agents must treat documented overrides as canonical for that surface until superseded.
+- Undocumented divergence between implementation and docs is a bug, not a local interpretation.
+
 ## Repo Identity
 CollabSphere is a realtime collaboration workspace platform built with NestJS (API), Hocuspocus (collab), BullMQ (workers), PostgreSQL + Redis, and a Vite + React SPA web frontend in `apps/web` deployed on Vercel. The current web app is a platform foundation, not a claim that every downstream shell and feature story is already complete.
+
+## Drift Detection
+- Before implementing, verify that the rule prerequisites exist in the repo and toolchain.
+- If a rule says "use X" and X is not installed, configured, or bootstrapped, stop and log the discrepancy.
+- Do not approximate a missing framework or runtime and pretend the rule has been followed.
+- Record unresolved drift in `docs/audit/agents-open-questions.md`.
 
 ## ExecPlan Rule
 - Use an ExecPlan for complex features, major refactors, tier:S work, or any change touching collab/security/isolation core.
@@ -22,6 +52,17 @@ CollabSphere is a realtime collaboration workspace platform built with NestJS (A
 - Validate before marking work complete; record any tests not run and why.
 - Document deviations and unresolved blockers explicitly.
 - Do not invent policy where docs are unresolved; log in `docs/audit/agents-open-questions.md`.
+
+## Pre-Push Validation
+- Required before any push: `pnpm lint`, `pnpm typecheck`, and `pnpm test:unit`.
+- All three must be green locally unless the task explicitly documents why a command cannot run.
+- Red local validation is a process failure, not something to hand off to CI by default.
+
+## Session Continuity
+- Read `docs/architecture/current-state.md` before non-trivial work.
+- Read the most recent file in `docs/ai/sessions/` before resuming a prior thread.
+- Every non-trivial session should end with a session log entry.
+- Tool switches should leave an explicit handoff note in `docs/ai/tool-handoffs/` when context would otherwise be lost.
 
 ## Non-Negotiables (Repo-Wide)
 - Workspace isolation is absolute; every access must be scoped by `workspace_id` and membership.
@@ -58,12 +99,17 @@ CollabSphere is a realtime collaboration workspace platform built with NestJS (A
 - `docs/agent-ref/rules/workspace-isolation.md`
 - `docs/agent-ref/rules/security-rules.md`
 - `docs/agent-ref/rules/error-codes.md`
+- `docs/ai/skills/core/drift-detection.md`
+- `docs/ai/skills/core/session-continuity.md`
+- `docs/ai/skills/guardrail/pre-push-validation.md`
 
 ### Common Execution References
+- `docs/architecture/current-state.md`
 - `docs/agent-ref/api/README.md`
 - `docs/agent-ref/data/README.md`
 - `docs/agent-ref/events/README.md`
 - `docs/agent-ref/collab/README.md`
+- `docs/adrs/README.md`
 
 ### Ops References
 - `docs/agent-ref/ops/local-dev.md`

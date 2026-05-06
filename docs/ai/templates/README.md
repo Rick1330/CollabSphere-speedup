@@ -23,6 +23,7 @@ This directory contains the canonical execution templates used to create real ta
 - `PROJECT_VALIDATION_TEMPLATE.md` — project-level completion gate.
 - `REVIEW_TASK_TEMPLATE.md` — review-only tasks.
 - `HOTFIX_TASK_TEMPLATE.md` — urgent production/staging fixes.
+- `SESSION_LOG_TEMPLATE.md` — end-of-session continuity and handoff record.
 
 ## Related References
 - `AGENTS.md`
