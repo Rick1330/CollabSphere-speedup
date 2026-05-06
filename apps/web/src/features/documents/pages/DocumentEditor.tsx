@@ -27,6 +27,10 @@ import {
   type SaveStatus,
 } from "@/features/documents/components/editor/editor-status-bar";
 import type { PresenceUser } from "@/features/documents/components/editor/editor-presence";
+import { EditorContextRail } from "@/features/documents/components/editor/editor-context-rail";
+import { useDocumentOutline } from "@/features/documents/hooks/use-document-outline";
+import { useDocumentReadiness } from "@/features/documents/hooks/use-document-readiness";
+import { getTemplateContract } from "@/features/documents/template-schema";
 import { DocumentTreePanel } from "@/features/documents/components/tree/document-tree-panel";
 import { TreeCreateDialog } from "@/features/documents/components/tree-create-dialog";
 import { DocumentCommentsRail } from "@/features/documents/components/comments/document-comments-rail";
