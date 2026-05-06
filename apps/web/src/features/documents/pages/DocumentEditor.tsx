@@ -493,6 +493,14 @@ const DocumentEditorPage = () => {
     },
   });
 
+  // ─────── Outline + readiness (right rail data) ───────
+  const outline = useDocumentOutline(editor);
+  const templateContract = useMemo(
+    () => getTemplateContract(mergedDoc?.templateId),
+    [mergedDoc?.templateId],
+  );
+  const readiness = useDocumentReadiness(editor, templateContract);
+
   // Auto "save" simulation
   useEffect(() => {
     if (saveStatus !== "unsaved") return;
