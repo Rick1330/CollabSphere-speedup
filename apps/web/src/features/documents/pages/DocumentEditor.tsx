@@ -76,6 +76,8 @@ interface MockWorkspace {
 interface MockDocument extends EditorDocument {
   content: string;
   createdBy: { id: string; fullName: string };
+  /** Optional template-contract id (see template-schema.ts). */
+  templateId?: string | null;
 }
 
 const CURRENT_USER_ID = "user-jane";
@@ -133,6 +135,7 @@ const DOCUMENTS: Record<string, MockDocument> = {
     folderName: "Product",
     content: "<h1>PRD v2</h1><p>Draft requirements for the next release.</p>",
     createdBy: { id: "user-bob", fullName: "Eyob Bekele" },
+    templateId: "doc-prd",
   },
   "d-survey": {
     id: "d-survey",
@@ -142,6 +145,7 @@ const DOCUMENTS: Record<string, MockDocument> = {
     folderName: "Research",
     content: "<h1>User survey results</h1><p>Highlights from the latest round.</p>",
     createdBy: { id: CURRENT_USER_ID, fullName: "Elshaday Tesfaye" },
+    templateId: "doc-research-brief",
   },
   "d-api": {
     id: "d-api",
@@ -151,6 +155,7 @@ const DOCUMENTS: Record<string, MockDocument> = {
     folderName: "Architecture",
     content: "<h1>API Design</h1><p>REST envelope conventions.</p>",
     createdBy: { id: CURRENT_USER_ID, fullName: "Elshaday Tesfaye" },
+    templateId: "doc-rfc",
   },
   "d-adr": {
     id: "d-adr",
@@ -160,6 +165,7 @@ const DOCUMENTS: Record<string, MockDocument> = {
     folderName: "Architecture",
     content: "<h1>ADR-003 Prisma</h1><p>We will adopt Prisma for the data layer.</p>",
     createdBy: { id: "user-bob", fullName: "Eyob Bekele" },
+    templateId: "doc-adr",
   },
   "d-retro": {
     id: "d-retro",
@@ -169,6 +175,7 @@ const DOCUMENTS: Record<string, MockDocument> = {
     folderName: "Meetings",
     content: "<h1>Sprint Retro Week 12</h1><p>What went well, what didn't.</p>",
     createdBy: { id: CURRENT_USER_ID, fullName: "Elshaday Tesfaye" },
+    templateId: "doc-meeting-notes",
   },
   "d-readme": {
     id: "d-readme",
