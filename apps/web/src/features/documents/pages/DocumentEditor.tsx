@@ -1047,6 +1047,26 @@ const DocumentEditorPage = () => {
         />
       </main>
 
+      {/* Right-side context rail: Outline + Readiness.
+          Hidden in focus mode and on viewports below lg. The comments rail
+          (xl+) sits to the right of this when both are visible. */}
+      <div
+        className={cn(
+          "hidden lg:flex flex-shrink-0 transition-[width] duration-300 ease-out overflow-hidden",
+          focusMode ? "w-0" : "w-[280px]",
+        )}
+        aria-hidden={focusMode}
+      >
+        <div className="w-[280px] h-full">
+          <EditorContextRail
+            editor={editor}
+            outline={outline}
+            contract={templateContract}
+            readiness={readiness}
+          />
+        </div>
+      </div>
+
       {/* Floating selection-based comment trigger */}
       <DocumentInlineCommentTrigger
         editor={editor}
