@@ -865,6 +865,17 @@ const DocumentEditorPage = () => {
   const docHasContent =
     !!editor && editor.getText().trim().length > 5;
 
+  // Template-contract gate: when the contract enforces structure, prevent
+  // submission until the readiness engine reports `blocksSubmit === false`.
+  // Advisory contracts (and missing contracts) never gate.
+  const readinessBlocks = !!readiness && readiness.blocksSubmit;
+  const canSubmitNow = docHasContent && !readinessBlocks;
+  const submitBlockReason = !docHasContent
+    ? "This document is empty. Add some content before submitting."
+    : readinessBlocks && readiness?.blockingReason
+      ? readiness.blockingReason
+      : undefined;
+
   // ── Submission handlers ──
 
   const nextVersionLabel = () => {
@@ -1154,12 +1165,8 @@ const DocumentEditorPage = () => {
           onOpenChange={setSubmitDialogOpen}
           documentTitle={mergedDoc.title}
           isResubmission={isResubmission}
-          canSubmit={docHasContent}
-          blockReason={
-            !docHasContent
-              ? "This document is empty. Add some content before submitting."
-              : undefined
-          }
+          canSubmit={canSubmitNow}
+          blockReason={submitBlockReason}
           onConfirm={handleConfirmSubmit}
         />
       )}
