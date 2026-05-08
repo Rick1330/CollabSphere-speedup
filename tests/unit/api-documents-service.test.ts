@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { AppError } from "../../apps/api/src/common/filters/app-error.filter.js";
 import { DocumentsService } from "../../apps/api/src/documents/documents.service.js";
 
 test("documents service creates document with parsed template metadata", async () => {
@@ -55,4 +56,96 @@ test("documents service creates document with parsed template metadata", async (
 
   assert.equal(created.templateId, "doc-prd-v2");
   assert.equal(created.templateVersion, 3);
+});
+
+test("documents service lists documents for member", async () => {
+  const prisma = {
+    workspaceMember: {
+      findFirst: async () => ({
+        id: "m-1",
+        workspace: { id: "ws-1", type: "professional", status: "active" },
+      }),
+    },
+    document: {
+      findMany: async () => [
+        {
+          id: "doc-1",
+          workspaceId: "ws-1",
+          title: "Doc A",
+        },
+      ],
+    },
+  };
+
+  const service = new DocumentsService(prisma as never);
+  const docs = await service.listDocumentsForUser({
+    actorUserId: "user-1",
+    workspaceId: "ws-1",
+  });
+
+  assert.equal(docs.length, 1);
+  assert.equal(docs[0]?.id, "doc-1");
+});
+
+test("documents service rejects non-member when reading", async () => {
+  const prisma = {
+    workspaceMember: {
+      findFirst: async () => null,
+    },
+  };
+
+  const service = new DocumentsService(prisma as never);
+  await assert.rejects(
+    () =>
+      service.getDocumentByIdForUser({
+        actorUserId: "user-1",
+        workspaceId: "ws-1",
+        documentId: "doc-1",
+      }),
+    (error: unknown) => {
+      assert.equal(error instanceof AppError, true);
+      assert.equal((error as AppError).code, "NOT_WORKSPACE_MEMBER");
+      return true;
+    },
+  );
+});
+
+test("documents service updates metadata with folder/status/title", async () => {
+  const prisma = {
+    workspaceMember: {
+      findFirst: async () => ({
+        id: "m-1",
+        workspace: { id: "ws-1", type: "professional", status: "active" },
+      }),
+    },
+    document: {
+      findFirst: async () => ({ id: "doc-1" }),
+      update: async ({ data }: { data: Record<string, unknown> }) => ({
+        id: "doc-1",
+        workspaceId: "ws-1",
+        folderId: data.folderId,
+        title: data.title,
+        status: data.status,
+        templateId: null,
+        templateVersion: null,
+        updatedAt: new Date("2026-05-08T00:00:00.000Z"),
+      }),
+    },
+    folder: {
+      findFirst: async () => ({ id: "folder-2" }),
+    },
+  };
+
+  const service = new DocumentsService(prisma as never);
+  const updated = await service.updateDocumentMetadata({
+    actorUserId: "user-1",
+    workspaceId: "ws-1",
+    documentId: "doc-1",
+    title: "Renamed Doc",
+    folderId: "folder-2",
+    status: "submitted",
+  });
+
+  assert.equal(updated.title, "Renamed Doc");
+  assert.equal(updated.status, "submitted");
 });
