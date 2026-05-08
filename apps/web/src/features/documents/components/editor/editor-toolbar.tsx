@@ -18,6 +18,10 @@ import {
   Underline as UnderlineIcon,
   Undo,
   Workflow,
+  Info,
+  Layout,
+  FileText,
+  Scissors,
   type LucideIcon,
 } from "lucide-react";
 import type { Editor } from "@tiptap/react";
@@ -33,6 +37,7 @@ import { cn } from "@/lib/utils";
 interface EditorToolbarProps {
   editor: Editor | null;
   isReadOnly: boolean;
+  onInsertTableRequest: () => void;
 }
 
 interface ToolbarBtnProps {
@@ -68,7 +73,11 @@ const ToolbarSep = () => (
   <div className="w-px h-4 bg-stone-200 mx-1 flex-shrink-0" aria-hidden="true" />
 );
 
-export const EditorToolbar = ({ editor, isReadOnly }: EditorToolbarProps) => {
+export const EditorToolbar = ({ 
+  editor, 
+  isReadOnly, 
+  onInsertTableRequest 
+}: EditorToolbarProps) => {
   const handleInsertLink = () => {
     if (!editor) return;
     const previousUrl = (editor.getAttributes("link").href as string | undefined) ?? "";
@@ -199,11 +208,7 @@ export const EditorToolbar = ({ editor, isReadOnly }: EditorToolbarProps) => {
           icon={TableIcon}
           label="Insert table"
           isActive={isActive("table")}
-          onClick={() =>
-            (editor?.chain().focus() as any)
-              ?.insertTable({ rows: 3, cols: 3, withHeaderRow: true })
-              .run()
-          }
+          onClick={onInsertTableRequest}
           disabled={isReadOnly}
         />
         <ToolbarBtn
@@ -218,6 +223,34 @@ export const EditorToolbar = ({ editor, isReadOnly }: EditorToolbarProps) => {
           label="Insert equation (LaTeX)"
           isActive={isActive("mathBlock")}
           onClick={() => (editor?.chain().focus() as any)?.insertMathBlock().run()}
+          disabled={isReadOnly}
+        />
+        <ToolbarBtn
+          icon={Info}
+          label="Insert callout"
+          isActive={isActive("calloutBlock")}
+          onClick={() => (editor?.chain().focus() as any)?.insertCallout().run()}
+          disabled={isReadOnly}
+        />
+        <ToolbarBtn
+          icon={Layout}
+          label="Insert section"
+          isActive={isActive("sectionBlock")}
+          onClick={() => (editor?.chain().focus() as any)?.insertSection().run()}
+          disabled={isReadOnly}
+        />
+        <ToolbarBtn
+          icon={FileText}
+          label="Insert cover page"
+          isActive={isActive("coverPageBlock")}
+          onClick={() => (editor?.chain().focus() as any)?.insertCoverPage().run()}
+          disabled={isReadOnly}
+        />
+        <ToolbarBtn
+          icon={Scissors}
+          label="Insert page break"
+          isActive={isActive("pageBreakBlock")}
+          onClick={() => (editor?.chain().focus() as any)?.insertPageBreak().run()}
           disabled={isReadOnly}
         />
 
@@ -322,6 +355,22 @@ export const EditorToolbar = ({ editor, isReadOnly }: EditorToolbarProps) => {
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => editor?.chain().focus().toggleCodeBlock().run()}>
               <TerminalSquare className="h-4 w-4 mr-2" /> Code block
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={onInsertTableRequest}>
+              <TableIcon className="h-4 w-4 mr-2" /> Table
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => (editor?.chain().focus() as any)?.insertCallout().run()}>
+              <Info className="h-4 w-4 mr-2" /> Callout
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => (editor?.chain().focus() as any)?.insertSection().run()}>
+              <Layout className="h-4 w-4 mr-2" /> Section
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => (editor?.chain().focus() as any)?.insertCoverPage().run()}>
+              <FileText className="h-4 w-4 mr-2" /> Cover page
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => (editor?.chain().focus() as any)?.insertPageBreak().run()}>
+              <Scissors className="h-4 w-4 mr-2" /> Page break
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => editor?.chain().focus().undo().run()}>

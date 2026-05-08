@@ -35,7 +35,7 @@ export const EditorStatusBar = ({
   const chars = text.length;
 
   return (
-    <div className="flex items-center justify-between h-8 px-4 border-t border-stone-100 bg-stone-50/50 flex-shrink-0 gap-3">
+    <div className="flex items-center justify-between h-8 px-4 border-t border-stone-100 bg-stone-50/50 shrink-0 gap-3">
       {/* Left: word/char counts */}
       <div className="font-mono text-[10px] text-stone-400 tracking-wider flex items-center gap-1.5 min-w-0">
         <span className="truncate">
@@ -48,7 +48,7 @@ export const EditorStatusBar = ({
       </div>
 
       {/* Right: collaborators + connection + save state */}
-      <div className="flex items-center gap-3 font-mono text-[10px] tracking-wider flex-shrink-0">
+      <div className="flex items-center gap-3 font-mono text-[10px] tracking-wider shrink-0">
         {/* Collaborators */}
         <div
           className="hidden md:flex items-center gap-1 text-stone-400"

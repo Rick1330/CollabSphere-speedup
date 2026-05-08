@@ -349,6 +349,9 @@ model Document {
   contentYjs       Bytes                    @default(dbgenerated("''::bytea")) @map("content_yjs")
   contentPlaintext String                   @default("") @map("content_plaintext") @db.Text
   searchVector     Unsupported("tsvector")? @map("search_vector")
+  properties       Json?                    @db.JsonB
+  templateId       String?                  @map("template_id") @db.VarChar(120)
+  templateVersion  Int?                     @map("template_version")
   createdById      String                   @map("created_by") @db.Uuid
   updatedById      String?                  @map("updated_by") @db.Uuid
   createdAt        DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -629,7 +632,7 @@ model Template {
   name            String   @db.VarChar(120)
   description     String?  @db.VarChar(280)
   version         Int      @default(1)
-  schemaVersion   Int      @default(1) @map("schema_version")
+  schemaVersion   Int      @default(2) @map("schema_version")
   contentFormat   String?  @map("content_format") @db.VarChar(20)
   content         Json     @db.JsonB
   isEnabled       Boolean  @default(true) @map("is_enabled")

@@ -19,7 +19,15 @@ import {
 import { useMemo, useState } from "react";
 import katex from "katex";
 import "katex/dist/katex.min.css";
-import { Code2, Eye, AlertCircle } from "lucide-react";
+import {
+  Code2,
+  Eye,
+  AlertCircle,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  Sigma,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const PLACEHOLDER = String.raw`E = mc^2 \quad \text{or} \quad \sum_{i=1}^{n} i = \frac{n(n+1)}{2}`;
@@ -34,9 +42,12 @@ declare module "@tiptap/core" {
 
 const MathView = ({ node, updateAttributes, editor }: NodeViewProps) => {
   const latex = (node.attrs.latex as string) ?? "";
+  const align = (node.attrs.align as "left" | "center" | "right") ?? "center";
+
   const [mode, setMode] = useState<"preview" | "source">(
     latex.trim().length === 0 ? "source" : "preview",
   );
+  const [isHovered, setIsHovered] = useState(false);
 
   const rendered = useMemo(() => {
     const trimmed = latex.trim();
@@ -61,80 +72,117 @@ const MathView = ({ node, updateAttributes, editor }: NodeViewProps) => {
 
   const isEditable = editor.isEditable;
 
+  const handleAlign = (newAlign: "left" | "center" | "right") => {
+    updateAttributes({ align: newAlign });
+  };
+
   return (
     <NodeViewWrapper
       data-type="math-block"
-      className="not-prose my-4 rounded-lg border border-stone-200 bg-white overflow-hidden print:break-inside-avoid"
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+      className={cn(
+        "not-prose my-6 relative group transition-all duration-200",
+        align === "left" && "mr-auto w-fit",
+        align === "center" && "mx-auto w-full",
+        align === "right" && "ml-auto w-fit",
+      )}
     >
-      <div className="flex items-center justify-between px-3 py-1.5 bg-stone-50 border-b border-stone-200 text-[11px] font-medium text-stone-500">
-        <span className="uppercase tracking-wider">Math · KaTeX</span>
-        {isEditable && (
-          <div className="flex gap-0.5">
-            <button
-              type="button"
-              onClick={() => setMode("preview")}
-              className={cn(
-                "px-2 py-0.5 rounded flex items-center gap-1 transition-colors",
-                mode === "preview"
-                  ? "bg-white text-stone-900 shadow-sm"
-                  : "text-stone-500 hover:text-stone-700",
-              )}
-              aria-pressed={mode === "preview"}
-            >
-              <Eye className="h-3 w-3" /> Preview
-            </button>
-            <button
-              type="button"
-              onClick={() => setMode("source")}
-              className={cn(
-                "px-2 py-0.5 rounded flex items-center gap-1 transition-colors",
-                mode === "source"
-                  ? "bg-white text-stone-900 shadow-sm"
-                  : "text-stone-500 hover:text-stone-700",
-              )}
-              aria-pressed={mode === "source"}
-            >
-              <Code2 className="h-3 w-3" /> LaTeX
-            </button>
+      <div className={cn(
+        "rounded-xl border border-stone-200 bg-white overflow-hidden shadow-sm hover:shadow-md transition-shadow duration-300 min-h-[60px]",
+        mode === "source" && "ring-1 ring-stone-200"
+      )}>
+        {/* Floating Toolbar (Hover only) */}
+        {isEditable && isHovered && (
+          <div className="absolute -top-10 left-1/2 -translate-x-1/2 flex items-center gap-1 p-1 bg-white border border-stone-200 shadow-lg rounded-lg z-20 animate-in fade-in slide-in-from-bottom-2 duration-200">
+            <div className="flex items-center gap-0.5 px-1 border-r border-stone-100">
+              <button
+                type="button"
+                onClick={() => setMode("preview")}
+                className={cn(
+                  "p-1.5 rounded-md flex items-center gap-1.5 text-[11px] font-medium transition-colors",
+                  mode === "preview" ? "bg-teal-50 text-teal-700" : "text-stone-500 hover:bg-stone-50 hover:text-stone-900"
+                )}
+              >
+                <Eye className="h-3.5 w-3.5" /> Preview
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode("source")}
+                className={cn(
+                  "p-1.5 rounded-md flex items-center gap-1.5 text-[11px] font-medium transition-colors",
+                  mode === "source" ? "bg-teal-50 text-teal-700" : "text-stone-500 hover:bg-stone-50 hover:text-stone-900"
+                )}
+              >
+                <Code2 className="h-3.5 w-3.5" /> LaTeX
+              </button>
+            </div>
+
+            <div className="flex items-center gap-0.5 px-1">
+              <button
+                type="button"
+                onClick={() => handleAlign("left")}
+                className={cn("p-1.5 rounded-md hover:bg-stone-50 transition-colors", align === "left" ? "text-teal-700 bg-teal-50/50" : "text-stone-500")}
+              >
+                <AlignLeft className="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => handleAlign("center")}
+                className={cn("p-1.5 rounded-md hover:bg-stone-50 transition-colors", align === "center" ? "text-teal-700 bg-teal-50/50" : "text-stone-500")}
+              >
+                <AlignCenter className="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => handleAlign("right")}
+                className={cn("p-1.5 rounded-md hover:bg-stone-50 transition-colors", align === "right" ? "text-teal-700 bg-teal-50/50" : "text-stone-500")}
+              >
+                <AlignRight className="h-3.5 w-3.5" />
+              </button>
+            </div>
           </div>
         )}
-      </div>
 
-      {(mode === "preview" || !isEditable) && (
-        <div className="p-4 flex items-center justify-center min-h-[60px] bg-white text-stone-900">
-          {rendered.error ? (
-            <div className="flex items-start gap-2 text-[13px] text-amber-700">
-              <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
-              <div>
-                <div className="font-medium">LaTeX error</div>
-                <div className="opacity-80 mt-0.5 font-mono text-xs">
-                  {rendered.error}
+        {(mode === "preview" || !isEditable) && (
+          <div className="p-6 flex items-center justify-center min-h-[60px] bg-white text-stone-900">
+            {rendered.error ? (
+              <div className="flex flex-col items-center gap-2 text-center max-w-md">
+                <div className="h-8 w-8 rounded-full bg-red-50 flex items-center justify-center">
+                  <AlertCircle className="h-4 w-4 text-red-500" />
+                </div>
+                <div>
+                  <div className="text-[12px] font-medium text-red-900">LaTeX Syntax Error</div>
+                  <div className="text-[11px] text-red-600/80 font-mono mt-0.5 max-w-xs truncate opacity-70">
+                    {rendered.error}
+                  </div>
                 </div>
               </div>
-            </div>
-          ) : rendered.html ? (
-            <div
-              className="katex-display-wrapper max-w-full overflow-x-auto"
-              // eslint-disable-next-line react/no-danger -- KaTeX output is sanitized HTML; trust:false disables \href etc.
-              dangerouslySetInnerHTML={{ __html: rendered.html }}
-            />
-          ) : (
-            <div className="text-stone-400 text-sm italic">
-              Empty equation — switch to LaTeX to write source.
-            </div>
-          )}
-        </div>
-      )}
+            ) : rendered.html ? (
+              <div
+                className="katex-display-wrapper max-w-full overflow-x-auto"
+                dangerouslySetInnerHTML={{ __html: rendered.html }}
+              />
+            ) : (
+              <div className="flex flex-col items-center gap-2 text-stone-400">
+                <Sigma className="h-6 w-6 opacity-20" />
+                <p className="text-[12px] italic">Empty equation</p>
+              </div>
+            )}
+          </div>
+        )}
 
-      {mode === "source" && isEditable && (
-        <textarea
-          value={latex}
-          onChange={(e) => updateAttributes({ latex: e.target.value })}
-          spellCheck={false}
-          placeholder={PLACEHOLDER}
-          className="w-full p-3 text-[13px] font-mono text-stone-800 bg-stone-50 outline-none resize-y min-h-[100px] block"
-        />
-      )}
+        {mode === "source" && isEditable && (
+          <textarea
+            value={latex}
+            onChange={(e) => updateAttributes({ latex: e.target.value })}
+            spellCheck={false}
+            placeholder={PLACEHOLDER}
+            className="w-full p-4 text-[13px] font-mono text-stone-800 bg-stone-50/50 outline-none resize-none min-h-[100px] block leading-relaxed"
+            autoFocus
+          />
+        )}
+      </div>
     </NodeViewWrapper>
   );
 };
@@ -152,6 +200,11 @@ export const MathBlock = Node.create({
         default: "",
         parseHTML: (el) => el.getAttribute("data-latex") ?? el.textContent ?? "",
         renderHTML: (attrs) => ({ "data-latex": attrs.latex }),
+      },
+      align: {
+        default: "center",
+        parseHTML: (el) => el.getAttribute("data-align") ?? "center",
+        renderHTML: (attrs) => ({ "data-align": attrs.align }),
       },
     };
   },

@@ -43,7 +43,8 @@ export type RequiredBlockKind =
   | "mermaidBlock"
   | "mathBlock"
   | "image"
-  | "codeBlock";
+  | "codeBlock"
+  | "sectionBlock";
 
 /**
  * A single required section. Identified by exact heading text + level so
@@ -396,7 +397,16 @@ export function computeReadiness(
         text: node.textContent,
         pos,
       });
-      return false; // headings can't contain other headings; skip subtree
+      return false; 
+    }
+    if (node.type.name === "sectionBlock") {
+      headings.push({
+        level: 2, // Semantic sections default to level 2 for contract matching
+        text: node.attrs.title || "",
+        pos,
+      });
+      // We don't return false here because section blocks contain content 
+      // (paragraphs, tables) that we might want to scan for word counts/blocks.
     }
     const kind = mapNodeNameToBlockKind(node.type.name);
     if (kind) {
@@ -538,7 +548,7 @@ function rollUp(
   };
 }
 
-function mapNodeNameToBlockKind(name: string): RequiredBlockKind | null {
+function mapNodeNameToBlockKind(name: string): RequiredBlockKind | "sectionBlock" | null {
   switch (name) {
     case "table":
       return "table";
@@ -550,6 +560,8 @@ function mapNodeNameToBlockKind(name: string): RequiredBlockKind | null {
       return "image";
     case "codeBlock":
       return "codeBlock";
+    case "sectionBlock":
+      return "sectionBlock";
     default:
       return null;
   }

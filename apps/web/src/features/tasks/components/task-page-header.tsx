@@ -86,7 +86,7 @@ export const TaskPageHeader = ({
                 aria-label={`${totalTaskCount} total tasks`}
               >
                 {visibleTaskCount !== undefined &&
-                visibleTaskCount !== totalTaskCount
+                  visibleTaskCount !== totalTaskCount
                   ? `${visibleTaskCount} / ${totalTaskCount}`
                   : totalTaskCount}
               </span>

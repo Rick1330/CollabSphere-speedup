@@ -10,6 +10,7 @@ import {
   ChevronsRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Separator } from "@/components/ui/separator";
 
 interface RecentWorkspace {
   id: string;
@@ -40,24 +41,26 @@ const dotColor = (t: RecentWorkspace["type"]) =>
 interface AppSidebarProps {
   collapsed: boolean;
   onToggle: () => void;
+  width?: number;
+  onResizeStart?: (event: React.PointerEvent<HTMLButtonElement>) => void;
 }
 
 function SidebarBrand({ collapsed }: { collapsed: boolean }) {
   return (
     <div
       className={cn(
-        "h-14 flex items-center border-b border-stone-200/70",
+        "h-14 flex items-center border-b border-stone-200/70 dark:border-stone-800",
         collapsed ? "justify-center px-2" : "px-4",
       )}
     >
       {collapsed ? (
-        <div className="h-7 w-7 rounded-md bg-teal-600 text-white text-xs font-bold flex items-center justify-center">
+        <div className="flex h-7 w-7 items-center justify-center rounded-md bg-teal-600 text-xs font-bold text-white shadow-sm">
           CS
         </div>
       ) : (
         <div className="flex flex-col leading-tight">
-          <span className="text-stone-900 font-bold text-sm tracking-tight">CollabSphere</span>
-          <span className="font-mono text-[10px] text-stone-400 tracking-[0.15em] mt-0.5">
+          <span className="text-sm font-bold tracking-tight text-stone-900 dark:text-stone-50">CollabSphere</span>
+          <span className="mt-0.5 font-mono text-[10px] tracking-[0.15em] text-stone-400 dark:text-stone-500">
             WORKSPACE HUB
           </span>
         </div>
@@ -81,9 +84,9 @@ function SidebarNav({ collapsed }: { collapsed: boolean }) {
                   "group flex items-center gap-3 rounded-lg text-sm transition-colors duration-150",
                   collapsed ? "justify-center px-2 py-2" : "px-3 py-2",
                   isActive
-                    ? "text-teal-700 bg-teal-50 font-semibold border-l-2 border-teal-600"
-                    : "text-stone-500 hover:text-stone-900 hover:bg-stone-100 font-medium",
-                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/50 focus-visible:ring-offset-1",
+                    ? "border-l-2 border-teal-600 bg-teal-50 font-semibold text-teal-700 dark:border-teal-400 dark:bg-teal-950/35 dark:text-teal-200"
+                    : "text-stone-500 font-medium hover:bg-stone-100 hover:text-stone-900 dark:text-stone-400 dark:hover:bg-stone-800/70 dark:hover:text-stone-100",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/50 focus-visible:ring-offset-1 focus-visible:ring-offset-[#FAFAF9] dark:focus-visible:ring-offset-[#171412]",
                 )
               }
               title={collapsed ? item.label : undefined}
@@ -110,9 +113,9 @@ function SidebarRecentWorkspaces() {
           <li key={w.id}>
             <Link
               to={`/w/${w.id}`}
-              className="flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-sm text-stone-600
-                hover:text-stone-900 hover:bg-stone-100 transition-colors duration-150
-                focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/50 focus-visible:ring-offset-1"
+              className="flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-sm text-stone-600 transition-colors duration-150
+                hover:bg-stone-100 hover:text-stone-900 dark:text-stone-300 dark:hover:bg-stone-800/70 dark:hover:text-stone-100
+                focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/50 focus-visible:ring-offset-1 focus-visible:ring-offset-[#FAFAF9] dark:focus-visible:ring-offset-[#171412]"
             >
               <span className={cn("h-2 w-2 rounded-full shrink-0", dotColor(w.type))} aria-hidden="true" />
               <span className="truncate">{w.name}</span>
@@ -122,7 +125,7 @@ function SidebarRecentWorkspaces() {
         <li>
           <Link
             to="/workspaces/new"
-            className="flex items-center gap-2.5 px-3 py-1.5 text-sm text-stone-400 hover:text-teal-600 transition-colors duration-150"
+            className="flex items-center gap-2.5 px-3 py-1.5 text-sm text-stone-400 transition-colors duration-150 hover:text-teal-600 dark:text-stone-500 dark:hover:text-teal-400"
           >
             <Plus className="h-3.5 w-3.5" aria-hidden="true" />
             New workspace
@@ -136,15 +139,14 @@ function SidebarRecentWorkspaces() {
 function SidebarToggle({ collapsed, onToggle }: AppSidebarProps) {
   const icon = collapsed ? <ChevronsRight className="h-4 w-4" /> : <ChevronsLeft className="h-4 w-4" />;
   return (
-    <div className={cn("border-t border-stone-200/70 p-2", collapsed ? "flex justify-center" : "px-3 py-2")}>
+    <div className={cn("border-t border-stone-200/70 p-2 dark:border-stone-800", collapsed ? "flex justify-center" : "px-3 py-2")}>
       <button
         type="button"
         onClick={onToggle}
         className={cn(
-          "flex items-center gap-2 rounded-lg text-stone-400 hover:text-stone-700 hover:bg-stone-100",
-          "transition-colors duration-150 text-xs",
+          "flex items-center gap-2 rounded-lg text-stone-400 transition-colors duration-150 text-xs hover:bg-stone-100 hover:text-stone-700 dark:text-stone-500 dark:hover:bg-stone-800/70 dark:hover:text-stone-100",
           collapsed ? "h-8 w-8 justify-center" : "h-8 px-2 w-full",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/50 focus-visible:ring-offset-1",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/50 focus-visible:ring-offset-1 focus-visible:ring-offset-[#FAFAF9] dark:focus-visible:ring-offset-[#171412]",
         )}
         aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
         title={`${collapsed ? "Expand" : "Collapse"} sidebar (⌘B)`}
@@ -153,7 +155,7 @@ function SidebarToggle({ collapsed, onToggle }: AppSidebarProps) {
         {!collapsed && (
           <>
             <span>Collapse</span>
-            <kbd className="ml-auto inline-flex items-center justify-center h-4 px-1 rounded bg-white border border-stone-200 font-mono text-[10px] text-stone-500">
+            <kbd className="ml-auto inline-flex h-4 items-center justify-center rounded border border-stone-200 bg-white px-1 font-mono text-[10px] text-stone-500 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-400">
               ⌘B
             </kbd>
           </>
@@ -163,15 +165,16 @@ function SidebarToggle({ collapsed, onToggle }: AppSidebarProps) {
   );
 }
 
-export const AppSidebar = ({ collapsed, onToggle }: AppSidebarProps) => {
+export const AppSidebar = ({ collapsed, onToggle, width = 260, onResizeStart }: AppSidebarProps) => {
   return (
     <aside
       className={cn(
         "hidden lg:flex flex-col h-screen sticky top-0 shrink-0",
-        "border-r border-stone-200 bg-[#FAFAF9]",
+        "border-r border-stone-200 bg-linear-to-b from-[#FAFAF9] to-[#F3EEE6] dark:border-stone-800 dark:from-[#171412] dark:to-[#201B17]",
         "transition-[width] duration-200 ease-out",
-        collapsed ? "w-[60px]" : "w-[260px]",
+        collapsed ? "w-[60px]" : undefined,
       )}
+      style={{ width: collapsed ? 60 : width, minWidth: collapsed ? 60 : width }}
       aria-label="Primary navigation"
     >
       <SidebarBrand collapsed={collapsed} />
@@ -182,6 +185,19 @@ export const AppSidebar = ({ collapsed, onToggle }: AppSidebarProps) => {
       </nav>
 
       <SidebarToggle collapsed={collapsed} onToggle={onToggle} />
+
+      {onResizeStart && !collapsed && (
+        <div className="absolute right-0 top-0 h-full w-3 translate-x-1/2 flex items-center justify-center">
+          <Separator orientation="vertical" className="absolute inset-y-0 left-1/2 -translate-x-1/2 bg-transparent hover:bg-teal-300 dark:hover:bg-teal-500/60" />
+          <button
+            type="button"
+            onPointerDown={onResizeStart}
+            aria-label="Resize sidebar"
+            title="Resize sidebar"
+            className="relative z-10 h-full w-full cursor-col-resize rounded-full bg-transparent transition-colors hover:bg-teal-500/10 dark:hover:bg-teal-400/10"
+          />
+        </div>
+      )}
     </aside>
   );
 };
@@ -190,11 +206,11 @@ export const AppSidebar = ({ collapsed, onToggle }: AppSidebarProps) => {
 export const MobileSidebarContent = () => {
   const [, force] = useState(0);
   return (
-    <div className="flex flex-col h-full bg-[#FAFAF9]">
-      <div className="h-14 flex items-center px-4 border-b border-stone-200">
+    <div className="flex h-full flex-col bg-linear-to-b from-[#FAFAF9] to-[#F3EEE6] dark:from-[#171412] dark:to-[#201B17]">
+      <div className="h-14 flex items-center border-b border-stone-200 px-4 dark:border-stone-800">
         <div className="flex flex-col leading-tight">
-          <span className="text-stone-900 font-bold text-sm tracking-tight">CollabSphere</span>
-          <span className="font-mono text-[10px] text-stone-400 tracking-[0.15em] mt-0.5">WORKSPACE HUB</span>
+          <span className="text-sm font-bold tracking-tight text-stone-900 dark:text-stone-50">CollabSphere</span>
+          <span className="mt-0.5 font-mono text-[10px] tracking-[0.15em] text-stone-400 dark:text-stone-500">WORKSPACE HUB</span>
         </div>
       </div>
       <nav className="flex-1 overflow-y-auto py-3" onClick={() => force((n) => n + 1)}>

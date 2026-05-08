@@ -72,9 +72,8 @@ const SortHeader = ({
             ? "text-stone-700"
             : "text-stone-400 hover:text-stone-600",
         )}
-        aria-label={`Sort by ${label}, currently ${
-          isActive ? currentDir + "ending" : "unsorted"
-        }`}
+        aria-label={`Sort by ${label}, currently ${isActive ? currentDir + "ending" : "unsorted"
+          }`}
       >
         {label}
         {isActive ? (

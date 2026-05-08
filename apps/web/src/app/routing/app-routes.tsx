@@ -72,69 +72,69 @@ export function AppRoutes() {
       <GlobalShortcuts />
       <ShortcutHelpDialog />
       <Routes>
-      {/* Landing & auth */}
-      <Route path="/" element={<Index />} />
-      <Route path="/login" element={guestOnly(<Login />)} />
-      <Route path="/register" element={guestOnly(<Register />)} />
-      <Route path="/forgot-password" element={guestOnly(<ForgotPassword />)} />
-      <Route path="/reset-password/:token" element={guestOnly(<ResetPassword />)} />
-      <Route path="/verify-email/:token" element={<VerifyEmail />} />
-      <Route path="/invite/:token" element={<AcceptInvite />} />
+        {/* Landing & auth */}
+        <Route path="/" element={<Index />} />
+        <Route path="/login" element={guestOnly(<Login />)} />
+        <Route path="/register" element={guestOnly(<Register />)} />
+        <Route path="/forgot-password" element={guestOnly(<ForgotPassword />)} />
+        <Route path="/reset-password/:token" element={guestOnly(<ResetPassword />)} />
+        <Route path="/verify-email/:token" element={<VerifyEmail />} />
+        <Route path="/invite/:token" element={<AcceptInvite />} />
 
-      {/* App shell */}
-      <Route path="/dashboard" element={protect(<Dashboard />)} />
-      <Route path="/workspaces" element={protect(<Workspaces />)} />
-      <Route path="/workspaces/new" element={protect(<CreateWorkspace />)} />
-      <Route path="/notifications" element={protect(<Notifications />)} />
-      <Route path="/review" element={protect(<ReviewQueue />)} />
+        {/* App shell */}
+        <Route path="/dashboard" element={protect(<Dashboard />)} />
+        <Route path="/workspaces" element={protect(<Workspaces />)} />
+        <Route path="/workspaces/new" element={protect(<CreateWorkspace />)} />
+        <Route path="/notifications" element={protect(<Notifications />)} />
+        <Route path="/review" element={protect(<ReviewQueue />)} />
 
-      {/* User settings */}
-      <Route path="/settings" element={protect(<Settings />)} />
-      <Route path="/settings/profile" element={protect(<SettingsProfile />)} />
-      <Route path="/settings/password" element={protect(<SettingsPassword />)} />
-      <Route path="/settings/notifications" element={protect(<SettingsNotifications />)} />
-      <Route path="/settings/appearance" element={protect(<SettingsAppearance />)} />
+        {/* User settings */}
+        <Route path="/settings" element={protect(<Settings />)} />
+        <Route path="/settings/profile" element={protect(<SettingsProfile />)} />
+        <Route path="/settings/password" element={protect(<SettingsPassword />)} />
+        <Route path="/settings/notifications" element={protect(<SettingsNotifications />)} />
+        <Route path="/settings/appearance" element={protect(<SettingsAppearance />)} />
 
-      {/* Workspace */}
-      <Route path="/w/:workspaceId" element={protect(<WorkspaceHome />)} />
-      <Route path="/w/:workspaceId/documents" element={protect(<Documents />)} />
-      <Route path="/w/:workspaceId/documents/new" element={protect(<NewDocument />)} />
-      <Route path="/w/:workspaceId/documents/:documentId" element={protect(<DocumentEditor />)} />
-      <Route
-        path="/w/:workspaceId/documents/:documentId/history"
-        element={protect(<DocumentHistory />)}
-      />
-      <Route path="/w/:workspaceId/tasks" element={protect(<Tasks />)} />
-      <Route path="/w/:workspaceId/tasks/list" element={protect(<TasksList />)} />
-      <Route path="/w/:workspaceId/tasks/:taskId" element={protect(<TaskDetail />)} />
-      <Route
-        path="/w/:workspaceId/tasks/new"
-        element={protect(
-          <WorkspaceComingSoon
-            title="New task"
-            description="Quick task creation lives inside the Tasks board — open it from the sidebar."
-          />,
-        )}
-      />
-      <Route path="/w/:workspaceId/members" element={protect(<Members />)} />
-      <Route path="/w/:workspaceId/activity" element={protect(<Activity />)} />
-      <Route path="/w/:workspaceId/files" element={protect(<Files />)} />
-      <Route path="/w/:workspaceId/analytics" element={protect(<Analytics />)} />
-      <Route path="/w/:workspaceId/templates" element={protect(<Templates />)} />
-      <Route path="/w/:workspaceId/settings" element={protect(<WorkspaceSettings />)} />
-      <Route path="/w/:workspaceId/settings/members" element={protect(<WorkspaceSettings />)} />
+        {/* Workspace */}
+        <Route path="/w/:workspaceId" element={protect(<WorkspaceHome />)} />
+        <Route path="/w/:workspaceId/documents" element={protect(<Documents />)} />
+        <Route path="/w/:workspaceId/documents/new" element={protect(<NewDocument />)} />
+        <Route path="/w/:workspaceId/documents/:documentId" element={protect(<DocumentEditor />)} />
+        <Route
+          path="/w/:workspaceId/documents/:documentId/history"
+          element={protect(<DocumentHistory />)}
+        />
+        <Route path="/w/:workspaceId/tasks" element={protect(<Tasks />)} />
+        <Route path="/w/:workspaceId/tasks/list" element={protect(<TasksList />)} />
+        <Route path="/w/:workspaceId/tasks/:taskId" element={protect(<TaskDetail />)} />
+        <Route
+          path="/w/:workspaceId/tasks/new"
+          element={protect(
+            <WorkspaceComingSoon
+              title="New task"
+              description="Quick task creation lives inside the Tasks board — open it from the sidebar."
+            />,
+          )}
+        />
+        <Route path="/w/:workspaceId/members" element={protect(<Members />)} />
+        <Route path="/w/:workspaceId/activity" element={protect(<Activity />)} />
+        <Route path="/w/:workspaceId/files" element={protect(<Files />)} />
+        <Route path="/w/:workspaceId/analytics" element={protect(<Analytics />)} />
+        <Route path="/w/:workspaceId/templates" element={protect(<Templates />)} />
+        <Route path="/w/:workspaceId/settings" element={protect(<WorkspaceSettings />)} />
+        <Route path="/w/:workspaceId/settings/members" element={protect(<WorkspaceSettings />)} />
 
-      {/* Admin (RequireAuth + AdminGuard inside each page) */}
-      <Route path="/admin" element={protect(<AdminDashboard />)} />
-      <Route path="/admin/users" element={protect(<AdminUsers />)} />
-      <Route path="/admin/users/:userId" element={protect(<AdminUserDetail />)} />
-      <Route path="/admin/workspaces" element={protect(<AdminWorkspaces />)} />
-      <Route path="/admin/workspaces/:workspaceId" element={protect(<AdminWorkspaceDetail />)} />
-      <Route path="/admin/audit" element={protect(<AdminAudit />)} />
-      <Route path="/admin/settings" element={protect(<AdminSettings />)} />
+        {/* Admin (RequireAuth + AdminGuard inside each page) */}
+        <Route path="/admin" element={protect(<AdminDashboard />)} />
+        <Route path="/admin/users" element={protect(<AdminUsers />)} />
+        <Route path="/admin/users/:userId" element={protect(<AdminUserDetail />)} />
+        <Route path="/admin/workspaces" element={protect(<AdminWorkspaces />)} />
+        <Route path="/admin/workspaces/:workspaceId" element={protect(<AdminWorkspaceDetail />)} />
+        <Route path="/admin/audit" element={protect(<AdminAudit />)} />
+        <Route path="/admin/settings" element={protect(<AdminSettings />)} />
 
-      {/* Catch-all */}
-      <Route path="*" element={<NotFound />} />
+        {/* Catch-all */}
+        <Route path="*" element={<NotFound />} />
       </Routes>
     </>
   );

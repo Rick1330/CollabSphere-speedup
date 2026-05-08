@@ -48,7 +48,7 @@ import {
 import type { SubmissionRecord } from "@/lib/mock-academic";
 
 const ReviewQueuePage = () => {
-  const { collapsed, toggle } = useSidebar();
+  const { collapsed, toggle, width, startResize } = useSidebar();
   const palette = useCommandPalette();
   const account = useCurrentAccount();
   const sessionRole = getSessionRole(account);
@@ -63,7 +63,7 @@ const ReviewQueuePage = () => {
 
   return (
     <div className="app-light min-h-screen flex">
-      <AppSidebar collapsed={collapsed} onToggle={toggle} />
+      <AppSidebar collapsed={collapsed} onToggle={toggle} width={width} onResizeStart={startResize} />
       <div className="flex-1 min-w-0 flex flex-col">
         <TopNav unreadCount={3} onOpenPalette={palette.toggle} />
         <ReviewQueueBody />
