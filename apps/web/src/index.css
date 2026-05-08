@@ -1071,30 +1071,73 @@
 .tiptap:focus { outline: none; }
 .tiptap ::selection { background: rgba(13, 148, 136, 0.18); }
 
-/* Inline comment anchor highlights. Passive anchors are quiet; the active
-   thread intensifies; clicking "Jump to" flashes the range briefly. */
+/* Inline comment anchors. The text range stays subtle; the hover trigger
+   icon is the primary affordance for jumping into the comments rail. */
 .tiptap .doc-anchor {
-  background-color: rgba(245, 158, 11, 0.10);
-  border-bottom: 1.5px solid rgba(245, 158, 11, 0.35);
-  border-radius: 2px;
-  padding: 0 1px;
-  cursor: pointer;
-  transition: background-color 150ms ease, border-color 150ms ease;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  cursor: default;
+  color: inherit;
+  text-decoration: none;
 }
 .tiptap .doc-anchor:hover {
-  background-color: rgba(245, 158, 11, 0.18);
-  border-bottom-color: rgba(245, 158, 11, 0.55);
+  background: transparent;
 }
 .tiptap .doc-anchor.is-active {
-  background-color: rgba(13, 148, 136, 0.14);
-  border-bottom-color: rgba(13, 148, 136, 0.6);
+  background: transparent;
 }
 .tiptap .doc-anchor.is-flashing {
   animation: doc-anchor-flash 1.4s ease-out;
 }
 @keyframes doc-anchor-flash {
-  0%   { background-color: rgba(13, 148, 136, 0.45); }
-  100% { background-color: rgba(13, 148, 136, 0.14); }
+  0%   { background: transparent; }
+  100% { background: transparent; }
+}
+
+.tiptap .doc-anchor-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  margin-left: 0.15rem;
+  margin-right: -0.05rem;
+  border: 1px solid rgba(245, 158, 11, 0.18);
+  border-radius: 9999px;
+  background: white;
+  color: rgba(217, 119, 6, 0.88);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  opacity: 0.72;
+  transform: translateY(-0.05rem) scale(0.94);
+  transition: opacity 120ms ease, transform 120ms ease, background-color 120ms ease, color 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+  pointer-events: auto;
+}
+
+.tiptap .doc-anchor-trigger svg {
+  width: 0.875rem;
+  height: 0.875rem;
+  display: block;
+}
+
+.tiptap .doc-anchor:hover + .doc-anchor-trigger,
+.tiptap .doc-anchor.is-active + .doc-anchor-trigger,
+.tiptap .doc-anchor-trigger:hover {
+  opacity: 1;
+  transform: translateY(-0.15rem) scale(1);
+  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.12);
+}
+
+.tiptap .doc-anchor.is-active + .doc-anchor-trigger {
+  border-color: rgba(245, 158, 11, 0.32);
+  color: rgba(180, 83, 9, 0.95);
+}
+
+.tiptap .doc-anchor-trigger:hover {
+  border-color: rgba(245, 158, 11, 0.32);
+  background: rgba(255, 251, 235, 1);
+  color: rgba(180, 83, 9, 0.95);
 }
 
 @layer utilities {
@@ -1119,5 +1162,96 @@
     .animate-cs-spin-slow {
       animation: none;
     }
+  }
+}
+
+/* ─── Document editor — print stylesheet ──────────────────────────────────
+ * Producing high-fidelity PDFs from the editor (Cmd/Ctrl+P → Save as PDF)
+ * is the OSS path to "Export as PDF" without a paid Tiptap Pro extension.
+ * Rules:
+ *   • Hide everything except the writing canvas (toolbars, rails, headers).
+ *   • Reset the canvas to a clean A4 page with comfortable margins.
+ *   • Force light theme, full-width content, and avoid clipping at page
+ *     boundaries for tables, code blocks, diagrams, and equations.
+ * ───────────────────────────────────────────────────────────────────────── */
+@media print {
+  /* Hide editor chrome */
+  [role="toolbar"],
+  [aria-label="Document context"],
+  [aria-label="Document outline"],
+  [aria-label*="comments rail" i],
+  header[role="banner"],
+  .editor-print-hide {
+    display: none !important;
+  }
+
+  /* Page setup */
+  @page {
+    size: A4;
+    margin: 18mm 16mm;
+  }
+
+  html, body {
+    background: #ffffff !important;
+    color: #111 !important;
+  }
+
+  /* Writing canvas */
+  main {
+    overflow: visible !important;
+  }
+  .tiptap {
+    max-width: 100% !important;
+    padding: 0 !important;
+    color: #111 !important;
+  }
+
+  /* Block-level elements should not split mid-block when avoidable */
+  .tiptap h1, .tiptap h2, .tiptap h3, .tiptap h4 {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+  .tiptap pre,
+  .tiptap table,
+  .tiptap blockquote,
+  [data-type="mermaid-block"],
+  [data-type="math-block"] {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* Code blocks: invert to print-safe greys (saves ink, stays legible) */
+  .tiptap pre {
+    background: #f5f5f4 !important;
+    color: #111 !important;
+    border: 1px solid #e7e5e4;
+  }
+
+  /* Mermaid + math: source textareas are editor-only; show preview only */
+  [data-type="mermaid-block"] textarea,
+  [data-type="math-block"] textarea,
+  [data-type="mermaid-block"] > div:first-child,
+  [data-type="math-block"] > div:first-child {
+    display: none !important;
+  }
+
+  [data-type="mermaid-block"] .mermaid-svg,
+  [data-type="mermaid-block"] .mermaid-svg svg {
+    width: 100% !important;
+    height: 100% !important;
+    display: block;
+  }
+
+  /* Tables: force visible borders */
+  .tiptap table th,
+  .tiptap table td {
+    border: 1px solid #d6d3d1 !important;
+  }
+
+  /* Links: print URL after text for context */
+  .tiptap a[href]::after {
+    content: " (" attr(href) ")";
+    font-size: 0.85em;
+    color: #555;
   }
 }

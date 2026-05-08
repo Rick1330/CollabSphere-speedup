@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, FileX, RefreshCw, Send, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
@@ -27,16 +27,21 @@ import {
   type SaveStatus,
 } from "@/features/documents/components/editor/editor-status-bar";
 import type { PresenceUser } from "@/features/documents/components/editor/editor-presence";
+import { EditorContextRail } from "@/features/documents/components/editor/editor-context-rail";
+import { useDocumentOutline } from "@/features/documents/hooks/use-document-outline";
+import { useDocumentReadiness } from "@/features/documents/hooks/use-document-readiness";
+import { getTemplateContract } from "@/features/documents/template-schema";
 import { DocumentTreePanel } from "@/features/documents/components/tree/document-tree-panel";
 import { TreeCreateDialog } from "@/features/documents/components/tree-create-dialog";
-import { DocumentCommentsRail } from "@/features/documents/components/comments/document-comments-rail";
 import { DocumentInlineCommentTrigger } from "@/features/documents/components/comments/document-inline-comment-trigger";
 import { DocumentCommentComposer } from "@/features/documents/components/comments/document-comment-composer";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Separator } from "@/components/ui/separator";
 import { EditorSubmitDialog } from "@/features/documents/components/editor/editor-submit-dialog";
 import { EditorReviewPanel } from "@/features/documents/components/editor/editor-review-panel";
 import { EditorReviewFeedback } from "@/features/documents/components/editor/editor-review-feedback";
 import { EditorSubmissionHistory } from "@/features/documents/components/editor/editor-submission-history";
+import { TableInsertDialog } from "@/features/documents/components/editor/table-insert-dialog";
 import {
   MOCK_SUBMISSION_HISTORY,
   type SubmissionRecord,
@@ -61,6 +66,8 @@ import {
   type TaskLinkedResource,
 } from "@/api/adapters/tasks";
 
+type SidebarTab = "outline" | "readiness" | "properties" | "comments";
+
 type WorkspaceRole = "OWNER" | "ADMIN" | "MANAGER" | "MEMBER" | "VIEWER";
 type WorkspaceStatus = "active" | "archived";
 
@@ -76,6 +83,8 @@ interface MockWorkspace {
 interface MockDocument extends EditorDocument {
   content: string;
   createdBy: { id: string; fullName: string };
+  /** Optional template-contract id (see template-schema.ts). */
+  templateId?: string | null;
 }
 
 const CURRENT_USER_ID = "user-jane";
@@ -133,6 +142,7 @@ const DOCUMENTS: Record<string, MockDocument> = {
     folderName: "Product",
     content: "<h1>PRD v2</h1><p>Draft requirements for the next release.</p>",
     createdBy: { id: "user-bob", fullName: "Eyob Bekele" },
+    templateId: "doc-prd",
   },
   "d-survey": {
     id: "d-survey",
@@ -142,6 +152,7 @@ const DOCUMENTS: Record<string, MockDocument> = {
     folderName: "Research",
     content: "<h1>User survey results</h1><p>Highlights from the latest round.</p>",
     createdBy: { id: CURRENT_USER_ID, fullName: "Elshaday Tesfaye" },
+    templateId: "doc-research-brief",
   },
   "d-api": {
     id: "d-api",
@@ -151,6 +162,7 @@ const DOCUMENTS: Record<string, MockDocument> = {
     folderName: "Architecture",
     content: "<h1>API Design</h1><p>REST envelope conventions.</p>",
     createdBy: { id: CURRENT_USER_ID, fullName: "Elshaday Tesfaye" },
+    templateId: "doc-rfc",
   },
   "d-adr": {
     id: "d-adr",
@@ -160,6 +172,7 @@ const DOCUMENTS: Record<string, MockDocument> = {
     folderName: "Architecture",
     content: "<h1>ADR-003 Prisma</h1><p>We will adopt Prisma for the data layer.</p>",
     createdBy: { id: "user-bob", fullName: "Eyob Bekele" },
+    templateId: "doc-adr",
   },
   "d-retro": {
     id: "d-retro",
@@ -169,6 +182,7 @@ const DOCUMENTS: Record<string, MockDocument> = {
     folderName: "Meetings",
     content: "<h1>Sprint Retro Week 12</h1><p>What went well, what didn't.</p>",
     createdBy: { id: CURRENT_USER_ID, fullName: "Elshaday Tesfaye" },
+    templateId: "doc-meeting-notes",
   },
   "d-readme": {
     id: "d-readme",
@@ -277,9 +291,30 @@ function getReadOnlyReason(
 }
 
 const MOCK_PRESENCE: PresenceUser[] = [
-  { id: CURRENT_USER_ID, fullName: "Elshaday Tesfaye", color: AVATAR_COLORS[0] },
-  { id: "user-alex", fullName: "Yonas Girma", color: AVATAR_COLORS[2] },
-  { id: "user-mira", fullName: "Hiwot Mengistu", color: AVATAR_COLORS[1] },
+  {
+    id: CURRENT_USER_ID,
+    fullName: "Elshaday Tesfaye",
+    color: AVATAR_COLORS[0],
+    profileHref: "/settings/profile",
+    roleLabel: "You",
+    statusLabel: "Editing now",
+  },
+  {
+    id: "u_eyob",
+    fullName: "Eyob Bekele",
+    color: AVATAR_COLORS[2],
+    profileHref: "/admin/users/u_eyob",
+    roleLabel: "Admin",
+    statusLabel: "Online",
+  },
+  {
+    id: "u_hanna",
+    fullName: "Hanna Girma",
+    color: AVATAR_COLORS[1],
+    profileHref: "/admin/users/u_hanna",
+    roleLabel: "Designer",
+    statusLabel: "Reviewing",
+  },
 ];
 
 // ---------- Tree skeleton (left panel during load) ----------
@@ -317,7 +352,7 @@ const TreeSkeleton = () => (
 
 const EditorCenterSkeleton = () => (
   <div className="flex-1 min-w-0 flex flex-col bg-white">
-    <div className="flex items-center gap-3 h-12 px-4 border-b border-stone-200 flex-shrink-0">
+    <div className="flex items-center gap-3 h-12 px-4 border-b border-stone-200 shrink-0">
       <Skeleton className="h-7 w-7 rounded-md" />
       <Skeleton className="h-4 w-12 rounded" />
       <Skeleton className="h-3 w-3 rounded" />
@@ -329,7 +364,7 @@ const EditorCenterSkeleton = () => (
       </div>
       <Skeleton className="h-7 w-7 rounded-md" />
     </div>
-    <div className="flex items-center gap-1 h-10 px-4 border-b border-stone-100 flex-shrink-0">
+    <div className="flex items-center gap-1 h-10 px-4 border-b border-stone-100 shrink-0">
       {Array.from({ length: 14 }).map((_, i) => (
         <Skeleton key={i} className="h-7 w-7 rounded-md" />
       ))}
@@ -346,7 +381,7 @@ const EditorCenterSkeleton = () => (
         <Skeleton className="h-4 w-5/6 rounded" />
       </div>
     </div>
-    <div className="flex items-center justify-between h-8 px-4 border-t border-stone-100 bg-stone-50/50 flex-shrink-0">
+    <div className="flex items-center justify-between h-8 px-4 border-t border-stone-100 bg-stone-50/50 shrink-0">
       <Skeleton className="h-3 w-24 rounded" />
       <Skeleton className="h-3 w-16 rounded" />
     </div>
@@ -355,7 +390,7 @@ const EditorCenterSkeleton = () => (
 
 const EditorShellSkeleton = () => (
   <div className="app-light flex h-screen bg-stone-50">
-    <div className="hidden lg:flex w-[280px] flex-shrink-0">
+    <div className="hidden lg:flex w-[280px] shrink-0">
       <TreeSkeleton />
     </div>
     <EditorCenterSkeleton />
@@ -423,6 +458,7 @@ const DocumentEditorPage = () => {
               folderName: pending.folderName,
               content: pending.contentHTML,
               createdBy: { id: CURRENT_USER_ID, fullName: "Elshaday Tesfaye" },
+              templateId: pending.templateId,
             }
           : { ...FALLBACK_DOC, id: documentId || "untitled" };
       // Keep the seed around for retries within this tab, but clear once we
@@ -456,6 +492,17 @@ const DocumentEditorPage = () => {
     setSubmissionHistory(MOCK_SUBMISSION_HISTORY[documentId] ?? []);
   }, [documentId]);
 
+  // ─────── Document Properties state ───────
+  const [properties, setProperties] = useState<any>({});
+  
+  const handleUpdateProperties = (newProps: any) => {
+    setProperties(newProps);
+    toast.success("Properties updated", {
+      description: "Document metadata has been saved.",
+      duration: 1500,
+    });
+  };
+
   const readOnlyReason =
     mergedDoc && workspace ? getReadOnlyReason(mergedDoc, workspace, CURRENT_USER_ID) : null;
   const isEditable = state.status === "loaded" && readOnlyReason === null;
@@ -476,10 +523,19 @@ const DocumentEditorPage = () => {
   const editor = useTiptapEditor({
     content,
     editable: isEditable,
+    properties: { ...properties, title: mergedDoc?.title },
     onUpdate: () => {
       setSaveStatus("unsaved");
     },
   });
+
+  // ─────── Outline + readiness (right rail data) ───────
+  const outline = useDocumentOutline(editor);
+  const templateContract = useMemo(
+    () => getTemplateContract(mergedDoc?.templateId),
+    [mergedDoc?.templateId],
+  );
+  const readiness = useDocumentReadiness(editor, templateContract);
 
   // Auto "save" simulation
   useEffect(() => {
@@ -496,10 +552,56 @@ const DocumentEditorPage = () => {
   }, [saveStatus]);
 
   // Focus mode + comments rail + mobile drawers
-  const [focusMode, setFocusMode] = useState(false);
+  const [focusMode, setFocusMode] = useState(() => {
+    return localStorage.getItem("collab-editor-focus") === "true";
+  });
+  const defaultSidebarTab: Exclude<SidebarTab, "comments"> =
+    templateContract?.enforcement === "sections-required" ? "readiness" : "outline";
+  const [sidebarTab, setSidebarTab] = useState<SidebarTab>(defaultSidebarTab);
+  const [previousSidebarTab, setPreviousSidebarTab] = useState<Exclude<SidebarTab, "comments">>(defaultSidebarTab);
+  const [treeOpen, setTreeOpen] = useState(() => {
+    const saved = localStorage.getItem("collab-editor-tree");
+    return saved === null ? true : saved === "true";
+  });
+
   const [mobileTreeOpen, setMobileTreeOpen] = useState(false);
-  const [commentsOpen, setCommentsOpen] = useState(true);
   const [mobileCommentsOpen, setMobileCommentsOpen] = useState(false);
+  const [contextRailCollapsed, setContextRailCollapsed] = useState(false);
+  const [contextRailWidth, setContextRailWidth] = useState(332);
+  const contextRailResizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
+
+  useEffect(() => {
+    if (focusMode || contextRailCollapsed) return;
+    const onMove = (event: PointerEvent) => {
+      if (!contextRailResizeRef.current) return;
+      const delta = contextRailResizeRef.current.startX - event.clientX;
+      const nextWidth = Math.max(280, Math.min(460, contextRailResizeRef.current.startWidth + delta));
+      setContextRailWidth(nextWidth);
+    };
+    const onUp = () => {
+      contextRailResizeRef.current = null;
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, [focusMode, contextRailCollapsed]);
+
+  useEffect(() => {
+    localStorage.setItem("collab-editor-focus", String(focusMode));
+  }, [focusMode]);
+
+  const commentsOpen = sidebarTab === "comments";
+
+  useEffect(() => {
+    localStorage.setItem("collab-editor-comments", String(commentsOpen));
+  }, [commentsOpen]);
+
+  useEffect(() => {
+    localStorage.setItem("collab-editor-tree", String(treeOpen));
+  }, [treeOpen]);
 
   // Comment system
   const {
@@ -529,14 +631,29 @@ const DocumentEditorPage = () => {
   // Connection truth (mock): cycles to demo states; in real life wired to socket.
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connected");
 
-  const handleAnchorClick = useCallback(
-    (threadId: string) => {
-      focusThread(threadId);
-      // open the rail if it was closed so the focused thread is visible
-      if (!commentsOpen) setCommentsOpen(true);
-    },
-    [focusThread, commentsOpen],
-  );
+  const handleAnchorClick = (threadId: string) => {
+    focusThread(threadId);
+    setContextRailCollapsed(false);
+    if (isMobile) {
+      setMobileCommentsOpen(true);
+    }
+    setSidebarTab("comments");
+  };
+
+  const handleToggleContextRail = () => {
+    setContextRailCollapsed((collapsed) => !collapsed);
+  };
+
+  const handleContextRailResizeStart = (event: React.PointerEvent<HTMLButtonElement>) => {
+    if (focusMode || contextRailCollapsed) return;
+    contextRailResizeRef.current = {
+      startX: event.clientX,
+      startWidth: contextRailWidth,
+    };
+    setContextRailCollapsed(false);
+    event.currentTarget.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  };
 
   // Decorate the editor with anchor highlights for each open thread
   useAnchorDecorations({
@@ -548,23 +665,20 @@ const DocumentEditorPage = () => {
   });
 
   // Jump to anchor: scroll the matching decoration into view + flash it
-  const handleJumpToAnchor = useCallback(
-    (threadId: string) => {
-      const scroller = editorScrollRef.current;
-      if (!scroller) return;
-      const el = scroller.querySelector(`[data-thread-id="${threadId}"]`) as HTMLElement | null;
-      if (el) {
-        el.scrollIntoView({ behavior: "smooth", block: "center" });
-        flashAnchor(threadId);
-        focusThread(threadId);
-      } else {
-        toast.info("Anchor text not found", {
-          description: "The original text may have been edited.",
-        });
-      }
-    },
-    [flashAnchor, focusThread],
-  );
+  const handleJumpToAnchor = (threadId: string) => {
+    const scroller = editorScrollRef.current;
+    if (!scroller) return;
+    const el = scroller.querySelector(`[data-thread-id="${threadId}"]`) as HTMLElement | null;
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      flashAnchor(threadId);
+      focusThread(threadId);
+    } else {
+      toast.info("Anchor text not found", {
+        description: "The original text may have been edited.",
+      });
+    }
+  };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -614,9 +728,9 @@ const DocumentEditorPage = () => {
   }, [editor, mergedDoc?.id]);
 
   // Close mobile tree drawer when navigating
-  const handleTreeNavigate = useCallback(() => {
+  const handleTreeNavigate = () => {
     setMobileTreeOpen(false);
-  }, []);
+  };
 
   // Title
   useEffect(() => {
@@ -631,6 +745,13 @@ const DocumentEditorPage = () => {
   const [createDocOpen, setCreateDocOpen] = useState(false);
   const [createFolderOpen, setCreateFolderOpen] = useState(false);
   const [submitDialogOpen, setSubmitDialogOpen] = useState(false);
+  const [tableDialogOpen, setTableDialogOpen] = useState(false);
+
+  const handleInsertTable = (rows: number, cols: number) => {
+    (editor?.chain().focus() as any)
+      ?.insertTable({ rows, cols, withHeaderRow: true })
+      .run();
+  };
 
   const handleCreateDoc = (title: string, templateId: string) => {
     setCreateDocOpen(false);
@@ -653,13 +774,25 @@ const DocumentEditorPage = () => {
     toast.success(`Created folder "${name}"`);
   };
 
+  const handleSidebarTabChange = (nextTab: SidebarTab) => {
+    setSidebarTab((currentTab) => {
+      if (nextTab !== "comments" && currentTab === "comments") {
+        setPreviousSidebarTab(nextTab);
+      }
+      if (nextTab === "comments" && currentTab !== "comments") {
+        setPreviousSidebarTab(currentTab === "comments" ? previousSidebarTab : currentTab);
+      }
+      return nextTab;
+    });
+  };
+
   if (state.status === "loading") return <EditorShellSkeleton />;
 
   if (state.status === "error" || !mergedDoc || !workspace) {
     return (
       <div className="app-light flex h-screen bg-stone-50">
         {!focusMode && (
-          <div className="hidden lg:flex w-[280px] flex-shrink-0">
+          <div className="hidden lg:flex w-[280px] shrink-0">
             <DocumentTreePanel
               workspaceId={workspaceId}
               workspaceName={WORKSPACES[workspaceId]?.name ?? workspaceId}
@@ -752,7 +885,13 @@ const DocumentEditorPage = () => {
     if (pendingAnchor === null) return;
     createThread({ body, anchorSnippet: pendingAnchor });
     setPendingAnchor(null);
-    if (!commentsOpen) setCommentsOpen(true);
+    if (!commentsOpen) {
+      setContextRailCollapsed(false);
+      if (isMobile) {
+        setMobileCommentsOpen(true);
+      }
+      setSidebarTab("comments");
+    }
   };
 
   const handleCreateTaskFromSelection = (params: {
@@ -802,8 +941,6 @@ const DocumentEditorPage = () => {
     workspace.myRole === "ADMIN" ||
     workspace.myRole === "MANAGER";
 
-  const showDesktopComments = commentsOpen && !focusMode;
-
   // ─────────── Academic workflow ───────────
   const isSupervisor =
     workspace.myRole === "OWNER" ||
@@ -844,6 +981,17 @@ const DocumentEditorPage = () => {
   const isResubmission = mergedDoc.status === "changes_requested";
   const docHasContent =
     !!editor && editor.getText().trim().length > 5;
+
+  // Template-contract gate: when the contract enforces structure, prevent
+  // submission until the readiness engine reports `blocksSubmit === false`.
+  // Advisory contracts (and missing contracts) never gate.
+  const readinessBlocks = !!readiness && readiness.blocksSubmit;
+  const canSubmitNow = docHasContent && !readinessBlocks;
+  const submitBlockReason = !docHasContent
+    ? "This document is empty. Add some content before submitting."
+    : readinessBlocks && readiness?.blockingReason
+      ? readiness.blockingReason
+      : undefined;
 
   // ── Submission handlers ──
 
@@ -930,13 +1078,13 @@ const DocumentEditorPage = () => {
 
   return (
     <div className="app-light flex h-screen bg-stone-50 overflow-hidden">
-      {/* Desktop tree (hidden in focus mode) */}
+      {/* Desktop tree (hidden in focus mode or if manually closed) */}
       <div
         className={cn(
-          "hidden lg:flex flex-shrink-0 transition-[width] duration-300 ease-out overflow-hidden",
-          focusMode ? "w-0" : "w-[280px]",
+          "hidden lg:flex shrink-0 transition-[width] duration-300 ease-out overflow-hidden",
+          focusMode || !treeOpen ? "w-0" : "w-[280px]",
         )}
-        aria-hidden={focusMode}
+        aria-hidden={focusMode || !treeOpen}
       >
         <div className="w-[280px] h-full">{treePanel}</div>
       </div>
@@ -963,18 +1111,21 @@ const DocumentEditorPage = () => {
           canDelete={canDelete}
           onToggleLock={handleToggleLock}
           onDelete={handleDelete}
-          onToggleTree={() => setMobileTreeOpen(true)}
-          onToggleFocusMode={() => setFocusMode((f) => !f)}
-          focusMode={focusMode}
-          onToggleComments={() => {
+          onToggleTree={() => {
             if (isMobile) {
-              setMobileCommentsOpen((v) => !v);
+              setMobileTreeOpen(true);
             } else {
-              setCommentsOpen((v) => !v);
+              setTreeOpen((v) => !v);
+              if (focusMode) {
+                setFocusMode(false);
+              }
             }
           }}
-          commentsOpen={isMobile ? mobileCommentsOpen : commentsOpen}
-          openCommentCount={openCount}
+          treeOpen={isMobile ? true : treeOpen}
+          onToggleFocusMode={() => setFocusMode((f) => !f)}
+          focusMode={focusMode}
+          onToggleContextRail={handleToggleContextRail}
+          contextRailCollapsed={contextRailCollapsed}
           submitSlot={submitButton}
         />
         {/* Supervisor review panel — top priority when present */}
@@ -1004,9 +1155,18 @@ const DocumentEditorPage = () => {
         {showSubmissionHistory && (
           <EditorSubmissionHistory history={submissionHistory} />
         )}
-        <EditorToolbar editor={editor} isReadOnly={!isEditable} />
+        <EditorToolbar 
+          editor={editor} 
+          isReadOnly={!isEditable} 
+          onInsertTableRequest={() => setTableDialogOpen(true)}
+        />
         <EditorContentArea ref={editorScrollRef} editor={editor} />
-        {isEditable && <EditorSlashCommand editor={editor} />}
+        {isEditable && (
+          <EditorSlashCommand 
+            editor={editor} 
+            onInsertTableRequest={() => setTableDialogOpen(true)}
+          />
+        )}
         <EditorStatusBar
           editor={editor}
           saveStatus={saveStatus}
@@ -1015,6 +1175,58 @@ const DocumentEditorPage = () => {
           collaboratorCount={MOCK_PRESENCE.length}
         />
       </main>
+
+      {/* Right-side context rail: Outline + Readiness.
+          Hidden in focus mode and on viewports below lg. The comments rail
+          (xl+) sits to the right of this when both are visible. */}
+      <div
+        className={cn(
+          "hidden lg:flex shrink-0 transition-[width] duration-300 ease-out overflow-hidden bg-background",
+          focusMode || contextRailCollapsed ? "w-0" : undefined,
+        )}
+        aria-hidden={focusMode || contextRailCollapsed}
+        style={{ width: focusMode || contextRailCollapsed ? 0 : `${contextRailWidth}px` }}
+      >
+        <div className="relative h-full w-full">
+          {!focusMode && !contextRailCollapsed && (
+            <div className="absolute left-0 inset-y-0 z-20 w-3 -translate-x-1/2 flex items-center justify-center">
+              <Separator orientation="vertical" className="absolute inset-y-2 left-1/2 -translate-x-1/2 bg-transparent dark:bg-transparent" />
+              <button
+                type="button"
+                onPointerDown={handleContextRailResizeStart}
+                aria-label="Resize context rail"
+                title="Resize context rail"
+                className="relative h-full w-full cursor-col-resize rounded-full bg-transparent hover:bg-teal-500/10 transition-colors"
+              />
+            </div>
+          )}
+          <EditorContextRail
+            editor={editor}
+            outline={outline}
+            contract={templateContract}
+            readiness={readiness}
+            properties={properties}
+            onUpdateProperties={handleUpdateProperties}
+            tab={sidebarTab}
+            onTabChange={handleSidebarTabChange}
+            commentData={{
+              threads: visibleThreads,
+              filter,
+              openCount,
+              resolvedCount,
+              activeThreadId,
+              canComment,
+              canResolve: canResolveThreads,
+              onFilterChange: setFilter,
+              onCreate: handleCreateGeneralComment,
+              onReply: handleReply,
+              onToggleResolve: handleToggleResolve,
+              onSelectThread: focusThread,
+              onJumpToAnchor: handleJumpToAnchor,
+            }}
+          />
+        </div>
+      </div>
 
       {/* Floating selection-based comment trigger */}
       <DocumentInlineCommentTrigger
@@ -1026,58 +1238,40 @@ const DocumentEditorPage = () => {
         }
       />
 
-      {/* Desktop comments rail */}
-      <div
-        className={cn(
-          "hidden xl:flex flex-shrink-0 transition-[width] duration-300 ease-out overflow-hidden",
-          showDesktopComments ? "w-[360px]" : "w-0",
-        )}
-        aria-hidden={!showDesktopComments}
-      >
-        <div className="w-[360px] h-full">
-          <DocumentCommentsRail
-            threads={visibleThreads}
-            filter={filter}
-            openCount={openCount}
-            resolvedCount={resolvedCount}
-            activeThreadId={activeThreadId}
-            canComment={canComment}
-            canResolve={canResolveThreads}
-            onFilterChange={setFilter}
-            onCreate={handleCreateGeneralComment}
-            onReply={handleReply}
-            onToggleResolve={handleToggleResolve}
-            onSelectThread={focusThread}
-            onJumpToAnchor={handleJumpToAnchor}
-          />
-        </div>
-      </div>
-
-      {/* Mobile/tablet comments drawer (right side) */}
+      {/* Mobile/tablet context drawer (right side) */}
       <Sheet open={mobileCommentsOpen} onOpenChange={setMobileCommentsOpen}>
         <SheetContent side="right" className="p-0 w-[340px] sm:w-[400px] xl:hidden">
           <SheetHeader className="sr-only">
             <SheetTitle>Comments</SheetTitle>
           </SheetHeader>
           <div className="h-full">
-            <DocumentCommentsRail
-              threads={visibleThreads}
-              filter={filter}
-              openCount={openCount}
-              resolvedCount={resolvedCount}
-              activeThreadId={activeThreadId}
-              canComment={canComment}
-              canResolve={canResolveThreads}
-              onFilterChange={setFilter}
-              onCreate={handleCreateGeneralComment}
-              onReply={handleReply}
-              onToggleResolve={handleToggleResolve}
-              onSelectThread={focusThread}
-              onJumpToAnchor={(id) => {
-                handleJumpToAnchor(id);
-                setMobileCommentsOpen(false);
+            <EditorContextRail
+              editor={editor}
+              outline={outline}
+              contract={templateContract}
+              readiness={readiness}
+              properties={properties}
+              onUpdateProperties={handleUpdateProperties}
+              tab={sidebarTab}
+              onTabChange={handleSidebarTabChange}
+              commentData={{
+                threads: visibleThreads,
+                filter,
+                openCount,
+                resolvedCount,
+                activeThreadId,
+                canComment,
+                canResolve: canResolveThreads,
+                onFilterChange: setFilter,
+                onCreate: handleCreateGeneralComment,
+                onReply: handleReply,
+                onToggleResolve: handleToggleResolve,
+                onSelectThread: focusThread,
+                onJumpToAnchor: (id) => {
+                  handleJumpToAnchor(id);
+                  setMobileCommentsOpen(false);
+                },
               }}
-              onClose={() => setMobileCommentsOpen(false)}
             />
           </div>
         </SheetContent>
@@ -1134,12 +1328,8 @@ const DocumentEditorPage = () => {
           onOpenChange={setSubmitDialogOpen}
           documentTitle={mergedDoc.title}
           isResubmission={isResubmission}
-          canSubmit={docHasContent}
-          blockReason={
-            !docHasContent
-              ? "This document is empty. Add some content before submitting."
-              : undefined
-          }
+          canSubmit={canSubmitNow}
+          blockReason={submitBlockReason}
           onConfirm={handleConfirmSubmit}
         />
       )}
@@ -1166,6 +1356,12 @@ const DocumentEditorPage = () => {
           onCreated={handleCreateTaskFromSelection}
         />
       )}
+
+      <TableInsertDialog
+        open={tableDialogOpen}
+        onOpenChange={setTableDialogOpen}
+        onConfirm={handleInsertTable}
+      />
     </div>
   );
 };

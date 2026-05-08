@@ -39,7 +39,7 @@ export const DocumentTreePanel = ({
       )}
     >
       {/* Tree header */}
-      <div className="h-12 flex items-center justify-between gap-2 px-3 border-b border-stone-200 bg-stone-50/80 flex-shrink-0">
+      <div className="h-12 flex items-center justify-between gap-2 px-3 border-b border-stone-200 bg-stone-50/80 shrink-0">
         <div className="min-w-0 flex items-center gap-2">
           <Link
             to={`/w/${workspaceId}/documents`}
@@ -59,7 +59,7 @@ export const DocumentTreePanel = ({
           </div>
         </div>
         {canCreate && (
-          <div className="flex items-center gap-0.5 flex-shrink-0">
+          <div className="flex items-center gap-0.5 shrink-0">
             <button
               type="button"
               onClick={onNewFolder}
@@ -140,7 +140,7 @@ export const DocumentTreePanel = ({
       </nav>
 
       {/* Footer */}
-      <div className="border-t border-stone-200 px-3 py-2 flex items-center justify-between bg-stone-50/80 flex-shrink-0">
+      <div className="border-t border-stone-200 px-3 py-2 flex items-center justify-between bg-stone-50/80 shrink-0">
         <Link
           to={`/w/${workspaceId}/documents`}
           className="font-mono text-[10px] tracking-wider uppercase text-stone-400 hover:text-stone-700 transition-colors"

@@ -7,10 +7,10 @@ import {
   History,
   Lock,
   Maximize2,
-  MessageSquare,
   Minimize2,
   MoreHorizontal,
   PanelLeft,
+  PanelRight,
   Trash2,
   Unlock,
 } from "lucide-react";
@@ -50,11 +50,11 @@ interface EditorHeaderProps {
   onToggleLock: () => void;
   onDelete: () => void;
   onToggleTree?: () => void;
+  treeOpen?: boolean;
   onToggleFocusMode?: () => void;
   focusMode?: boolean;
-  onToggleComments?: () => void;
-  commentsOpen?: boolean;
-  openCommentCount?: number;
+  onToggleContextRail?: () => void;
+  contextRailCollapsed?: boolean;
   /** Optional slot for academic submit/resubmit action button. */
   submitSlot?: React.ReactNode;
 }
@@ -68,22 +68,27 @@ export const EditorHeader = ({
   onToggleLock,
   onDelete,
   onToggleTree,
+  treeOpen = true,
   onToggleFocusMode,
   focusMode = false,
-  onToggleComments,
-  commentsOpen = false,
-  openCommentCount = 0,
+  onToggleContextRail,
+  contextRailCollapsed = false,
   submitSlot,
 }: EditorHeaderProps) => {
   return (
-    <div className="flex items-center justify-between gap-3 h-14 px-3 sm:px-4 border-b border-stone-200 bg-white flex-shrink-0">
+    <div className="flex items-center justify-between gap-3 h-14 px-3 sm:px-4 border-b border-stone-200 bg-white shrink-0">
       {/* Left: tree toggle + back + breadcrumb + status badges */}
       <div className="flex items-center gap-2 min-w-0">
         {onToggleTree && (
           <button
             type="button"
             onClick={onToggleTree}
-            className="h-7 w-7 rounded-md flex items-center justify-center text-stone-400 hover:text-stone-700 hover:bg-stone-100 transition-colors duration-100 flex-shrink-0 lg:hidden"
+            className={cn(
+              "h-7 w-7 rounded-md flex items-center justify-center transition-colors duration-100 shrink-0",
+              treeOpen
+                ? "bg-stone-100 text-stone-700"
+                : "text-stone-400 hover:text-stone-700 hover:bg-stone-100",
+            )}
             aria-label="Toggle document tree"
             title="Toggle document tree"
           >
@@ -92,7 +97,7 @@ export const EditorHeader = ({
         )}
         <Link
           to={`/w/${workspaceId}/documents`}
-          className="hidden lg:flex h-7 w-7 rounded-md items-center justify-center text-stone-400 hover:text-stone-700 hover:bg-stone-100 transition-colors duration-100 flex-shrink-0"
+          className="hidden lg:flex h-7 w-7 rounded-md items-center justify-center text-stone-400 hover:text-stone-700 hover:bg-stone-100 transition-colors duration-100 shrink-0"
           aria-label="Back to documents"
         >
           <ArrowLeft className="h-4 w-4" />
@@ -137,7 +142,7 @@ export const EditorHeader = ({
           </nav>
         </div>
 
-        <div className="hidden sm:flex items-center gap-1.5 flex-shrink-0">
+        <div className="hidden sm:flex items-center gap-1.5 shrink-0">
           {document.isLocked && (
             <span
               className="flex items-center gap-1 text-[10px] font-mono tracking-wider uppercase px-1.5 py-0.5 rounded bg-amber-50 text-amber-600 border border-amber-200"
@@ -170,37 +175,26 @@ export const EditorHeader = ({
       </div>
 
       {/* Right: presence + submit + focus mode + actions */}
-      <div className="flex items-center gap-2 flex-shrink-0">
+      <div className="flex items-center gap-2 shrink-0">
         <EditorPresence users={presence} />
 
         {submitSlot}
 
-        {onToggleComments && (
+        {onToggleContextRail && (
           <button
             type="button"
-            onClick={onToggleComments}
+            onClick={onToggleContextRail}
             className={cn(
-              "relative h-7 px-2 rounded-md flex items-center gap-1.5 text-[12px] font-medium transition-colors duration-100",
-              commentsOpen
+              "h-7 w-7 rounded-md flex items-center justify-center transition-colors duration-100 shrink-0",
+              contextRailCollapsed
                 ? "bg-teal-50 text-teal-700"
-                : "text-stone-500 hover:text-stone-800 hover:bg-stone-100",
+                : "text-stone-400 hover:text-stone-700 hover:bg-stone-100",
             )}
-            aria-label={commentsOpen ? "Hide comments" : "Show comments"}
-            title={commentsOpen ? "Hide comments" : "Show comments"}
-            aria-pressed={commentsOpen}
+            aria-label={contextRailCollapsed ? "Show context rail" : "Hide context rail"}
+            title={contextRailCollapsed ? "Show context rail" : "Hide context rail"}
+            aria-pressed={!contextRailCollapsed}
           >
-            <MessageSquare className="h-4 w-4" aria-hidden="true" />
-            <span className="hidden md:inline">Comments</span>
-            {openCommentCount > 0 && (
-              <span
-                className={cn(
-                  "min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-mono font-bold flex items-center justify-center",
-                  commentsOpen ? "bg-teal-600 text-white" : "bg-stone-200 text-stone-700",
-                )}
-              >
-                {openCommentCount}
-              </span>
-            )}
+            <PanelRight className="h-4 w-4" aria-hidden="true" />
           </button>
         )}
 

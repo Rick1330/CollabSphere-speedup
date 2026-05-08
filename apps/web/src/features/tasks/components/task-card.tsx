@@ -1,4 +1,4 @@
-import { Calendar, Link as LinkIcon, MessageSquare } from "lucide-react";
+import { Calendar, Link as LinkIcon, MessageSquare, KanbanSquare } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDueDate, getAvatarColor, getInitials } from "@/lib/format";
 import type { TaskBoardItem } from "@/api/adapters/tasks";
@@ -119,6 +119,12 @@ export const TaskCard = ({ task, onClick }: TaskCardProps) => {
             )}
           </div>
           <div className="flex items-center gap-2 flex-shrink-0 text-stone-400">
+            {task.subtaskCount !== undefined && task.subtaskCount > 0 && (
+              <span className="text-[10px] flex items-center gap-0.5 font-mono tabular-nums">
+                <KanbanSquare className="h-3 w-3" />
+                {task.completedSubtaskCount ?? 0}/{task.subtaskCount}
+              </span>
+            )}
             {task.commentCount > 0 && (
               <span className="text-[10px] flex items-center gap-0.5 font-mono tabular-nums">
                 <MessageSquare className="h-3 w-3" />

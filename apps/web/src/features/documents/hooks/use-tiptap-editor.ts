@@ -3,70 +3,112 @@ import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
 import Link from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
+import Table from "@tiptap/extension-table";
+import TableRow from "@tiptap/extension-table-row";
+import TableHeader from "@tiptap/extension-table-header";
+import TableCell from "@tiptap/extension-table-cell";
+import { MermaidBlock } from "@/features/documents/editor-extensions/mermaid-block";
+import { MathBlock } from "@/features/documents/editor-extensions/math-block";
+import { CalloutBlock } from "@/features/documents/editor-extensions/callout-block";
+import { SectionBlock } from "@/features/documents/editor-extensions/section-block";
+import { TOCBlock } from "@/features/documents/editor-extensions/toc-block";
+import { CoverPageBlock } from "@/features/documents/editor-extensions/cover-page-block";
+import { PageBreakBlock } from "@/features/documents/editor-extensions/page-break-block";
+import { CommentAnchorExtension } from "@/features/documents/editor-extensions/comment-anchor-extension";
 
 interface UseTiptapEditorProps {
   content: string;
   editable: boolean;
   onUpdate?: (html: string) => void;
+  properties?: any;
 }
 
 export function useTiptapEditor({
   content,
   editable,
   onUpdate,
+  properties = {},
 }: UseTiptapEditorProps): Editor | null {
-  return useEditor(
-    {
-      extensions: [
-        (StarterKit as any).configure({
-          heading: { levels: [1, 2, 3, 4, 5, 6] },
-          codeBlock: {
-            HTMLAttributes: {
-              class:
-                "not-prose rounded-lg bg-stone-900 text-stone-100 p-4 text-sm font-mono overflow-x-auto",
-            },
-          },
-        }),
-        Underline as any,
-        (Link as any).configure({
-          openOnClick: false,
+  return useEditor({
+    extensions: [
+      (StarterKit as any).configure({
+        heading: { levels: [1, 2, 3, 4, 5, 6] },
+        codeBlock: {
           HTMLAttributes: {
-            class: "text-teal-600 hover:underline cursor-pointer",
+            class:
+              "not-prose rounded-lg bg-stone-900 text-stone-100 p-4 text-sm font-mono overflow-x-auto",
           },
-        }),
-        (Placeholder as any).configure({
-          placeholder: ({ node }: any) => {
-            if (node.type.name === "heading") return "Heading";
-            return "Start writing, or press / for commands…";
-          },
-        }),
-      ],
-      content,
-      editable,
-      autofocus: editable ? "end" : false,
-      onUpdate: ({ editor: ed }) => onUpdate?.(ed.getHTML()),
-      editorProps: {
-        attributes: {
-          class: [
-            "tiptap",
-            "prose prose-stone max-w-none",
-            "prose-headings:font-bold prose-headings:tracking-tight prose-headings:text-stone-900",
-            "prose-p:leading-relaxed prose-p:text-stone-700",
-            "prose-a:text-teal-600 prose-a:no-underline hover:prose-a:underline",
-            "prose-strong:text-stone-900",
-            "prose-code:text-teal-700 prose-code:bg-stone-100",
-            "prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:text-sm prose-code:font-medium",
-            "prose-code:before:content-none prose-code:after:content-none",
-            "prose-blockquote:border-l-4 prose-blockquote:border-l-teal-500 prose-blockquote:not-italic",
-            "prose-blockquote:text-stone-600 prose-blockquote:font-normal",
-            "prose-pre:bg-stone-900 prose-pre:text-stone-100 prose-pre:rounded-lg",
-            "prose-li:marker:text-stone-400",
-            "prose-hr:border-stone-200",
-            "focus:outline-none min-h-[60vh]",
-          ].join(" "),
         },
+      }),
+      Underline as any,
+      (Link as any).configure({
+        openOnClick: false,
+        HTMLAttributes: {
+          class: "text-teal-600 hover:underline cursor-pointer",
+        },
+      }),
+      (Placeholder as any).configure({
+        placeholder: ({ node }: any) => {
+          if (node.type.name === "heading") return "Heading";
+          return "Start writing, or press / for commands…";
+        },
+      }),
+      (Table as any).configure({
+        resizable: true,
+        HTMLAttributes: {
+          class:
+            "w-full border-collapse my-4 text-sm rounded-md overflow-hidden",
+        },
+      }),
+      TableRow as any,
+      (TableHeader as any).configure({
+        HTMLAttributes: {
+          class:
+            "bg-stone-100 text-left font-semibold text-stone-800 px-3 py-2 border border-stone-200",
+        },
+      }),
+      (TableCell as any).configure({
+        HTMLAttributes: {
+          class: "px-3 py-2 border border-stone-200 align-top",
+        },
+      }),
+      MermaidBlock,
+      MathBlock,
+      CalloutBlock,
+      SectionBlock,
+      TOCBlock,
+      CoverPageBlock,
+      PageBreakBlock,
+      CommentAnchorExtension,
+    ],
+    content,
+    editable,
+    autofocus: editable ? "end" : false,
+    // Pass properties as custom option for extensions to consume
+    documentProperties: properties,
+    onUpdate: ({ editor: ed }) => onUpdate?.(ed.getHTML()),
+    editorProps: {
+      attributes: {
+        class: [
+          "tiptap",
+          "prose prose-stone max-w-none",
+          "prose-headings:font-bold prose-headings:tracking-tight prose-headings:text-stone-900",
+          "prose-p:leading-relaxed prose-p:text-stone-700",
+          "prose-a:text-teal-600 prose-a:no-underline hover:prose-a:underline",
+          "prose-strong:text-stone-900",
+          "prose-code:text-teal-700 prose-code:bg-stone-100",
+          "prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:text-sm prose-code:font-medium",
+          "prose-code:before:content-none prose-code:after:content-none",
+          "prose-blockquote:border-l-4 prose-blockquote:border-l-teal-500 prose-blockquote:not-italic",
+          "prose-blockquote:text-stone-600 prose-blockquote:font-normal",
+          "prose-pre:bg-stone-900 prose-pre:text-stone-100 prose-pre:rounded-lg",
+          "prose-li:marker:text-stone-400",
+          "prose-hr:border-stone-200",
+          "focus:outline-none min-h-[60vh]",
+        ].join(" "),
       },
     },
-    [editable, content === "" ? "empty" : "filled"],
+  } as any,
+  [editable, content === "" ? "empty" : "filled", JSON.stringify(properties)]
   );
 }

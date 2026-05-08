@@ -29,6 +29,14 @@ import {
   Quote,
   Minus,
   Type,
+  Table as TableIcon,
+  Workflow,
+  Sigma,
+  Info,
+  Layout,
+  ListTree,
+  FileText,
+  Scissors,
 } from "lucide-react";
 
 interface EditorSlashCommandProps {
@@ -36,6 +44,7 @@ interface EditorSlashCommandProps {
   /** Optional offset (px) added to the caret coordinates — useful when the
    * editor lives inside a scrollable viewport. */
   scrollContainer?: HTMLElement | null;
+  onInsertTableRequest: () => void;
 }
 
 interface SlashItem {
@@ -133,6 +142,73 @@ const ITEMS: SlashItem[] = [
     keywords: ["divider", "hr", "rule", "separator"],
     run: (e) => e.chain().focus().setHorizontalRule().run(),
   },
+  {
+    id: "table",
+    label: "Table",
+    hint: "3×3 with header row",
+    Icon: TableIcon,
+    keywords: ["table", "grid", "matrix"],
+    run: (e) =>
+      (e.chain().focus() as any)
+        .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
+        .run(),
+  },
+  {
+    id: "mermaid",
+    label: "Diagram",
+    hint: "Mermaid (flow, sequence…)",
+    Icon: Workflow,
+    keywords: ["diagram", "mermaid", "flow", "sequence", "graph"],
+    run: (e) => (e.chain().focus() as any).insertMermaidBlock().run(),
+  },
+  {
+    id: "math",
+    label: "Equation",
+    hint: "LaTeX (KaTeX)",
+    Icon: Sigma,
+    keywords: ["math", "equation", "latex", "katex", "formula"],
+    run: (e) => (e.chain().focus() as any).insertMathBlock().run(),
+  },
+  {
+    id: "callout",
+    label: "Callout",
+    hint: "Info/warning box",
+    Icon: Info,
+    keywords: ["callout", "info", "warning", "note", "alert"],
+    run: (e) => (e.chain().focus() as any).insertCallout().run(),
+  },
+  {
+    id: "section",
+    label: "Section",
+    hint: "Container with title",
+    Icon: Layout,
+    keywords: ["section", "container", "group", "block"],
+    run: (e) => (e.chain().focus() as any).insertSection().run(),
+  },
+  {
+    id: "toc",
+    label: "Table of Contents",
+    hint: "Auto-generated list",
+    Icon: ListTree,
+    keywords: ["toc", "index", "contents", "outline"],
+    run: (e) => (e.chain().focus() as any).insertTOC().run(),
+  },
+  {
+    id: "coverPage",
+    label: "Cover Page",
+    hint: "Styled document cover",
+    Icon: FileText,
+    keywords: ["cover", "title", "front"],
+    run: (e) => (e.chain().focus() as any).insertCoverPage().run(),
+  },
+  {
+    id: "pageBreak",
+    label: "Page Break",
+    hint: "For PDF export",
+    Icon: Scissors,
+    keywords: ["page", "break", "print", "pagination"],
+    run: (e) => (e.chain().focus() as any).insertPageBreak().run(),
+  },
 ];
 
 interface MenuState {
@@ -145,7 +221,10 @@ interface MenuState {
   query: string;
 }
 
-export const EditorSlashCommand = ({ editor }: EditorSlashCommandProps) => {
+export const EditorSlashCommand = ({ 
+  editor, 
+  onInsertTableRequest,
+}: EditorSlashCommandProps) => {
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [activeIdx, setActiveIdx] = useState(0);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -295,7 +374,12 @@ export const EditorSlashCommand = ({ editor }: EditorSlashCommandProps) => {
       .focus()
       .deleteRange({ from: triggerPos, to: triggerPos + 1 + query.length })
       .run();
-    item.run(editor);
+
+    if (item.id === "table") {
+      onInsertTableRequest();
+    } else {
+      item.run(editor);
+    }
     setMenu(null);
   };
 

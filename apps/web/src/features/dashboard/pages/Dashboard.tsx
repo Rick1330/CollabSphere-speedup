@@ -8,7 +8,7 @@ import { useCommandPalette } from "@/hooks/use-command-palette";
 import { useCurrentAccount } from "@/lib/auth-session";
 
 const Dashboard = () => {
-  const { collapsed, toggle } = useSidebar();
+  const { collapsed, toggle, width, startResize } = useSidebar();
   const palette = useCommandPalette();
   const account = useCurrentAccount();
 
@@ -22,7 +22,7 @@ const Dashboard = () => {
 
   return (
     <div className="app-light min-h-screen flex">
-      <AppSidebar collapsed={collapsed} onToggle={toggle} />
+      <AppSidebar collapsed={collapsed} onToggle={toggle} width={width} onResizeStart={startResize} />
 
       <div className="flex-1 min-w-0 flex flex-col">
         <TopNav unreadCount={3} onOpenPalette={palette.toggle} />

@@ -84,6 +84,32 @@ export function useAnchorDecorations({
                   "data-thread-id": t.id,
                 }),
               );
+              decorations.push(
+                Decoration.widget(
+                  pmTo,
+                  () => {
+                    const button = document.createElement("button");
+                    button.type = "button";
+                    button.className = "doc-anchor-trigger";
+                    button.setAttribute("aria-label", "Open comment thread");
+                    button.setAttribute("title", "Open comment thread");
+                    button.setAttribute("data-thread-id", t.id);
+                    button.innerHTML = `
+                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <path d="M7.5 4.5h9A3.5 3.5 0 0 1 20 8v4a3.5 3.5 0 0 1-3.5 3.5H13l-3.5 3v-3H7.5A3.5 3.5 0 0 1 4 12V8a3.5 3.5 0 0 1 3.5-3.5Z" fill="currentColor" opacity="0.14"/>
+                        <path d="M8.25 8.25h7.5M8.25 11.25h5.4" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6"/>
+                      </svg>
+                    `;
+                    button.addEventListener("mousedown", (event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      onAnchorClick(t.id);
+                    });
+                    return button;
+                  },
+                  { side: 1 },
+                ),
+              );
               usedRanges.push([idx, idx + snippet.length]);
             }
             break;

@@ -27,7 +27,7 @@ export const SettingsLayout = ({
   title,
   description,
 }: SettingsLayoutProps) => {
-  const { collapsed, toggle } = useSidebar();
+  const { collapsed, toggle, width, startResize } = useSidebar();
   const palette = useCommandPalette();
 
   useEffect(() => {
@@ -36,7 +36,7 @@ export const SettingsLayout = ({
 
   return (
     <div className="app-light min-h-screen flex bg-stone-50">
-      <AppSidebar collapsed={collapsed} onToggle={toggle} />
+      <AppSidebar collapsed={collapsed} onToggle={toggle} width={width} onResizeStart={startResize} />
       <div className="flex-1 min-w-0 flex flex-col bg-stone-50">
         <TopNav user={MOCK_USER} unreadCount={3} onOpenPalette={palette.toggle} />
         <main className="flex-1 px-4 sm:px-6 md:px-10 py-8 md:py-10 bg-stone-50">
