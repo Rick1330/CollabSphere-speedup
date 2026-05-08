@@ -21,6 +21,13 @@ type UpdateDocumentBody = {
   status?: DocumentStatus | null;
 };
 
+type UpdateDocumentContentBody = {
+  contentPlaintext: string;
+  yjsStateBase64?: string | null;
+  reason?: string | null;
+  blockTypes?: string[] | null;
+};
+
 const validDocumentStatus: DocumentStatus[] = [
   "draft",
   "submitted",
@@ -113,6 +120,28 @@ export class DocumentsNestController {
 
     return wrapSuccessResponse({
       payload: createSingleResourcePayload({ document }),
+      requestId: "nest-request",
+    });
+  }
+
+  @Put(":documentId/content")
+  async updateDocumentContent(
+    @Param("workspaceId") workspaceId: string,
+    @Param("documentId") documentId: string,
+    @Headers("x-user-id") userIdHeader: unknown,
+    @Body() body: UpdateDocumentContentBody,
+  ) {
+    const actorUserId = resolveRequestUserId(userIdHeader);
+    const payload = this.validateContentUpdatePayload(body);
+    const data = await this.documentsService.updateDocumentContent({
+      actorUserId,
+      workspaceId,
+      documentId,
+      ...payload,
+    });
+
+    return wrapSuccessResponse({
+      payload: createSingleResourcePayload(data),
       requestId: "nest-request",
     });
   }
@@ -211,6 +240,74 @@ export class DocumentsNestController {
       title,
       folderId,
       status,
+    };
+  }
+
+  private validateContentUpdatePayload(raw: UpdateDocumentContentBody) {
+    if (!raw || typeof raw !== "object") {
+      throw new ValidationAppError({
+        message: "Document content payload is required.",
+        issues: [
+          { field: "body", rule: "required", message: "Document content payload is required." },
+        ],
+      });
+    }
+
+    const contentPlaintext = (raw.contentPlaintext ?? "").toString().trim();
+    if (contentPlaintext.length === 0) {
+      throw new ValidationAppError({
+        message: "Document content cannot be empty.",
+        issues: [
+          {
+            field: "contentPlaintext",
+            rule: "required",
+            message: "Document content cannot be empty.",
+          },
+        ],
+      });
+    }
+    if (contentPlaintext.length > 20_000) {
+      throw new ValidationAppError({
+        message: "Document content must be 20,000 characters or less.",
+        issues: [
+          {
+            field: "contentPlaintext",
+            rule: "length",
+            message: "Document content must be 20,000 characters or less.",
+          },
+        ],
+      });
+    }
+
+    const yjsStateBase64 =
+      raw.yjsStateBase64 === undefined
+        ? undefined
+        : (raw.yjsStateBase64 ?? "").toString().trim() || undefined;
+    const reason = (raw.reason ?? "manual_edit").toString().trim() || "manual_edit";
+    if (reason.length > 30) {
+      throw new ValidationAppError({
+        message: "Version reason must be 30 characters or less.",
+        issues: [
+          {
+            field: "reason",
+            rule: "length",
+            message: "Version reason must be 30 characters or less.",
+          },
+        ],
+      });
+    }
+
+    const blockTypes = Array.isArray(raw.blockTypes)
+      ? raw.blockTypes
+          .map((entry) => entry?.toString().trim())
+          .filter((entry): entry is string => Boolean(entry))
+      : undefined;
+
+    return {
+      contentPlaintext,
+      yjsStateBase64,
+      reason,
+      blockTypes,
     };
   }
 }
