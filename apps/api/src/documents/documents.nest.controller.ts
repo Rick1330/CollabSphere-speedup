@@ -1,7 +1,9 @@
-import { Body, Controller, Headers, Param, Post } from "@nestjs/common";
+import type { DocumentStatus } from "@prisma/client";
+import { Body, Controller, Get, Headers, Param, Post, Put, Query } from "@nestjs/common";
 import { resolveRequestUserId } from "../common/auth/request-user.js";
 import { ValidationAppError } from "../common/filters/app-error.filter.js";
 import {
+  createListResponsePayload,
   createSingleResourcePayload,
   wrapSuccessResponse,
 } from "../common/interceptors/response-envelope.interceptor.js";
@@ -13,9 +15,62 @@ type CreateDocumentBody = {
   templateId?: string | null;
 };
 
+type UpdateDocumentBody = {
+  title?: string | null;
+  folderId?: string | null;
+  status?: DocumentStatus | null;
+};
+
+const validDocumentStatus: DocumentStatus[] = [
+  "draft",
+  "submitted",
+  "changes_requested",
+  "approved",
+  "archived",
+];
+
 @Controller("workspaces/:workspaceId/documents")
 export class DocumentsNestController {
   constructor(private readonly documentsService: DocumentsService) {}
+
+  @Get()
+  async listDocuments(
+    @Param("workspaceId") workspaceId: string,
+    @Headers("x-user-id") userIdHeader: unknown,
+    @Query("folderId") folderIdQuery?: string,
+  ) {
+    const actorUserId = resolveRequestUserId(userIdHeader);
+    const folderId = folderIdQuery ? folderIdQuery.trim() : undefined;
+    const items = await this.documentsService.listDocumentsForUser({
+      actorUserId,
+      workspaceId,
+      folderId,
+    });
+
+    return wrapSuccessResponse({
+      payload: createListResponsePayload({ items, total: items.length }),
+      requestId: "nest-request",
+    });
+  }
+
+  @Get(":documentId")
+  async getDocument(
+    @Param("workspaceId") workspaceId: string,
+    @Param("documentId") documentId: string,
+    @Headers("x-user-id") userIdHeader: unknown,
+  ) {
+    const actorUserId = resolveRequestUserId(userIdHeader);
+    const document = await this.documentsService.getDocumentByIdForUser({
+      actorUserId,
+      workspaceId,
+      documentId,
+    });
+
+    return wrapSuccessResponse({
+      payload: createSingleResourcePayload({ document }),
+      requestId: "nest-request",
+    });
+  }
 
   @Post()
   async createDocument(
@@ -38,6 +93,28 @@ export class DocumentsNestController {
         requestId: "nest-request",
       }),
     };
+  }
+
+  @Put(":documentId")
+  async updateDocument(
+    @Param("workspaceId") workspaceId: string,
+    @Param("documentId") documentId: string,
+    @Headers("x-user-id") userIdHeader: unknown,
+    @Body() body: UpdateDocumentBody,
+  ) {
+    const actorUserId = resolveRequestUserId(userIdHeader);
+    const payload = this.validateUpdatePayload(body);
+    const document = await this.documentsService.updateDocumentMetadata({
+      actorUserId,
+      workspaceId,
+      documentId,
+      ...payload,
+    });
+
+    return wrapSuccessResponse({
+      payload: createSingleResourcePayload({ document }),
+      requestId: "nest-request",
+    });
   }
 
   private validateCreatePayload(raw: CreateDocumentBody) {
@@ -71,6 +148,69 @@ export class DocumentsNestController {
       title,
       folderId,
       templateId,
+    };
+  }
+
+  private validateUpdatePayload(raw: UpdateDocumentBody) {
+    if (!raw || typeof raw !== "object") {
+      throw new ValidationAppError({
+        message: "Document payload is required.",
+        issues: [{ field: "body", rule: "required", message: "Document payload is required." }],
+      });
+    }
+
+    const title = raw.title === undefined ? undefined : (raw.title ?? "").toString().trim();
+    if (title !== undefined && (title.length < 3 || title.length > 200)) {
+      throw new ValidationAppError({
+        message: "Title must be 3-200 characters.",
+        issues: [
+          {
+            field: "title",
+            rule: "length",
+            message: "Title must be 3-200 characters.",
+          },
+        ],
+      });
+    }
+
+    const folderId =
+      raw.folderId === undefined ? undefined : (raw.folderId ?? "").toString().trim() || null;
+
+    let status: DocumentStatus | undefined;
+    if (raw.status !== undefined && raw.status !== null) {
+      const nextStatus = raw.status.toString().trim() as DocumentStatus;
+      if (!validDocumentStatus.includes(nextStatus)) {
+        throw new ValidationAppError({
+          message: "Document status is invalid.",
+          issues: [
+            {
+              field: "status",
+              rule: "enum",
+              message: "Document status is invalid.",
+            },
+          ],
+        });
+      }
+      status = nextStatus;
+    }
+
+    if (title === undefined && folderId === undefined && status === undefined) {
+      throw new ValidationAppError({
+        message: "At least one updatable field is required.",
+        issues: [
+          {
+            field: "body",
+            rule: "required",
+            message: "At least one updatable field is required.",
+          },
+        ],
+      });
+    }
+
+    return {
+      title,
+      folderId,
+      status,
     };
   }
 }
