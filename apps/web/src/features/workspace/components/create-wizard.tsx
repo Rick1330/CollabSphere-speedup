@@ -46,6 +46,19 @@ type WizardData = {
   templateName: string | null;
 };
 
+const ICON_CHOICES = [
+  "📦",
+  "🧠",
+  "📝",
+  "🚀",
+  "🎓",
+  "🔬",
+  "💼",
+  "⚙️",
+  "📚",
+  "🎯",
+];
+
 const STEPS = [
   { number: 1 as const, label: "Details" },
   { number: 2 as const, label: "Type" },
@@ -93,6 +106,10 @@ export const CreateWorkspaceWizard = () => {
 
   const handleCreate = async () => {
     setServerError(null);
+    if (data.description.trim().length < 10) {
+      setServerError("Description is required and should be at least 10 characters.");
+      return;
+    }
     setIsCreating(true);
     await new Promise((r) => setTimeout(r, 700));
     const ws = workspaceStore.create({
@@ -307,7 +324,7 @@ const StepDetails = ({
         htmlFor="ws-desc"
         className="font-mono text-[10px] text-stone-400 tracking-[0.18em] uppercase block"
       >
-        Description <span className="text-stone-300 normal-case tracking-normal">— optional</span>
+        Description
       </label>
       <textarea
         id="ws-desc"
@@ -322,6 +339,11 @@ const StepDetails = ({
           resize-none transition-colors duration-200"
       />
       <div className="text-right">
+        {data.description.trim().length > 0 && data.description.trim().length < 10 && (
+          <p className="text-[12px] text-amber-700 text-left">
+            Description should be at least 10 characters.
+          </p>
+        )}
         <span className="font-mono text-[10px] text-stone-300 tracking-wider tabular-nums">
           {data.description.length}/280
         </span>
@@ -340,20 +362,38 @@ const StepDetails = ({
         type="text"
         placeholder="📦"
         value={data.icon}
-        onChange={(e) => onUpdate({ icon: e.target.value.slice(0, 2) })}
-        maxLength={2}
+        onChange={(e) => onUpdate({ icon: e.target.value.slice(0, 3) })}
+        maxLength={3}
         className="w-20 bg-transparent border-0 border-b border-stone-200 px-0 py-3
           text-[24px] text-stone-900 placeholder:text-stone-300
           focus:border-stone-900 focus:outline-none focus:ring-0
           transition-colors duration-200"
       />
+      <div className="flex flex-wrap gap-1.5 pt-2">
+        {ICON_CHOICES.map((emoji) => (
+          <button
+            key={emoji}
+            type="button"
+            onClick={() => onUpdate({ icon: emoji })}
+            className={cn(
+              "h-8 w-8 rounded-md border text-base inline-flex items-center justify-center transition-colors",
+              data.icon === emoji
+                ? "border-teal-300 bg-teal-50"
+                : "border-stone-200 bg-white hover:bg-stone-50",
+            )}
+            aria-label={`Use ${emoji} icon`}
+          >
+            {emoji}
+          </button>
+        ))}
+      </div>
     </div>
 
     <div className="pt-6 flex items-center justify-end">
       <button
         type="button"
         onClick={onNext}
-        disabled={data.name.trim().length < 3}
+        disabled={data.name.trim().length < 3 || data.description.trim().length < 10}
         className="group inline-flex items-center gap-2 text-[13px] font-medium text-stone-900
           border-b border-stone-900 pb-1
           disabled:opacity-30 disabled:border-stone-300 disabled:cursor-not-allowed

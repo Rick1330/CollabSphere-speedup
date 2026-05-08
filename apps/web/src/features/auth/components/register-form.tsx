@@ -13,7 +13,27 @@ import { EmailSentCard } from "./email-sent-card";
 
 const registerSchema = z
   .object({
-    fullName: z.string().min(1, "Name is required").min(2, "Too short").max(100),
+    fullName: z
+      .string()
+      .trim()
+      .min(1, "Full name is required")
+      .max(100, "Full name is too long")
+      .transform((value) => value.replace(/\s+/g, " "))
+      .refine(
+        (value) => /^[A-Za-z][A-Za-z' -]*[A-Za-z]$/.test(value),
+        "Use letters, spaces, hyphens, or apostrophes only",
+      )
+      .refine(
+        (value) => value.split(" ").length >= 2,
+        "Enter your first and last name",
+      )
+      .refine(
+        (value) =>
+          value
+            .split(" ")
+            .every((part) => part.replace(/['-]/g, "").length >= 2),
+        "Each name part must be at least 2 letters",
+      ),
     email: z.string().min(1, "Email is required").email("Invalid email"),
     password: z
       .string()
@@ -66,7 +86,9 @@ export const RegisterForm = () => {
     setServerError(null);
     // Mock registration: simulate latency, then show "check email" card
     await new Promise((r) => setTimeout(r, 600));
+    const normalizedFullName = values.fullName.replace(/\s+/g, " ").trim();
     setSubmittedEmail(values.email);
+    form.setValue("fullName", normalizedFullName, { shouldValidate: true });
     setIsSubmitted(true);
   };
 
@@ -132,7 +154,7 @@ export const RegisterForm = () => {
                 id="fullName"
                 type="text"
                 autoComplete="name"
-                placeholder="Elshaday Tesfaye"
+                placeholder="First Last"
                 className={inputClass}
                 style={{ ...inputStyle, ...(form.formState.errors.fullName ? errorBorder : {}) }}
                 {...form.register("fullName")}
