@@ -780,7 +780,7 @@ const DocumentEditorPage = () => {
         setPreviousSidebarTab(nextTab);
       }
       if (nextTab === "comments" && currentTab !== "comments") {
-        setPreviousSidebarTab(currentTab === "comments" ? previousSidebarTab : currentTab);
+        setPreviousSidebarTab(currentTab);
       }
       return nextTab;
     });

@@ -73,19 +73,23 @@ const filterTree = (
   status: "all" | DocStatus,
 ): TreeNode[] => {
   const q = query.trim().toLowerCase();
-  return nodes.flatMap((node) => {
+  const next: TreeNode[] = [];
+  for (const node of nodes) {
     if (node.type === "document") {
       const matchesQuery = q.length === 0 || node.title.toLowerCase().includes(q);
       const matchesStatus = status === "all" || node.status === status;
-      return matchesQuery && matchesStatus ? [node] : [];
+      if (matchesQuery && matchesStatus) {
+        next.push(node);
+      }
+      continue;
     }
     const children = filterTree(node.children, query, status);
     const folderMatches = q.length > 0 && node.name.toLowerCase().includes(q);
     if (children.length > 0 || folderMatches) {
-      return [{ ...node, children }];
+      next.push({ ...node, children });
     }
-    return [];
-  });
+  }
+  return next;
 };
 
 // Mutate helpers (returns new tree)

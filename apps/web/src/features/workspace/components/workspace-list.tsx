@@ -1,6 +1,19 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { AlertCircle, FolderKanban, Plus, RefreshCw, Search, Sparkles, Users, X } from "lucide-react";
+import {
+  AlertCircle,
+  ChevronLeft,
+  ChevronRight,
+  FolderKanban,
+  LayoutGrid,
+  List,
+  Plus,
+  RefreshCw,
+  Search,
+  Sparkles,
+  Users,
+  X,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
@@ -119,6 +132,9 @@ const MOCK_WORKSPACES: WorkspaceSummary[] = [
 export const WorkspaceList = () => {
   const [state] = useState<State>("loaded");
   const [searchQuery, setSearchQuery] = useState("");
+  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  const [page, setPage] = useState(1);
+  const pageSize = viewMode === "grid" ? 8 : 4;
   const stored = useStoredWorkspaces();
   const [overrides, setOverrides] = useState<Record<string, "active" | "archived">>({});
 
@@ -169,6 +185,21 @@ export const WorkspaceList = () => {
       );
     });
   }, [filteredWorkspaces]);
+  const totalPages = Math.max(1, Math.ceil(sortedWorkspaces.length / pageSize));
+  const pagedWorkspaces = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return sortedWorkspaces.slice(start, start + pageSize);
+  }, [sortedWorkspaces, page, pageSize]);
+
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [page, totalPages]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [searchQuery]);
 
   const isEmpty = state === "loaded" && workspaces.length === 0;
   const showSearch = state === "loaded" && workspaces.length > 0;
@@ -251,6 +282,36 @@ export const WorkspaceList = () => {
                 )}
               </div>
             )}
+            {state === "loaded" && workspaces.length > 0 && (
+              <div className="inline-flex h-9 rounded-lg border border-stone-200 bg-white p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setViewMode("grid")}
+                  className={cn(
+                    "px-2.5 rounded-md text-[12px] font-medium inline-flex items-center gap-1.5 transition-colors",
+                    viewMode === "grid"
+                      ? "bg-stone-900 text-white"
+                      : "text-stone-600 hover:bg-stone-100",
+                  )}
+                >
+                  <LayoutGrid className="h-3.5 w-3.5" />
+                  Grid
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode("list")}
+                  className={cn(
+                    "px-2.5 rounded-md text-[12px] font-medium inline-flex items-center gap-1.5 transition-colors",
+                    viewMode === "list"
+                      ? "bg-stone-900 text-white"
+                      : "text-stone-600 hover:bg-stone-100",
+                  )}
+                >
+                  <List className="h-3.5 w-3.5" />
+                  List
+                </button>
+              </div>
+            )}
 
             <Link to="/workspaces/new" className="flex-shrink-0">
               <button
@@ -301,9 +362,15 @@ export const WorkspaceList = () => {
         {state === "loaded" && !isEmpty && sortedWorkspaces.length === 0 && (
           <EmptySearch query={searchQuery} onClear={() => setSearchQuery("")} />
         )}
-        {state === "loaded" && sortedWorkspaces.length > 0 && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {sortedWorkspaces.map((w) => (
+        {state === "loaded" && pagedWorkspaces.length > 0 && (
+          <div
+            className={cn(
+              viewMode === "grid"
+                ? "grid grid-cols-1 sm:grid-cols-2 gap-4"
+                : "flex flex-col gap-3",
+            )}
+          >
+            {pagedWorkspaces.map((w) => (
               <WorkspaceCard
                 key={w.id}
                 workspace={w}
@@ -311,6 +378,33 @@ export const WorkspaceList = () => {
                 onUnarchive={handleUnarchive}
               />
             ))}
+          </div>
+        )}
+        {state === "loaded" && sortedWorkspaces.length > pageSize && (
+          <div className="mt-5 flex items-center justify-between rounded-lg border border-stone-200 bg-white px-3 py-2">
+            <span className="font-mono text-[10px] text-stone-400 tracking-wider uppercase">
+              Page {page} of {totalPages}
+            </span>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page <= 1}
+                className="h-8 px-3 rounded-md border border-stone-200 bg-white text-[12px] text-stone-700 hover:bg-stone-50 disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" />
+                Prev
+              </button>
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page >= totalPages}
+                className="h-8 px-3 rounded-md border border-stone-200 bg-white text-[12px] text-stone-700 hover:bg-stone-50 disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1"
+              >
+                Next
+                <ChevronRight className="h-3.5 w-3.5" />
+              </button>
+            </div>
           </div>
         )}
       </div>

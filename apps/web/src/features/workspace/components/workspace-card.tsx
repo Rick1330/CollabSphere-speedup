@@ -230,7 +230,7 @@ export const WorkspaceCard = ({
       {/* LAYER 3 — People */}
       <div className="flex items-center justify-between mt-3">
         <div className="flex -space-x-1.5">
-          {workspace.recentMembers.slice(0, 4).map((m, i) => (
+          {workspace.recentMembers.slice(0, 2).map((m, i) => (
             <div
               key={m.id}
               className="h-6 w-6 rounded-full border-2 border-white flex items-center justify-center text-[9px] font-bold"
@@ -245,14 +245,14 @@ export const WorkspaceCard = ({
               {getInitials(m.fullName, 1)}
             </div>
           ))}
-          {workspace.memberCount > 4 && (
+          {workspace.memberCount > 2 && (
             <div
               className="h-6 w-6 rounded-full border-2 border-white bg-stone-100 flex items-center justify-center text-[9px] font-medium text-stone-500"
               style={{ zIndex: 0 }}
-              title={`${workspace.memberCount - 4} more members`}
+              title={`${workspace.memberCount - 2} more members`}
               aria-hidden="true"
             >
-              +{workspace.memberCount - 4}
+              +{workspace.memberCount - 2}
             </div>
           )}
         </div>
