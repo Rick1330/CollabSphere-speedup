@@ -26,6 +26,7 @@ export interface SourceDocumentLink {
 interface CreateTaskDialogProps {
   workspaceId: string;
   presetStatus: TaskStatus;
+  statusOptions?: Array<{ status: TaskStatus; label: string }>;
   members: TaskAssignee[];
   /** Members the current user can assign tasks to. */
   assignableMembers: TaskAssignee[];
@@ -47,6 +48,7 @@ interface CreateTaskDialogProps {
 export const CreateTaskDialog = ({
   workspaceId,
   presetStatus,
+  statusOptions,
   members,
   assignableMembers,
   currentUserId,
@@ -62,6 +64,7 @@ export const CreateTaskDialog = ({
   const [title, setTitle] = useState(prefilledTitle.slice(0, 200));
   const [description, setDescription] = useState(prefilledDesc);
   const [priority, setPriority] = useState<TaskPriority>("medium");
+  const [status, setStatus] = useState<TaskStatus>(presetStatus);
   const [dueDate, setDueDate] = useState("");
   const [assigneeId, setAssigneeId] = useState<string>("");
   const [labels, setLabels] = useState<string[]>([]);
@@ -75,8 +78,15 @@ export const CreateTaskDialog = ({
     setDescription(prefilledDesc);
   }, [prefilledTitle, prefilledDesc]);
 
+  useEffect(() => {
+    setStatus(presetStatus);
+  }, [presetStatus]);
+
   const today = new Date().toISOString().split("T")[0];
-  const statusLabel = STATUS_LABELS[presetStatus].toUpperCase();
+  const statusLabel =
+    statusOptions?.find((s) => s.status === status)?.label ??
+    STATUS_LABELS[status] ??
+    status;
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -112,7 +122,7 @@ export const CreateTaskDialog = ({
       onCreated({
         title: trimmed,
         description: description.trim() || undefined,
-        status: presetStatus,
+        status,
         priority,
         dueDate: dueDate || undefined,
         assigneeId: assigneeId || undefined,
@@ -137,7 +147,7 @@ export const CreateTaskDialog = ({
           <DialogDescription className="text-stone-500">
             Creating in the
             <span className="font-mono text-[11px] tracking-wider uppercase mx-1.5 px-1.5 py-0.5 rounded border bg-stone-100 text-stone-600 border-stone-200">
-              {statusLabel}
+              {statusLabel.toUpperCase()}
             </span>
             column.
           </DialogDescription>
@@ -195,6 +205,36 @@ export const CreateTaskDialog = ({
             )}
           </div>
 
+          <div>
+            <label
+              htmlFor="task-status"
+              className="text-sm font-medium text-stone-700 mb-1.5 block"
+            >
+              Status column
+            </label>
+            <select
+              id="task-status"
+              value={status}
+              onChange={(e) => setStatus(e.target.value as TaskStatus)}
+              className="w-full h-10 rounded-lg border border-stone-200 bg-white px-3 text-sm text-stone-700 focus:border-teal-500/40 focus:ring-1 focus:ring-teal-500/20 focus:outline-none transition-all duration-150"
+            >
+              {(statusOptions ?? []).length > 0
+                ? statusOptions!.map((opt) => (
+                    <option key={opt.status} value={opt.status}>
+                      {opt.label}
+                    </option>
+                  ))
+                : (
+                  <>
+                    <option value="todo">To Do</option>
+                    <option value="in_progress">In Progress</option>
+                    <option value="in_review">In Review</option>
+                    <option value="done">Done</option>
+                  </>
+                )}
+            </select>
+          </div>
+
           {/* Description */}
           <div>
             <div className="flex items-center gap-2 mb-1.5">
@@ -214,8 +254,12 @@ export const CreateTaskDialog = ({
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Add details, context, or acceptance criteria..."
               rows={3}
+              maxLength={3000}
               className="w-full rounded-lg text-sm px-3.5 py-2.5 resize-none bg-white border border-stone-200 text-stone-900 placeholder:text-stone-400 focus:border-teal-500/40 focus:ring-1 focus:ring-teal-500/20 focus:outline-none transition-all duration-150"
             />
+            <p className="mt-1 text-[11px] text-stone-400">
+              Supports long-form planning notes, acceptance criteria, and rollout details.
+            </p>
           </div>
 
           {/* Priority + Due date row */}

@@ -12,7 +12,8 @@ export type TaskStatus =
   | "todo"
   | "in_progress"
   | "in_review"
-  | "done";
+  | "done"
+  | (string & {});
 
 export interface TaskAssignee {
   id: string;
@@ -51,16 +52,25 @@ export interface TaskBoardItem {
   commentCount: number;
   position: number;
   linkedResourceCount?: number;
+  subtaskCount?: number;
+  completedSubtaskCount?: number;
+  blockedByCount?: number;
+  blocksCount?: number;
 }
 
 export interface TaskDetail extends TaskBoardItem {
   description: string | null;
+  descriptionRich?: CommentNode[] | null;
   reporterId: string;
   reporterName: string | null;
   createdAt: string;
   updatedAt: string;
   linkedResources: TaskLinkedResource[];
   comments: TaskComment[];
+  parentTaskId?: string | null;
+  subtaskIds?: string[];
+  blockedByTaskIds?: string[];
+  blockingTaskIds?: string[];
 }
 
 /**
@@ -72,6 +82,8 @@ export interface TaskBoardColumnConfig {
   status: TaskStatus;
   /** Display label, may differ from status label (e.g. "Testing" → in_review) */
   label: string;
+  tone?: "stone" | "teal" | "amber" | "emerald" | "rose" | "indigo" | "violet" | "sky";
+  isDone?: boolean;
 }
 
 export interface TaskBoardColumn extends TaskBoardColumnConfig {
@@ -79,13 +91,13 @@ export interface TaskBoardColumn extends TaskBoardColumnConfig {
 }
 
 export const DEFAULT_BOARD_COLUMNS: TaskBoardColumnConfig[] = [
-  { status: "todo", label: "To Do" },
-  { status: "in_progress", label: "In Progress" },
-  { status: "in_review", label: "Testing" }, // canonical: in_review, display: Testing
-  { status: "done", label: "Done" },
+  { status: "todo", label: "To Do", tone: "stone" },
+  { status: "in_progress", label: "In Progress", tone: "teal" },
+  { status: "in_review", label: "Testing", tone: "amber" }, // canonical: in_review, display: Testing
+  { status: "done", label: "Done", tone: "emerald", isDone: true },
 ];
 
-export const STATUS_LABELS: Record<TaskStatus, string> = {
+export const STATUS_LABELS: Record<string, string> = {
   backlog: "Backlog",
   todo: "To Do",
   in_progress: "In Progress",
@@ -97,7 +109,7 @@ export const STATUS_LABELS: Record<TaskStatus, string> = {
  * Canonical workflow transitions. Anything not in here is an invalid move
  * and the UI must explain why instead of silently snapping back.
  */
-export const VALID_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
+export const VALID_TRANSITIONS: Record<string, TaskStatus[]> = {
   backlog: ["todo"],
   todo: ["backlog", "in_progress"],
   in_progress: ["in_review", "todo"],
@@ -106,11 +118,13 @@ export const VALID_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
 };
 
 export function canTransition(from: TaskStatus, to: TaskStatus): boolean {
+  if (!(from in VALID_TRANSITIONS) || !(to in STATUS_LABELS)) return true;
   if (from === to) return true;
   return VALID_TRANSITIONS[from]?.includes(to) ?? false;
 }
 
 export function transitionReason(from: TaskStatus, to: TaskStatus): string {
+  if (!(from in VALID_TRANSITIONS) || !(to in STATUS_LABELS)) return "Allowed in custom workflow.";
   if (from === to) return "Already in this column.";
   const allowed = VALID_TRANSITIONS[from] ?? [];
   if (allowed.length === 0) return `Tasks in ${STATUS_LABELS[from]} cannot be moved.`;
@@ -455,6 +469,51 @@ export const MOCK_TASKS: Record<string, TaskDetail> = {
   },
 };
 
+const DEFAULT_WORKFLOW_BY_WORKSPACE: Record<string, TaskBoardColumnConfig[]> = {};
+
+function getDefaultWorkflow(): TaskBoardColumnConfig[] {
+  return DEFAULT_BOARD_COLUMNS.map((col) => ({ ...col }));
+}
+
+export function getWorkspaceWorkflowColumns(workspaceId: string): TaskBoardColumnConfig[] {
+  if (!DEFAULT_WORKFLOW_BY_WORKSPACE[workspaceId]) {
+    DEFAULT_WORKFLOW_BY_WORKSPACE[workspaceId] = getDefaultWorkflow();
+  }
+  return DEFAULT_WORKFLOW_BY_WORKSPACE[workspaceId];
+}
+
+export function setWorkspaceWorkflowColumns(
+  workspaceId: string,
+  columns: TaskBoardColumnConfig[],
+): TaskBoardColumnConfig[] {
+  DEFAULT_WORKFLOW_BY_WORKSPACE[workspaceId] = columns.map((c) => ({ ...c }));
+  for (const status of Object.keys(STATUS_LABELS)) {
+    if (!columns.some((c) => c.status === status)) continue;
+  }
+  return getWorkspaceWorkflowColumns(workspaceId);
+}
+
+export function getStatusLabel(status: TaskStatus, columns?: TaskBoardColumnConfig[]): string {
+  const fromColumns = columns?.find((c) => c.status === status)?.label;
+  if (fromColumns) return fromColumns;
+  return STATUS_LABELS[status] ?? status.replace(/[_-]/g, " ");
+}
+
+for (const task of Object.values(MOCK_TASKS)) {
+  task.descriptionRich = task.description ? [{ type: "text", text: task.description }] : null;
+  task.parentTaskId = null;
+  task.subtaskIds = [];
+  task.blockedByTaskIds = [];
+  task.blockingTaskIds = [];
+}
+
+MOCK_TASKS["task-5"].subtaskIds = ["task-2", "task-3"];
+MOCK_TASKS["task-2"].parentTaskId = "task-5";
+MOCK_TASKS["task-3"].parentTaskId = "task-5";
+
+MOCK_TASKS["task-4"].blockedByTaskIds = ["task-1"];
+MOCK_TASKS["task-1"].blockingTaskIds = ["task-4"];
+
 /** All distinct labels across the workspace, for the label filter. */
 export function getAllLabels(tasks: Record<string, TaskDetail>): string[] {
   const set = new Set<string>();
@@ -477,6 +536,10 @@ export function buildBoardData(
 }
 
 export function toBoardItem(t: TaskDetail): TaskBoardItem {
+  const subtaskCount = t.subtaskIds?.length ?? 0;
+  const completedSubtaskCount = (t.subtaskIds ?? []).filter(
+    (id) => MOCK_TASKS[id]?.status === "done",
+  ).length;
   return {
     id: t.id,
     title: t.title,
@@ -488,5 +551,9 @@ export function toBoardItem(t: TaskDetail): TaskBoardItem {
     commentCount: t.comments.length || t.commentCount,
     position: t.position,
     linkedResourceCount: t.linkedResources?.length ?? t.linkedResourceCount,
+    subtaskCount,
+    completedSubtaskCount,
+    blockedByCount: t.blockedByTaskIds?.length ?? 0,
+    blocksCount: t.blockingTaskIds?.length ?? 0,
   };
 }

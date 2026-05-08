@@ -14,15 +14,19 @@ import {
 import {
   inviteMember,
   getAssignableRoles,
-  getRoleLabel,
-  getRoleDescription,
   type WorkspaceRole,
   type ApiError,
 } from "@/api/adapters/members";
+import {
+  getWorkspaceRoleDescription,
+  getWorkspaceRoleLabel,
+  type WorkspaceTypeForLabels,
+} from "@/lib/role-labels";
 
 interface InviteDialogProps {
   workspaceId: string;
   currentUserRole: WorkspaceRole;
+  workspaceType: WorkspaceTypeForLabels;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onInvited: () => void;
@@ -38,6 +42,7 @@ type InviteValues = z.infer<typeof inviteSchema>;
 export const InviteDialog = ({
   workspaceId,
   currentUserRole,
+  workspaceType,
   open,
   onOpenChange,
   onInvited,
@@ -77,7 +82,7 @@ export const InviteDialog = ({
       await inviteMember(workspaceId, {
         email: values.email.trim().toLowerCase(),
         role: values.role,
-      });
+      }, currentUserRole);
       setLastInvitedEmail(values.email);
       setInviteSuccess(true);
       form.reset({ email: "", role: defaultRole });
@@ -167,12 +172,12 @@ export const InviteDialog = ({
             >
               {assignable.map((role) => (
                 <option key={role} value={role}>
-                  {getRoleLabel(role)}
+                  {getWorkspaceRoleLabel(workspaceType, role)}
                 </option>
               ))}
             </select>
             <p className="text-xs text-stone-400 mt-1.5">
-              {getRoleDescription(watchedRole)}
+              {getWorkspaceRoleDescription(workspaceType, watchedRole)}
             </p>
           </div>
 

@@ -21,6 +21,7 @@ import {
   MetaDivider,
 } from "@/components/shared/page-header";
 import {
+  canManageMember,
   changeMemberRole,
   fetchMembers,
   fetchPendingInvitations,
@@ -36,6 +37,7 @@ import {
 import { MemberTable } from "./member-table";
 import { MemberCard } from "./member-card";
 import { InviteDialog } from "./invite-dialog";
+import type { WorkspaceTypeForLabels } from "@/lib/role-labels";
 
 interface MemberListProps {
   workspaceId: string;
@@ -43,6 +45,7 @@ interface MemberListProps {
   workspaceStatus: "active" | "archived";
   currentUserId: string;
   currentUserRole: WorkspaceRole;
+  workspaceType: WorkspaceTypeForLabels;
 }
 
 export const MemberList = ({
@@ -51,6 +54,7 @@ export const MemberList = ({
   workspaceStatus,
   currentUserId,
   currentUserRole,
+  workspaceType,
 }: MemberListProps) => {
   const queryClient = useQueryClient();
   const isArchived = workspaceStatus === "archived";
@@ -102,7 +106,13 @@ export const MemberList = ({
 
   const handleRoleChange = async (member: WorkspaceMember, newRole: WorkspaceRole) => {
     try {
-      await changeMemberRole(workspaceId, member.membershipId, newRole);
+      await changeMemberRole(
+        workspaceId,
+        member.membershipId,
+        newRole,
+        currentUserRole,
+        currentUserId,
+      );
       refetchMembers();
       toast.success(`${member.user.fullName}'s role updated to ${newRole}`);
     } catch (err) {
@@ -111,6 +121,8 @@ export const MemberList = ({
         toast.error("Cannot change the Owner's role.");
       } else if (apiErr?.code === "FORBIDDEN_ROLE_ASSIGNMENT") {
         toast.error("You don't have permission to assign this role.");
+      } else if (apiErr?.code === "WORKSPACE_ARCHIVED") {
+        toast.error("Workspace is archived. Membership changes are locked.");
       } else {
         toast.error("Failed to update role.");
       }
@@ -126,12 +138,21 @@ export const MemberList = ({
     )
       return;
     try {
-      await removeMember(workspaceId, member.membershipId);
+      await removeMember(
+        workspaceId,
+        member.membershipId,
+        currentUserRole,
+        currentUserId,
+      );
       refetchMembers();
       toast.success(`${member.user.fullName} removed`);
     } catch (err) {
       if ((err as ApiError)?.code === "CANNOT_REMOVE_OWNER") {
         toast.error("Cannot remove the workspace Owner. Transfer ownership first.");
+      } else if ((err as ApiError)?.code === "FORBIDDEN_REMOVE_MEMBER") {
+        toast.error("You don't have permission to remove this member.");
+      } else if ((err as ApiError)?.code === "WORKSPACE_ARCHIVED") {
+        toast.error("Workspace is archived. Membership changes are locked.");
       } else {
         toast.error("Failed to remove member.");
       }
@@ -140,7 +161,11 @@ export const MemberList = ({
 
   const handleResendInvite = async (inv: PendingInvitation) => {
     try {
-      await inviteMember(workspaceId, { email: inv.email, role: inv.role });
+      await inviteMember(
+        workspaceId,
+        { email: inv.email, role: inv.role },
+        currentUserRole,
+      );
       refetchInvitations();
       toast.success(`Invitation resent to ${inv.email}`);
     } catch (err) {
@@ -158,7 +183,7 @@ export const MemberList = ({
   const handleRevokeInvite = async (inv: PendingInvitation) => {
     if (!confirm(`Revoke invitation to ${inv.email}?`)) return;
     try {
-      await revokeInvitation(workspaceId, inv.id);
+      await revokeInvitation(workspaceId, inv.id, currentUserRole);
       refetchInvitations();
       toast.success("Invitation revoked");
     } catch {
@@ -374,6 +399,9 @@ export const MemberList = ({
               currentUserId={currentUserId}
               currentUserRole={currentUserRole}
               canManage={canManage}
+              canManageMember={(member) =>
+                canManageMember(currentUserRole, currentUserId, member)
+              }
               onRoleChange={handleRoleChange}
               onRemove={handleRemoveMember}
             />
@@ -385,6 +413,9 @@ export const MemberList = ({
                   currentUserId={currentUserId}
                   currentUserRole={currentUserRole}
                   canManage={canManage}
+                  canManageMember={(member) =>
+                    canManageMember(currentUserRole, currentUserId, member)
+                  }
                   onRoleChange={handleRoleChange}
                   onRemove={handleRemoveMember}
                 />
@@ -499,6 +530,7 @@ export const MemberList = ({
         open={showInviteDialog}
         onOpenChange={setShowInviteDialog}
         onInvited={refetchMembers}
+        workspaceType={workspaceType}
       />
     </div>
   );

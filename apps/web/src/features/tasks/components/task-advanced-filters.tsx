@@ -44,6 +44,7 @@ interface Props {
   allLabels: string[];
   /** Hide statuses entirely if the surface only shows board columns. */
   showStatus?: boolean;
+  statusOptions?: Array<{ status: TaskStatus; label: string }>;
 }
 
 const ALL_STATUSES: TaskStatus[] = ["backlog", "todo", "in_progress", "in_review", "done"];
@@ -55,12 +56,17 @@ export const TaskAdvancedFilters = ({
   members,
   allLabels,
   showStatus = true,
+  statusOptions,
 }: Props) => {
   const [open, setOpen] = useState(false);
   const count = activeFilterCount(value);
 
   const toggle = <T extends string>(arr: T[], item: T): T[] =>
     arr.includes(item) ? arr.filter((x) => x !== item) : [...arr, item];
+
+  const statuses = statusOptions?.length
+    ? statusOptions.map((s) => s.status)
+    : ALL_STATUSES;
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -107,7 +113,7 @@ export const TaskAdvancedFilters = ({
           {showStatus && (
             <Section title="Status">
               <div className="flex flex-wrap gap-1.5">
-                {ALL_STATUSES.map((s) => (
+                {statuses.map((s) => (
                   <Chip
                     key={s}
                     active={value.statuses.includes(s)}
@@ -115,7 +121,7 @@ export const TaskAdvancedFilters = ({
                       onChange({ ...value, statuses: toggle(value.statuses, s) })
                     }
                   >
-                    {STATUS_LABELS[s]}
+                    {statusOptions?.find((opt) => opt.status === s)?.label ?? STATUS_LABELS[s] ?? s}
                   </Chip>
                 ))}
               </div>

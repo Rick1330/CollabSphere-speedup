@@ -20,6 +20,7 @@ export {
   removeMember,
   revokeInvitation,
   sortMembers,
+  canManageMember,
   getAssignableRoles,
   getRoleLabel,
   getRoleDescription,

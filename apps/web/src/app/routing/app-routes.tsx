@@ -55,7 +55,6 @@ import AdminUserDetail from "@/features/admin/pages/AdminUserDetail";
 import AdminWorkspaces from "@/features/admin/pages/AdminWorkspaces";
 import AdminWorkspaceDetail from "@/features/admin/pages/AdminWorkspaceDetail";
 import AdminAudit from "@/features/admin/pages/AdminAudit";
-import AdminSettings from "@/features/admin/pages/AdminSettings";
 
 // Reviewer
 import ReviewQueue from "@/features/review/pages/ReviewQueue";
@@ -109,12 +108,7 @@ export function AppRoutes() {
         <Route path="/w/:workspaceId/tasks/:taskId" element={protect(<TaskDetail />)} />
         <Route
           path="/w/:workspaceId/tasks/new"
-          element={protect(
-            <WorkspaceComingSoon
-              title="New task"
-              description="Quick task creation lives inside the Tasks board — open it from the sidebar."
-            />,
-          )}
+          element={protect(<Tasks />)}
         />
         <Route path="/w/:workspaceId/members" element={protect(<Members />)} />
         <Route path="/w/:workspaceId/activity" element={protect(<Activity />)} />
@@ -131,7 +125,6 @@ export function AppRoutes() {
         <Route path="/admin/workspaces" element={protect(<AdminWorkspaces />)} />
         <Route path="/admin/workspaces/:workspaceId" element={protect(<AdminWorkspaceDetail />)} />
         <Route path="/admin/audit" element={protect(<AdminAudit />)} />
-        <Route path="/admin/settings" element={protect(<AdminSettings />)} />
 
         {/* Catch-all */}
         <Route path="*" element={<NotFound />} />

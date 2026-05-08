@@ -11,57 +11,70 @@ import { TaskCard } from "./task-card";
  *   - a status dot + label + count rhythm
  * Done columns recede slightly so attention sits on active work.
  */
-const STATUS_IDENTITY: Record<
-  TaskStatus,
-  {
-    rail: string;
-    headerBg: string;
-    dot: string;
-    label: string;
-    body: string;
-  }
-> = {
-  backlog: {
-    rail: "bg-stone-300",
-    headerBg: "bg-stone-100/70",
-    dot: "bg-stone-400",
-    label: "text-stone-600",
-    body: "bg-stone-50/40",
-  },
-  todo: {
+const TONE_IDENTITY = {
+  stone: {
     rail: "bg-stone-500",
     headerBg: "bg-stone-100",
     dot: "bg-stone-600",
     label: "text-stone-800",
     body: "bg-white",
   },
-  in_progress: {
+  teal: {
     rail: "bg-teal-500",
     headerBg: "bg-teal-50/80",
     dot: "bg-teal-500",
     label: "text-teal-800",
     body: "bg-teal-50/20",
   },
-  in_review: {
+  amber: {
     rail: "bg-amber-500",
     headerBg: "bg-amber-50/80",
     dot: "bg-amber-500",
     label: "text-amber-800",
     body: "bg-amber-50/20",
   },
-  done: {
+  emerald: {
     rail: "bg-emerald-500",
     headerBg: "bg-emerald-50/60",
     dot: "bg-emerald-500",
     label: "text-emerald-800",
     body: "bg-emerald-50/10",
   },
-};
+  rose: {
+    rail: "bg-rose-500",
+    headerBg: "bg-rose-50/70",
+    dot: "bg-rose-500",
+    label: "text-rose-800",
+    body: "bg-rose-50/20",
+  },
+  indigo: {
+    rail: "bg-indigo-500",
+    headerBg: "bg-indigo-50/70",
+    dot: "bg-indigo-500",
+    label: "text-indigo-800",
+    body: "bg-indigo-50/20",
+  },
+  violet: {
+    rail: "bg-violet-500",
+    headerBg: "bg-violet-50/70",
+    dot: "bg-violet-500",
+    label: "text-violet-800",
+    body: "bg-violet-50/20",
+  },
+  sky: {
+    rail: "bg-sky-500",
+    headerBg: "bg-sky-50/70",
+    dot: "bg-sky-500",
+    label: "text-sky-800",
+    body: "bg-sky-50/20",
+  },
+} as const;
 
 interface TaskColumnProps {
   status: TaskStatus;
   label: string;
   tasks: TaskBoardItem[];
+  tone?: keyof typeof TONE_IDENTITY;
   canCreate: boolean;
   onTaskClick: (taskId: string) => void;
   onAddTask: (status: TaskStatus) => void;
@@ -71,11 +84,12 @@ export const TaskColumn = ({
   status,
   label,
   tasks,
+  tone = "stone",
   canCreate,
   onTaskClick,
   onAddTask,
 }: TaskColumnProps) => {
-  const identity = STATUS_IDENTITY[status];
+  const identity = TONE_IDENTITY[tone] ?? TONE_IDENTITY.stone;
   return (
     <section
       role="region"

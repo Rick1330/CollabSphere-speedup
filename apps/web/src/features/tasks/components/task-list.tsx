@@ -6,8 +6,9 @@ import type { CommentNode } from "@/lib/mock-comments";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useHotkey } from "@/hooks/use-hotkey";
 import {
-  STATUS_LABELS,
   canTransition,
+  getStatusLabel,
+  getWorkspaceWorkflowColumns,
   getAllLabels,
   listTasksMap,
   listWorkspaceMembers,
@@ -40,7 +41,7 @@ interface TaskListProps {
 
 const CURRENT_USER_ID = "user-jane";
 
-const STATUS_ORDER: Record<TaskStatus, number> = {
+const STATUS_ORDER: Record<string, number> = {
   backlog: 0,
   todo: 1,
   in_progress: 2,
@@ -149,6 +150,7 @@ export const TaskList = ({
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [sheetLoading, setSheetLoading] = useState(false);
+  const [columns, setColumns] = useState(() => getWorkspaceWorkflowColumns(workspaceId));
 
   useEffect(() => {
     if (!selectedTaskId) return;
@@ -156,6 +158,10 @@ export const TaskList = ({
     const t = globalThis.setTimeout(() => setSheetLoading(false), 180);
     return () => globalThis.clearTimeout(t);
   }, [selectedTaskId]);
+
+  useEffect(() => {
+    setColumns(getWorkspaceWorkflowColumns(workspaceId));
+  }, [workspaceId]);
 
   const isArchived = workspaceStatus === "archived";
   const canCreate =
@@ -189,6 +195,7 @@ export const TaskList = ({
   const { rows, total } = useMemo(() => {
     const { search, filters, sortBy, sortOrder, page, pageSize } = state;
     const q = search.trim().toLowerCase();
+    const statusOrder = new Map(columns.map((c, idx) => [c.status, idx]));
 
     const filtered = allTasks.filter((t) => {
       if (q && !t.title.toLowerCase().includes(q)) return false;
@@ -226,7 +233,8 @@ export const TaskList = ({
           break;
         case "status":
           cmp =
-            (STATUS_ORDER[a.status] ?? 99) - (STATUS_ORDER[b.status] ?? 99);
+            (statusOrder.get(a.status) ?? STATUS_ORDER[a.status] ?? 99) -
+            (statusOrder.get(b.status) ?? STATUS_ORDER[b.status] ?? 99);
           if (cmp === 0) cmp = a.position - b.position;
           break;
         case "priority":
@@ -264,7 +272,7 @@ export const TaskList = ({
       updatedAt: t.updatedAt,
     }));
     return { rows, total: sorted.length };
-  }, [allTasks, state]);
+  }, [allTasks, state, columns]);
 
   const selectedTask = selectedTaskId ? (tasks[selectedTaskId] ?? null) : null;
 
@@ -294,17 +302,24 @@ export const TaskList = ({
       commentCount: 0,
       position: Object.keys(tasks).length + 1,
       description: params.description ?? null,
+      descriptionRich: params.description
+        ? [{ type: "text", text: params.description }]
+        : null,
       reporterId: CURRENT_USER_ID,
       reporterName: "Elshaday Tesfaye",
       createdAt: nowIso,
       updatedAt: nowIso,
       linkedResources: params.sourceLink ? [params.sourceLink] : [],
       comments: [],
+      parentTaskId: null,
+      subtaskIds: [],
+      blockedByTaskIds: [],
+      blockingTaskIds: [],
     };
     setTasks((prev) => ({ ...prev, [id]: newTask }));
     setShowCreateDialog(false);
     toast.success("Task created", {
-      description: `"${params.title}" added to ${STATUS_LABELS[params.status]}.`,
+      description: `"${params.title}" added to ${getStatusLabel(params.status, columns)}.`,
     });
   };
 
@@ -477,6 +492,7 @@ export const TaskList = ({
           canCreate={canCreate}
           onCreateTask={() => setShowCreateDialog(true)}
           realtime={realtime}
+          statusOptions={columns.map((c) => ({ status: c.status, label: c.label }))}
         />
       </div>
 
@@ -574,7 +590,8 @@ export const TaskList = ({
       {showCreateDialog && (
         <CreateTaskDialog
           workspaceId={workspaceId}
-          presetStatus="todo"
+          presetStatus={columns[0]?.status ?? "todo"}
+          statusOptions={columns.map((c) => ({ status: c.status, label: c.label }))}
           members={members}
           assignableMembers={
             ["OWNER", "ADMIN", "MANAGER"].includes(myRole)
@@ -603,6 +620,8 @@ export const TaskList = ({
         onEditComment={handleEditComment}
         onDeleteComment={handleDeleteComment}
         onUnlinkResource={handleUnlinkResource}
+        allTasks={tasks}
+        statusOptions={columns.map((c) => ({ status: c.status, label: c.label }))}
       />
     </div>
   );

@@ -4,8 +4,10 @@ import {
   AlertCircle,
   Archive,
   KanbanSquare,
+  Settings2,
   Plus,
   RefreshCw,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useHotkey } from "@/hooks/use-hotkey";
@@ -13,12 +15,13 @@ import type { CommentNode } from "@/lib/mock-comments";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   buildBoardData,
-  DEFAULT_BOARD_COLUMNS,
-  STATUS_LABELS,
   canTransition,
+  getStatusLabel,
+  getWorkspaceWorkflowColumns,
   getAllLabels,
   listTasksMap,
   listWorkspaceMembers,
+  setWorkspaceWorkflowColumns,
   transitionReason,
   type TaskAssignee,
   type TaskBoardColumn,
@@ -123,6 +126,9 @@ export const TaskBoard = ({
   );
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [sheetLoading, setSheetLoading] = useState(false);
+  const [columns, setColumns] = useState(() => getWorkspaceWorkflowColumns(workspaceId));
+  const [columnEditorOpen, setColumnEditorOpen] = useState(false);
+  const [newColumnLabel, setNewColumnLabel] = useState("");
 
   useEffect(() => {
     if (!selectedTaskId) return;
@@ -131,6 +137,10 @@ export const TaskBoard = ({
     return () => globalThis.clearTimeout(t);
   }, [selectedTaskId]);
 
+  useEffect(() => {
+    setColumns(getWorkspaceWorkflowColumns(workspaceId));
+  }, [workspaceId]);
+
   const isArchived = workspaceStatus === "archived";
   const canCreate =
     !isArchived && ["OWNER", "ADMIN", "MANAGER", "MEMBER"].includes(myRole);
@@ -138,8 +148,8 @@ export const TaskBoard = ({
   const allLabels = useMemo(() => getAllLabels(tasks), [tasks]);
 
   const boardColumns: TaskBoardColumn[] = useMemo(
-    () => buildBoardData(tasks, DEFAULT_BOARD_COLUMNS),
-    [tasks],
+    () => buildBoardData(tasks, columns),
+    [tasks, columns],
   );
 
   const filteredColumns = useMemo(() => {
@@ -197,7 +207,9 @@ export const TaskBoard = ({
     el?.select();
   });
   useHotkey("n", () => {
-    if (canCreate && !createDialogStatus) setCreateDialogStatus("todo");
+    if (canCreate && !createDialogStatus) {
+      setCreateDialogStatus(columns[0]?.status ?? "todo");
+    }
   });
   useHotkey("v b", () => navigate(`/w/${workspaceId}/tasks`));
   useHotkey("v l", () => navigate(`/w/${workspaceId}/tasks/list`));
@@ -230,17 +242,24 @@ export const TaskBoard = ({
       commentCount: 0,
       position: Object.keys(tasks).length + 1,
       description: params.description ?? null,
+      descriptionRich: params.description
+        ? [{ type: "text", text: params.description }]
+        : null,
       reporterId: CURRENT_USER_ID,
       reporterName: "Elshaday Tesfaye",
       createdAt: nowIso,
       updatedAt: nowIso,
       linkedResources: params.sourceLink ? [params.sourceLink] : [],
       comments: [],
+      parentTaskId: null,
+      subtaskIds: [],
+      blockedByTaskIds: [],
+      blockingTaskIds: [],
     };
     setTasks((prev) => ({ ...prev, [id]: newTask }));
     setCreateDialogStatus(null);
     toast.success("Task created", {
-      description: `"${params.title}" added to ${STATUS_LABELS[params.status]}.`,
+      description: `"${params.title}" added to ${getStatusLabel(params.status, columns)}.`,
     });
   };
 
@@ -357,6 +376,50 @@ export const TaskBoard = ({
 
   const sourceLink: SourceDocumentLink | null = null;
 
+  const handleUpdateColumnLabel = (status: TaskStatus, label: string) => {
+    const trimmed = label.trim();
+    if (!trimmed) return;
+    setColumns((prev) => {
+      const next = prev.map((c) => (c.status === status ? { ...c, label: trimmed } : c));
+      setWorkspaceWorkflowColumns(workspaceId, next);
+      return next;
+    });
+  };
+
+  const handleRemoveColumn = (status: TaskStatus) => {
+    setColumns((prev) => {
+      if (prev.length <= 2) return prev;
+      const fallback = prev[0]?.status ?? "todo";
+      setTasks((taskState) => {
+        const nextTasks = { ...taskState };
+        for (const task of Object.values(nextTasks)) {
+          if (task.status === status) task.status = fallback;
+        }
+        return nextTasks;
+      });
+      const next = prev.filter((c) => c.status !== status);
+      setWorkspaceWorkflowColumns(workspaceId, next);
+      return next;
+    });
+  };
+
+  const handleAddColumn = () => {
+    const trimmed = newColumnLabel.trim();
+    if (!trimmed) return;
+    const slug = trimmed
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "");
+    if (!slug) return;
+    setColumns((prev) => {
+      if (prev.some((c) => c.status === slug)) return prev;
+      const next = [...prev, { status: slug, label: trimmed, tone: "violet" as const }];
+      setWorkspaceWorkflowColumns(workspaceId, next);
+      return next;
+    });
+    setNewColumnLabel("");
+  };
+
   return (
     <div className="flex flex-col h-full min-h-0" aria-busy={isLoading}>
       {isArchived && (
@@ -409,8 +472,62 @@ export const TaskBoard = ({
           members={members}
           allLabels={allLabels}
           canCreate={canCreate}
-          onCreateTask={() => setCreateDialogStatus("todo")}
+          onCreateTask={() => setCreateDialogStatus(columns[0]?.status ?? "todo")}
           realtime={realtime}
+          statusOptions={columns.map((c) => ({ status: c.status, label: c.label }))}
+          statusActions={
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setColumnEditorOpen((v) => !v)}
+                className="h-8 px-2.5 rounded-lg border border-stone-200 bg-white text-[12px] font-medium text-stone-600 hover:text-stone-900 hover:bg-stone-50 dark:border-teal-900/70 dark:bg-teal-950/30 dark:text-teal-100 dark:hover:bg-teal-900/35 dark:hover:text-teal-50 transition-colors inline-flex items-center gap-1.5"
+              >
+                <Settings2 className="h-3.5 w-3.5" />
+                Columns
+              </button>
+              {columnEditorOpen && (
+                <div className="absolute right-0 z-20 mt-1.5 w-80 rounded-lg border border-stone-200 bg-white p-3 shadow-xl dark:border-teal-900/70 dark:bg-stone-950">
+                  <div className="text-[10px] font-mono uppercase tracking-wider text-stone-500 dark:text-teal-200/85 mb-2">
+                    Workflow columns
+                  </div>
+                  <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                    {columns.map((col) => (
+                      <div key={col.status} className="flex items-center gap-1.5">
+                        <input
+                          value={col.label}
+                          onChange={(e) => handleUpdateColumnLabel(col.status, e.target.value)}
+                          className="h-8 w-full rounded-md border border-stone-200 px-2 text-[12px] text-stone-700 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200 focus:border-teal-500/40 focus:ring-1 focus:ring-teal-500/20 focus:outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveColumn(col.status)}
+                          className="h-8 w-8 rounded-md border border-stone-200 text-stone-400 hover:text-rose-600 hover:bg-rose-50 hover:border-rose-200 dark:border-stone-700 dark:text-stone-400 dark:hover:bg-rose-950/30 dark:hover:border-rose-900"
+                          title={`Remove ${col.label}`}
+                        >
+                          <X className="h-3.5 w-3.5 mx-auto" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-3 flex items-center gap-1.5">
+                    <input
+                      value={newColumnLabel}
+                      onChange={(e) => setNewColumnLabel(e.target.value)}
+                      placeholder="New column label"
+                      className="h-8 w-full rounded-md border border-stone-200 px-2 text-[12px] text-stone-700 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200 dark:placeholder:text-stone-500 focus:border-teal-500/40 focus:ring-1 focus:ring-teal-500/20 focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddColumn}
+                      className="h-8 px-2 rounded-md bg-teal-600 text-white text-[11px] font-medium hover:bg-teal-500 dark:bg-emerald-700 dark:hover:bg-emerald-600"
+                    >
+                      Add
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          }
         />
       </div>
 
@@ -504,6 +621,7 @@ export const TaskBoard = ({
                   status={column.status}
                   label={column.label}
                   tasks={column.tasks}
+                  tone={columns.find((c) => c.status === column.status)?.tone}
                   canCreate={canCreate}
                   onTaskClick={(taskId) => setSelectedTaskId(taskId)}
                   onAddTask={(status) => setCreateDialogStatus(status)}
@@ -534,6 +652,7 @@ export const TaskBoard = ({
         <CreateTaskDialog
           workspaceId={workspaceId}
           presetStatus={createDialogStatus}
+          statusOptions={columns.map((c) => ({ status: c.status, label: c.label }))}
           members={members}
           assignableMembers={
             ["OWNER", "ADMIN", "MANAGER"].includes(myRole)
@@ -563,6 +682,8 @@ export const TaskBoard = ({
         onEditComment={handleEditComment}
         onDeleteComment={handleDeleteComment}
         onUnlinkResource={handleUnlinkResource}
+        allTasks={tasks}
+        statusOptions={columns.map((c) => ({ status: c.status, label: c.label }))}
       />
     </div>
   );

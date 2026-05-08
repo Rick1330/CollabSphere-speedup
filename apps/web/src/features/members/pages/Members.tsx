@@ -145,6 +145,7 @@ const Members = () => {
             workspaceStatus={workspace.status}
             currentUserId={CURRENT_USER_ID}
             currentUserRole={workspace.myRole}
+            workspaceType={workspace.type}
           />
         </main>
       </div>

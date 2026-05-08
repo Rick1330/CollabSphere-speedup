@@ -8,6 +8,7 @@
  */
 export {
   getWorkspaceLabels,
+  createWorkspaceLabel,
   findLabel,
   getLabelClasses,
   getLabelName,

@@ -17,6 +17,7 @@ interface MemberCardProps {
   currentUserId: string;
   currentUserRole: WorkspaceRole;
   canManage: boolean;
+  canManageMember: (member: WorkspaceMember) => boolean;
   onRoleChange: (member: WorkspaceMember, nextRole: WorkspaceRole) => void;
   onRemove: (member: WorkspaceMember) => void;
 }
@@ -26,13 +27,14 @@ export const MemberCard = ({
   currentUserId,
   currentUserRole,
   canManage,
+  canManageMember,
   onRoleChange,
   onRemove,
 }: MemberCardProps) => {
   const isOwner = member.role === "OWNER";
   const isSelf = member.user.id === currentUserId;
   const assignable = getAssignableRoles(currentUserRole);
-  const showActions = canManage && !isOwner && !isSelf;
+  const showActions = canManage && canManageMember(member);
 
   return (
     <div className="rounded-lg border border-stone-200 bg-white p-4 shadow-sm space-y-3">

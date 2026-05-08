@@ -81,6 +81,20 @@ export function getAssignableRoles(currentUserRole: WorkspaceRole): WorkspaceRol
   return [];
 }
 
+export function canManageMember(
+  actorRole: WorkspaceRole,
+  actorUserId: string,
+  target: WorkspaceMember,
+): boolean {
+  if (target.user.id === actorUserId) return false;
+  if (target.role === "OWNER") return false;
+  if (actorRole === "OWNER") return true;
+  if (actorRole === "ADMIN") {
+    return target.role === "MANAGER" || target.role === "MEMBER" || target.role === "VIEWER";
+  }
+  return false;
+}
+
 const ROLE_ORDER: Record<WorkspaceRole, number> = {
   OWNER: 0,
   ADMIN: 1,
@@ -479,13 +493,22 @@ export async function changeMemberRole(
   workspaceId: string,
   membershipId: string,
   role: WorkspaceRole,
+  actorRole: WorkspaceRole,
+  actorUserId: string,
 ): Promise<void> {
   await wait();
   const data = getOrInit(workspaceId);
+  if (data.archived) throw makeError("WORKSPACE_ARCHIVED", "Workspace is archived.");
   const member = data.members.find((m) => m.membershipId === membershipId);
   if (!member) throw makeError("NOT_FOUND", "Member not found.");
+  if (!canManageMember(actorRole, actorUserId, member)) {
+    throw makeError("FORBIDDEN_ROLE_ASSIGNMENT", "You don't have permission to change this role.");
+  }
   if (member.role === "OWNER") throw makeError("CANNOT_DEMOTE_OWNER", "Cannot demote the Owner.");
   if (role === "OWNER") throw makeError("FORBIDDEN_ROLE_ASSIGNMENT", "Cannot assign Owner role.");
+  if (!getAssignableRoles(actorRole).includes(role)) {
+    throw makeError("FORBIDDEN_ROLE_ASSIGNMENT", "You can't assign this role.");
+  }
   member.role = role;
   member.roleLabel = getWorkspaceRoleLabel(data.type, role);
 }
@@ -493,11 +516,17 @@ export async function changeMemberRole(
 export async function removeMember(
   workspaceId: string,
   membershipId: string,
+  actorRole: WorkspaceRole,
+  actorUserId: string,
 ): Promise<void> {
   await wait();
   const data = getOrInit(workspaceId);
+  if (data.archived) throw makeError("WORKSPACE_ARCHIVED", "Workspace is archived.");
   const member = data.members.find((m) => m.membershipId === membershipId);
   if (!member) throw makeError("NOT_FOUND", "Member not found.");
+  if (!canManageMember(actorRole, actorUserId, member)) {
+    throw makeError("FORBIDDEN_REMOVE_MEMBER", "You don't have permission to remove this member.");
+  }
   if (member.role === "OWNER") {
     throw makeError("CANNOT_REMOVE_OWNER", "Cannot remove the workspace Owner.");
   }
@@ -507,9 +536,13 @@ export async function removeMember(
 export async function inviteMember(
   workspaceId: string,
   params: { email: string; role: WorkspaceRole },
+  actorRole: WorkspaceRole,
 ): Promise<void> {
   await wait();
   const data = getOrInit(workspaceId);
+  if (!["OWNER", "ADMIN"].includes(actorRole)) {
+    throw makeError("FORBIDDEN_INVITE", "You don't have permission to invite members.");
+  }
   if (data.archived) {
     throw makeError(
       "WORKSPACE_ARCHIVED",
@@ -517,6 +550,9 @@ export async function inviteMember(
     );
   }
   const email = params.email.trim().toLowerCase();
+  if (!getAssignableRoles(actorRole).includes(params.role)) {
+    throw makeError("FORBIDDEN_ROLE_ASSIGNMENT", "You can't invite with this role.");
+  }
   if (data.members.some((m) => m.user.email.toLowerCase() === email)) {
     throw makeError("EMAIL_ALREADY_MEMBER", "Already a member.");
   }
@@ -554,8 +590,12 @@ export async function inviteMember(
 export async function revokeInvitation(
   workspaceId: string,
   invitationId: string,
+  actorRole: WorkspaceRole,
 ): Promise<void> {
   await wait();
+  if (!["OWNER", "ADMIN"].includes(actorRole)) {
+    throw makeError("FORBIDDEN_INVITE", "You don't have permission to revoke invitations.");
+  }
   const data = getOrInit(workspaceId);
   data.invitations = data.invitations.filter((i) => i.id !== invitationId);
 }

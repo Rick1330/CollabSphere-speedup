@@ -22,12 +22,7 @@ export const TaskCalendar = ({
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
 
-  const {
-    search,
-    setSearch,
-    filters,
-    setFilters,
-  } = useTaskListQueryState();
+  const { state, setSearch, setFilters } = useTaskListQueryState();
 
   const realtime = useTaskRealtime(workspaceId);
 
@@ -54,17 +49,17 @@ export const TaskCalendar = ({
       <div className="px-6 pt-6 flex-shrink-0">
         <TaskPageHeader
           workspaceId={workspaceId}
-          activeView="calendar"
+          activeView="list"
           totalTaskCount={tasks.length}
-          search={search}
+          search={state.search}
           onSearchChange={setSearch}
-          filters={filters}
+          filters={state.filters}
           onFiltersChange={setFilters}
           members={SEED_WORKSPACE_MEMBERS}
           allLabels={allLabels}
           canCreate={canCreate}
           onCreateTask={() => setIsCreateOpen(true)}
-          realtime={realtime.status}
+          realtime={realtime}
         />
       </div>
 
@@ -93,6 +88,7 @@ export const TaskCalendar = ({
           open={true}
           isArchived={isArchived}
           myRole={myRole}
+          allTasks={tasksMap}
           currentUserId="user-jane"
           members={SEED_WORKSPACE_MEMBERS}
           onClose={() => setActiveTaskId(null)}
@@ -111,19 +107,61 @@ export const TaskCalendar = ({
           onAddComment={() => {}}
           onEditComment={() => {}}
           onDeleteComment={() => {}}
+          statusOptions={[
+            { status: "todo", label: "To Do" },
+            { status: "in_progress", label: "In Progress" },
+            { status: "in_review", label: "Testing" },
+            { status: "done", label: "Done" },
+          ]}
         />
       )}
 
       {isCreateOpen && (
         <CreateTaskDialog
-          open={isCreateOpen}
-          onOpenChange={setIsCreateOpen}
           workspaceId={workspaceId}
+          presetStatus="todo"
+          statusOptions={[
+            { status: "todo", label: "To Do" },
+            { status: "in_progress", label: "In Progress" },
+            { status: "in_review", label: "Testing" },
+            { status: "done", label: "Done" },
+          ]}
           members={SEED_WORKSPACE_MEMBERS}
-          allLabels={allLabels}
-          defaultAssigneeId="user-jane"
-          onSubmit={(task) => {
-            setTasksMap((prev) => ({ ...prev, [task.id]: task as any }));
+          assignableMembers={SEED_WORKSPACE_MEMBERS}
+          currentUserId="user-jane"
+          onClose={() => setIsCreateOpen(false)}
+          onCreated={(task) => {
+            const id = `task-${Date.now()}`;
+            const assignee = task.assigneeId
+              ? SEED_WORKSPACE_MEMBERS.find((m) => m.id === task.assigneeId) ?? null
+              : null;
+            const now = new Date().toISOString();
+            setTasksMap((prev) => ({
+              ...prev,
+              [id]: {
+                id,
+                title: task.title,
+                status: task.status,
+                priority: task.priority,
+                assignee,
+                dueDate: task.dueDate ? new Date(task.dueDate).toISOString() : null,
+                labels: task.labels ?? [],
+                commentCount: 0,
+                position: Object.keys(prev).length + 1,
+                description: task.description ?? null,
+                descriptionRich: task.description ? [{ type: "text", text: task.description }] : null,
+                reporterId: "user-jane",
+                reporterName: "Elshaday Tesfaye",
+                createdAt: now,
+                updatedAt: now,
+                linkedResources: task.sourceLink ? [task.sourceLink] : [],
+                comments: [],
+                parentTaskId: null,
+                subtaskIds: [],
+                blockedByTaskIds: [],
+                blockingTaskIds: [],
+              },
+            }));
             setIsCreateOpen(false);
           }}
         />
