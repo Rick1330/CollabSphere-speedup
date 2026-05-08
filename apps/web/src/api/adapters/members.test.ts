@@ -61,13 +61,13 @@ describe("api/adapters/members", () => {
 
   it("inviteMember + fetchPendingInvitations + revokeInvitation round-trip", async () => {
     const ws = `test-ws-${Date.now()}`;
-    await inviteMember(ws, { email: "new.user@example.com", role: "MEMBER" });
+    await inviteMember(ws, { email: "new.user@example.com", role: "MEMBER" }, "OWNER");
     const pending = await fetchPendingInvitations(ws);
     const inv = pending.data.items.find((i) => i.email === "new.user@example.com");
     expect(inv).toBeDefined();
     expect(inv!.role).toBe("MEMBER");
 
-    await revokeInvitation(ws, inv!.id);
+    await revokeInvitation(ws, inv!.id, "OWNER");
     const after = await fetchPendingInvitations(ws);
     expect(after.data.items.find((i) => i.id === inv!.id)).toBeUndefined();
   });
@@ -76,7 +76,7 @@ describe("api/adapters/members", () => {
     const ws = `test-ws-dup-${Date.now()}`;
     // Auto-seeded workspace puts Elshaday Tesfaye as Owner with this email.
     await expect(
-      inviteMember(ws, { email: "jane@collabsphere.app", role: "MEMBER" }),
+      inviteMember(ws, { email: "jane@collabsphere.app", role: "MEMBER" }, "OWNER"),
     ).rejects.toThrow(/already a member/i);
   });
 });

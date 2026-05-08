@@ -47,6 +47,8 @@ export type TaskRole = "OWNER" | "ADMIN" | "MANAGER" | "MEMBER" | "VIEWER";
 interface Props {
   workspaceId: string;
   task: TaskDetail | null;
+  allTasks: Record<string, TaskDetail>;
+  statusOptions?: Array<{ status: TaskStatus; label: string }>;
   isLoading: boolean;
   open: boolean;
   isArchived: boolean;
@@ -60,11 +62,14 @@ interface Props {
   onEditComment: (taskId: string, commentId: string, body: CommentNode[]) => void;
   onDeleteComment: (taskId: string, commentId: string) => void;
   onUnlinkResource?: (taskId: string, resourceId: string) => void;
+  mode?: "sheet" | "page";
 }
 
 export const TaskDetailSheet = ({
   workspaceId,
   task,
+  allTasks,
+  statusOptions,
   isLoading,
   open,
   isArchived,
@@ -78,6 +83,7 @@ export const TaskDetailSheet = ({
   onEditComment,
   onDeleteComment,
   onUnlinkResource,
+  mode = "sheet",
 }: Props) => {
   const canManage = ["OWNER", "ADMIN", "MANAGER"].includes(myRole);
   const isReporter = task?.reporterId === currentUserId;
@@ -90,6 +96,46 @@ export const TaskDetailSheet = ({
     !isArchived && (canManage || (isReporter && myRole !== "VIEWER"));
   const canComment = !isArchived && myRole !== "VIEWER";
 
+  const content = isLoading || !task ? (
+    <div className="p-6 space-y-4">
+      <Skeleton className="h-6 w-3/4 rounded" />
+      <Skeleton className="h-4 w-1/2 rounded" />
+      <div className="grid grid-cols-2 gap-4 mt-6">
+        <Skeleton className="h-10 w-full rounded-lg" />
+        <Skeleton className="h-10 w-full rounded-lg" />
+      </div>
+      <Skeleton className="h-20 w-full rounded-lg mt-4" />
+    </div>
+  ) : (
+    <DetailBody
+      workspaceId={workspaceId}
+      task={task}
+      allTasks={allTasks}
+      statusOptions={statusOptions}
+      isArchived={isArchived}
+      canEdit={canEdit}
+      canChangeStatus={canChangeStatus}
+      canAssignOthers={canAssignOthers}
+      canSelfAssign={canSelfAssign}
+      canDelete={canDelete}
+      canComment={canComment}
+      currentUserId={currentUserId}
+      members={members}
+      onClose={onClose}
+      onDelete={onDelete}
+      onUpdate={onUpdate}
+      onAddComment={onAddComment}
+      onEditComment={onEditComment}
+      onDeleteComment={onDeleteComment}
+      onUnlinkResource={onUnlinkResource}
+      showOpenFullPageLink={mode === "sheet"}
+    />
+  );
+
+  if (mode === "page") {
+    return <div className="h-full min-h-0">{content}</div>;
+  }
+
   return (
     <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
       <SheetContent
@@ -100,39 +146,7 @@ export const TaskDetailSheet = ({
           <SheetTitle>{task?.title ?? "Task details"}</SheetTitle>
           <SheetDescription>View and edit task details.</SheetDescription>
         </SheetHeader>
-
-        {isLoading || !task ? (
-          <div className="p-6 space-y-4">
-            <Skeleton className="h-6 w-3/4 rounded" />
-            <Skeleton className="h-4 w-1/2 rounded" />
-            <div className="grid grid-cols-2 gap-4 mt-6">
-              <Skeleton className="h-10 w-full rounded-lg" />
-              <Skeleton className="h-10 w-full rounded-lg" />
-            </div>
-            <Skeleton className="h-20 w-full rounded-lg mt-4" />
-          </div>
-        ) : (
-          <DetailBody
-            workspaceId={workspaceId}
-            task={task}
-            isArchived={isArchived}
-            canEdit={canEdit}
-            canChangeStatus={canChangeStatus}
-            canAssignOthers={canAssignOthers}
-            canSelfAssign={canSelfAssign}
-            canDelete={canDelete}
-            canComment={canComment}
-            currentUserId={currentUserId}
-            members={members}
-            onClose={onClose}
-            onDelete={onDelete}
-            onUpdate={onUpdate}
-            onAddComment={onAddComment}
-            onEditComment={onEditComment}
-            onDeleteComment={onDeleteComment}
-            onUnlinkResource={onUnlinkResource}
-          />
-        )}
+        {content}
       </SheetContent>
     </Sheet>
   );
@@ -141,6 +155,8 @@ export const TaskDetailSheet = ({
 interface DetailBodyProps {
   workspaceId: string;
   task: TaskDetail;
+  allTasks: Record<string, TaskDetail>;
+  statusOptions?: Array<{ status: TaskStatus; label: string }>;
   isArchived: boolean;
   canEdit: boolean;
   canChangeStatus: boolean;
@@ -157,11 +173,14 @@ interface DetailBodyProps {
   onEditComment: (id: string, cid: string, body: CommentNode[]) => void;
   onDeleteComment: (id: string, cid: string) => void;
   onUnlinkResource?: (id: string, rid: string) => void;
+  showOpenFullPageLink?: boolean;
 }
 
 const DetailBody = ({
   workspaceId,
   task,
+  allTasks,
+  statusOptions,
   isArchived,
   canEdit,
   canChangeStatus,
@@ -178,11 +197,13 @@ const DetailBody = ({
   onEditComment,
   onDeleteComment,
   onUnlinkResource,
+  showOpenFullPageLink = true,
 }: DetailBodyProps) => {
   const [titleEditing, setTitleEditing] = useState(false);
   const [titleDraft, setTitleDraft] = useState(task.title);
   const [descEditing, setDescEditing] = useState(false);
   const [descDraft, setDescDraft] = useState(task.description ?? "");
+  const [descriptionMode, setDescriptionMode] = useState<"plain" | "checklist">("plain");
   const [transitionError, setTransitionError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -193,10 +214,12 @@ const DetailBody = ({
     setTransitionError(null);
   }, [task.id]);
 
-  const allowedNextStatuses = useMemo(
-    () => [task.status, ...VALID_TRANSITIONS[task.status]],
-    [task.status],
-  );
+  const allowedNextStatuses = useMemo(() => {
+    if (statusOptions && statusOptions.length > 0) {
+      return [task.status, ...statusOptions.map((s) => s.status)];
+    }
+    return [task.status, ...(VALID_TRANSITIONS[task.status] ?? [])];
+  }, [task.status, statusOptions]);
 
   const assignableMembers = useMemo(() => {
     if (canAssignOthers) return members;
@@ -215,6 +238,9 @@ const DetailBody = ({
   };
 
   const dueLabel = task.dueDate ? formatDueDate(task.dueDate) : null;
+  const subtaskIds = task.subtaskIds ?? [];
+  const blockedByTaskIds = task.blockedByTaskIds ?? [];
+  const blockingTaskIds = task.blockingTaskIds ?? [];
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -281,15 +307,16 @@ const DetailBody = ({
               <Lock className="h-2.5 w-2.5" /> Read-only
             </span>
           )}
-          <Link
-            to={`/w/${workspaceId}/tasks/${task.id}`}
-            onClick={onClose}
-            className="ml-auto inline-flex items-center gap-1 text-[11px] font-medium text-stone-500 hover:text-stone-900 px-2 py-1 rounded-md hover:bg-stone-100 transition-colors"
-            title="Open full task page"
-          >
-            <ExternalLink className="h-3 w-3" />
-            Open full page
-          </Link>
+          {showOpenFullPageLink && (
+            <Link
+              to={`/w/${workspaceId}/tasks/${task.id}`}
+              className="ml-auto inline-flex items-center gap-1 text-[11px] font-medium text-stone-500 hover:text-stone-900 px-2 py-1 rounded-md hover:bg-stone-100 transition-colors"
+              title="Open full task page"
+            >
+              <ExternalLink className="h-3 w-3" />
+              Open full page
+            </Link>
+          )}
         </div>
       </div>
 
@@ -306,12 +333,12 @@ const DetailBody = ({
                 className="w-full h-9 rounded-lg border border-stone-200 bg-white px-3 text-sm text-stone-700 focus:border-teal-500/40 focus:ring-1 focus:ring-teal-500/20 focus:outline-none"
                 aria-label="Change task status"
               >
-                {(["backlog", "todo", "in_progress", "in_review", "done"] as TaskStatus[]).map(
+                {(statusOptions?.map((s) => s.status) ?? ["backlog", "todo", "in_progress", "in_review", "done"]).map(
                   (s) => {
                     const allowed = allowedNextStatuses.includes(s);
                     return (
                       <option key={s} value={s} disabled={!allowed}>
-                        {STATUS_LABELS[s]}
+                        {statusOptions?.find((opt) => opt.status === s)?.label ?? STATUS_LABELS[s] ?? s}
                         {!allowed ? " — not allowed from here" : ""}
                       </option>
                     );
@@ -491,6 +518,14 @@ const DetailBody = ({
           <div className="flex items-center justify-between mb-1.5">
             <SectionLabel className="mb-0">Description</SectionLabel>
             {canEdit && !descEditing && (
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setDescriptionMode((m) => (m === "plain" ? "checklist" : "plain"))}
+                  className="h-6 px-2 rounded-md text-[10px] font-mono uppercase tracking-wider text-stone-400 hover:text-stone-700 hover:bg-stone-100"
+                >
+                  {descriptionMode === "plain" ? "Checklist mode" : "Plain mode"}
+                </button>
               <button
                 type="button"
                 onClick={() => setDescEditing(true)}
@@ -498,6 +533,7 @@ const DetailBody = ({
               >
                 <Pencil className="h-3 w-3" /> Edit
               </button>
+              </div>
             )}
           </div>
           {descEditing ? (
@@ -505,9 +541,13 @@ const DetailBody = ({
               <textarea
                 value={descDraft}
                 onChange={(e) => setDescDraft(e.target.value)}
-                rows={5}
+                rows={descriptionMode === "plain" ? 6 : 9}
                 autoFocus
-                placeholder="Add description… (plain text)"
+                placeholder={
+                  descriptionMode === "plain"
+                    ? "Add long-form planning notes, context, and acceptance criteria..."
+                    : "- [ ] Define acceptance criteria\n- [ ] Build API endpoint\n- [ ] QA regression checklist"
+                }
                 className="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900 focus:border-teal-500/40 focus:ring-1 focus:ring-teal-500/20 focus:outline-none resize-none"
               />
               <div className="flex justify-end gap-1.5">
@@ -544,6 +584,179 @@ const DetailBody = ({
               No description provided.
             </p>
           )}
+        </div>
+
+        <Divider />
+
+        {/* Parent / subtasks / dependencies */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <div>
+            <SectionLabel>Parent task</SectionLabel>
+            <select
+              value={task.parentTaskId ?? ""}
+              onChange={(e) => {
+                const parentTaskId = e.target.value || null;
+                if (parentTaskId === task.id) return;
+                onUpdate(task.id, { parentTaskId });
+              }}
+              disabled={!canEdit}
+              className="w-full h-9 rounded-lg border border-stone-200 bg-white px-3 text-sm text-stone-700 focus:border-teal-500/40 focus:ring-1 focus:ring-teal-500/20 focus:outline-none disabled:opacity-60"
+            >
+              <option value="">No parent</option>
+              {Object.values(allTasks)
+                .filter((candidate) => candidate.id !== task.id)
+                .map((candidate) => (
+                  <option key={candidate.id} value={candidate.id}>
+                    {candidate.title}
+                  </option>
+                ))}
+            </select>
+          </div>
+
+          <div>
+            <SectionLabel>Subtasks</SectionLabel>
+            <select
+              value=""
+              onChange={(e) => {
+                const id = e.target.value;
+                if (!id) return;
+                if (subtaskIds.includes(id) || id === task.id) return;
+                onUpdate(task.id, { subtaskIds: [...subtaskIds, id] });
+                onUpdate(id, { parentTaskId: task.id });
+              }}
+              disabled={!canEdit}
+              className="w-full h-9 rounded-lg border border-stone-200 bg-white px-3 text-sm text-stone-700 focus:border-teal-500/40 focus:ring-1 focus:ring-teal-500/20 focus:outline-none disabled:opacity-60"
+            >
+              <option value="">Add subtask…</option>
+              {Object.values(allTasks)
+                .filter((candidate) => candidate.id !== task.id && !subtaskIds.includes(candidate.id))
+                .map((candidate) => (
+                  <option key={candidate.id} value={candidate.id}>
+                    {candidate.title}
+                  </option>
+                ))}
+            </select>
+            {subtaskIds.length > 0 && (
+              <div className="mt-2 space-y-1.5">
+                {subtaskIds.map((id) => {
+                  const sub = allTasks[id];
+                  if (!sub) return null;
+                  return (
+                    <div key={id} className="flex items-center justify-between rounded-md border border-stone-200 bg-stone-50/70 px-2 py-1.5">
+                      <span className="text-[12px] text-stone-700 truncate">{sub.title}</span>
+                      {canEdit && (
+                        <button
+                          type="button"
+                          onClick={() => onUpdate(task.id, { subtaskIds: subtaskIds.filter((t) => t !== id) })}
+                          className="text-[11px] text-rose-600 hover:text-rose-700"
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div>
+            <SectionLabel>Blocked by</SectionLabel>
+            <select
+              value=""
+              onChange={(e) => {
+                const id = e.target.value;
+                if (!id || id === task.id || blockedByTaskIds.includes(id)) return;
+                onUpdate(task.id, { blockedByTaskIds: [...blockedByTaskIds, id] });
+              }}
+              disabled={!canEdit}
+              className="w-full h-9 rounded-lg border border-stone-200 bg-white px-3 text-sm text-stone-700 focus:border-teal-500/40 focus:ring-1 focus:ring-teal-500/20 focus:outline-none disabled:opacity-60"
+            >
+              <option value="">Add blocker…</option>
+              {Object.values(allTasks)
+                .filter((candidate) => candidate.id !== task.id && !blockedByTaskIds.includes(candidate.id))
+                .map((candidate) => (
+                  <option key={candidate.id} value={candidate.id}>
+                    {candidate.title}
+                  </option>
+                ))}
+            </select>
+            {blockedByTaskIds.length > 0 && (
+              <div className="mt-2 space-y-1.5">
+                {blockedByTaskIds.map((id) => {
+                  const dep = allTasks[id];
+                  if (!dep) return null;
+                  return (
+                    <div key={id} className="flex items-center justify-between rounded-md border border-stone-200 bg-rose-50/40 px-2 py-1.5">
+                      <span className="text-[12px] text-stone-700 truncate">{dep.title}</span>
+                      {canEdit && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onUpdate(task.id, {
+                              blockedByTaskIds: blockedByTaskIds.filter((t) => t !== id),
+                            })
+                          }
+                          className="text-[11px] text-rose-600 hover:text-rose-700"
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div>
+            <SectionLabel>Blocking</SectionLabel>
+            <select
+              value=""
+              onChange={(e) => {
+                const id = e.target.value;
+                if (!id || id === task.id || blockingTaskIds.includes(id)) return;
+                onUpdate(task.id, { blockingTaskIds: [...blockingTaskIds, id] });
+              }}
+              disabled={!canEdit}
+              className="w-full h-9 rounded-lg border border-stone-200 bg-white px-3 text-sm text-stone-700 focus:border-teal-500/40 focus:ring-1 focus:ring-teal-500/20 focus:outline-none disabled:opacity-60"
+            >
+              <option value="">Add dependent task…</option>
+              {Object.values(allTasks)
+                .filter((candidate) => candidate.id !== task.id && !blockingTaskIds.includes(candidate.id))
+                .map((candidate) => (
+                  <option key={candidate.id} value={candidate.id}>
+                    {candidate.title}
+                  </option>
+                ))}
+            </select>
+            {blockingTaskIds.length > 0 && (
+              <div className="mt-2 space-y-1.5">
+                {blockingTaskIds.map((id) => {
+                  const dep = allTasks[id];
+                  if (!dep) return null;
+                  return (
+                    <div key={id} className="flex items-center justify-between rounded-md border border-stone-200 bg-violet-50/40 px-2 py-1.5">
+                      <span className="text-[12px] text-stone-700 truncate">{dep.title}</span>
+                      {canEdit && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onUpdate(task.id, {
+                              blockingTaskIds: blockingTaskIds.filter((t) => t !== id),
+                            })
+                          }
+                          className="text-[11px] text-violet-600 hover:text-violet-700"
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
 
         <Divider />

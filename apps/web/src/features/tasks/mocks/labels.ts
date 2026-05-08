@@ -13,7 +13,7 @@ export interface WorkspaceLabel {
   description?: string;
 }
 
-const LABELS: WorkspaceLabel[] = [
+const BASE_LABELS: WorkspaceLabel[] = [
   // Engineering
   { value: "frontend", name: "Frontend", tone: "indigo", description: "UI, components, styles." },
   { value: "backend", name: "Backend", tone: "emerald", description: "APIs, services, jobs." },
@@ -31,13 +31,70 @@ const LABELS: WorkspaceLabel[] = [
   { value: "triage", name: "Triage", tone: "rose", description: "Needs investigation." },
 ];
 
+const CUSTOM_LABELS_BY_WORKSPACE: Record<string, WorkspaceLabel[]> = {};
+
+function slugifyLabel(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
+}
+
+function pickToneForLabel(name: string): WorkspaceLabel["tone"] {
+  const tones: WorkspaceLabel["tone"][] = [
+    "teal",
+    "indigo",
+    "amber",
+    "rose",
+    "emerald",
+    "stone",
+    "violet",
+    "sky",
+  ];
+  let acc = 0;
+  for (const ch of name) acc += ch.charCodeAt(0);
+  return tones[acc % tones.length];
+}
+
 export function getWorkspaceLabels(_workspaceId: string): WorkspaceLabel[] {
-  // In a real app, this would be per-workspace.
-  return LABELS;
+  const custom = CUSTOM_LABELS_BY_WORKSPACE[_workspaceId] ?? [];
+  return [...BASE_LABELS, ...custom];
+}
+
+export function createWorkspaceLabel(
+  workspaceId: string,
+  name: string,
+): WorkspaceLabel | null {
+  const trimmed = name.trim();
+  if (!trimmed) return null;
+
+  const slug = slugifyLabel(trimmed);
+  if (!slug) return null;
+
+  const existing = getWorkspaceLabels(workspaceId).find(
+    (l) => l.value === slug || l.name.toLowerCase() === trimmed.toLowerCase(),
+  );
+  if (existing) return existing;
+
+  const next: WorkspaceLabel = {
+    value: slug,
+    name: trimmed,
+    tone: pickToneForLabel(trimmed),
+    description: "Custom workspace label.",
+  };
+  if (!CUSTOM_LABELS_BY_WORKSPACE[workspaceId]) {
+    CUSTOM_LABELS_BY_WORKSPACE[workspaceId] = [];
+  }
+  CUSTOM_LABELS_BY_WORKSPACE[workspaceId].push(next);
+  return next;
 }
 
 export function findLabel(value: string): WorkspaceLabel | undefined {
-  return LABELS.find((l) => l.value === value);
+  return [...BASE_LABELS, ...Object.values(CUSTOM_LABELS_BY_WORKSPACE).flat()].find(
+    (l) => l.value === value,
+  );
 }
 
 const TONE_CLASSES: Record<WorkspaceLabel["tone"], string> = {

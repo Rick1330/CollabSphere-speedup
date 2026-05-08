@@ -261,18 +261,8 @@ export const AdminDashboard = () => {
           </AdminSection>
         </div>
 
-        {/* System column */}
+        {/* Operations column */}
         <div className="space-y-4">
-          <AdminSection title="System status" dense>
-            <ul className="divide-y divide-stone-100 text-[12px]">
-              <SystemRow label="API" value="v1.4.2" tone="success" />
-              <SystemRow label="Database" value="healthy" tone="success" dot />
-              <SystemRow label="Storage" value="healthy" tone="success" dot />
-              <SystemRow label="Region" value="us-east-1" tone="info" />
-              <SystemRow label="Environment" value="production" tone="info" />
-            </ul>
-          </AdminSection>
-
           <AdminSection title="Storage" dense>
             <div className="p-3">
               {stats.isLoading || !data ? (
@@ -331,27 +321,6 @@ export const AdminDashboard = () => {
     </div>
   );
 };
-
-const SystemRow = ({
-  label,
-  value,
-  tone,
-  dot,
-}: {
-  label: string;
-  value: string;
-  tone: "success" | "info" | "warn" | "error";
-  dot?: boolean;
-}) => (
-  <li className="flex items-center justify-between px-3 py-2">
-    <span className="font-mono text-[10px] text-stone-500 tracking-wider uppercase">
-      {label}
-    </span>
-    <SeverityChip tone={tone} dot={dot}>
-      {value}
-    </SeverityChip>
-  </li>
-);
 
 const PostureRow = ({
   icon: Icon,

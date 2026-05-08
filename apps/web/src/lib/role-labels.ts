@@ -29,8 +29,8 @@ const TYPE_LABEL_MAP: Record<WorkspaceTypeForLabels, Record<WorkspaceRole, strin
   },
   academic: {
     OWNER: "INSTRUCTOR",
-    ADMIN: "INSTRUCTOR",
-    MANAGER: "ADVISOR",
+    ADMIN: "ADVISOR",
+    MANAGER: "SUPERVISOR",
     MEMBER: "STUDENT",
     VIEWER: "AUDITOR",
   },
@@ -59,4 +59,51 @@ export function getWorkspaceRoleLabel(
 export function getSupervisorAlias(workspaceType: WorkspaceTypeForLabels): string {
   if (workspaceType === "academic") return "ADVISOR";
   return "REVIEWER";
+}
+
+export function getWorkspaceRoleDescription(
+  workspaceType: WorkspaceTypeForLabels,
+  role: WorkspaceRole,
+): string {
+  if (workspaceType === "academic") {
+    switch (role) {
+      case "OWNER":
+      case "ADMIN":
+        return "Lead instructor controls grading flow, membership, and workspace policy.";
+      case "MANAGER":
+        return "Supervisor/advisor can guide reviews, assign tasks, and moderate submissions.";
+      case "MEMBER":
+        return "Student can submit work, collaborate on documents, and complete tasks.";
+      case "VIEWER":
+        return "Observer can review activity and read artifacts without editing.";
+    }
+  }
+
+  if (workspaceType === "professional") {
+    switch (role) {
+      case "OWNER":
+        return "Workspace owner with full governance, billing, and transfer rights.";
+      case "ADMIN":
+        return "Tech lead/admin can manage team membership and workspace settings.";
+      case "MANAGER":
+        return "Manager can coordinate delivery, assign work, and review outcomes.";
+      case "MEMBER":
+        return "Contributor can create and edit documents/tasks.";
+      case "VIEWER":
+        return "Stakeholder has read-only visibility.";
+    }
+  }
+
+  switch (role) {
+    case "OWNER":
+      return "Full control including ownership transfer and workspace deletion.";
+    case "ADMIN":
+      return "Can manage workspace settings, members, and all content.";
+    case "MANAGER":
+      return "Can manage tasks, assign work, and review documents.";
+    case "MEMBER":
+      return "Can create and edit documents and tasks.";
+    case "VIEWER":
+      return "Can view all content but cannot edit or create.";
+  }
 }

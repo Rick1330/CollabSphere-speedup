@@ -4,7 +4,6 @@ import {
   FolderOpen,
   LayoutDashboard,
   ScrollText,
-  Settings as SettingsIcon,
   Shield,
   Users,
   type LucideIcon,
@@ -23,7 +22,6 @@ const ADMIN_NAV: AdminNavItem[] = [
   { to: "/admin/users", label: "Users", icon: Users },
   { to: "/admin/workspaces", label: "Workspaces", icon: FolderOpen },
   { to: "/admin/audit", label: "Audit Log", icon: ScrollText },
-  { to: "/admin/settings", label: "System", icon: SettingsIcon },
 ];
 
 export const AdminNav = () => {

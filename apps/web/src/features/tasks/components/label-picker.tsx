@@ -3,6 +3,7 @@ import { Check, Plus, X } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import {
+  createWorkspaceLabel,
   getLabelClasses,
   getLabelName,
   getWorkspaceLabels,
@@ -36,6 +37,12 @@ export const LabelPicker = ({
   const filtered = q
     ? all.filter((l) => l.name.toLowerCase().includes(q) || l.value.includes(q))
     : all;
+  const canCreateLabel =
+    q.length > 1 &&
+    !all.some(
+      (l) =>
+        l.name.toLowerCase() === q || l.value.toLowerCase() === q,
+    );
 
   const toggle = (slug: string) => {
     if (value.includes(slug)) {
@@ -99,6 +106,29 @@ export const LabelPicker = ({
               />
             </div>
             <ul className="max-h-64 overflow-y-auto py-1">
+              {canCreateLabel && (
+                <li>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const created = createWorkspaceLabel(workspaceId, query.trim());
+                      if (!created) return;
+                      if (!value.includes(created.value)) {
+                        onChange([...value, created.value]);
+                      }
+                      setQuery("");
+                    }}
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[12.5px] hover:bg-stone-50 border-b border-stone-100"
+                  >
+                    <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-teal-100 text-teal-700">
+                      <Plus className="h-3 w-3" />
+                    </span>
+                    <span className="text-stone-700">
+                      Create label: <strong>{query.trim()}</strong>
+                    </span>
+                  </button>
+                </li>
+              )}
               {filtered.length === 0 && (
                 <li className="px-3 py-4 text-[12px] text-stone-400 italic text-center">
                   No labels found.

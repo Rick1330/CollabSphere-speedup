@@ -2,7 +2,7 @@ import { cn } from "@/lib/utils";
 import type { TaskStatus } from "@/api/adapters/tasks";
 
 const STATUS_CONFIG: Record<
-  TaskStatus,
+  string,
   { color: string; bg: string; border: string; label: string }
 > = {
   backlog: {
@@ -43,7 +43,12 @@ interface TaskStatusBadgeProps {
 }
 
 export const TaskStatusBadge = ({ status, className }: TaskStatusBadgeProps) => {
-  const config = STATUS_CONFIG[status];
+  const config = STATUS_CONFIG[status] ?? {
+    color: "text-violet-700",
+    bg: "bg-violet-50",
+    border: "border-violet-200",
+    label: status.replace(/[_-]/g, " ").toUpperCase(),
+  };
   return (
     <span
       className={cn(

@@ -18,6 +18,7 @@ interface MemberTableProps {
   currentUserId: string;
   currentUserRole: WorkspaceRole;
   canManage: boolean;
+  canManageMember: (member: WorkspaceMember) => boolean;
   onRoleChange: (member: WorkspaceMember, nextRole: WorkspaceRole) => void;
   onRemove: (member: WorkspaceMember) => void;
 }
@@ -27,6 +28,7 @@ export const MemberTable = ({
   currentUserId,
   currentUserRole,
   canManage,
+  canManageMember,
   onRoleChange,
   onRemove,
 }: MemberTableProps) => {
@@ -57,7 +59,7 @@ export const MemberTable = ({
           {members.map((member) => {
             const isOwner = member.role === "OWNER";
             const isSelf = member.user.id === currentUserId;
-            const showSelect = canManage && !isOwner && !isSelf;
+            const showSelect = canManage && canManageMember(member);
             const currentRoleAssignable = assignable.includes(member.role);
 
             return (
@@ -137,7 +139,7 @@ export const MemberTable = ({
 
                 {canManage && (
                   <td className="px-4 py-3 text-right">
-                    {!isOwner && !isSelf ? (
+                    {canManageMember(member) ? (
                       <button
                         onClick={() => onRemove(member)}
                         className={cn(

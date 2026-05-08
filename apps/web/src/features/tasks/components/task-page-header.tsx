@@ -14,7 +14,7 @@ import {
   ActiveFilterPills,
   type AdvancedFilterState,
 } from "./task-advanced-filters";
-import type { TaskAssignee } from "@/api/adapters/tasks";
+import type { TaskAssignee, TaskStatus } from "@/api/adapters/tasks";
 import type { RealtimeStatus } from "@/features/tasks/hooks/use-task-realtime";
 
 interface TaskPageHeaderProps {
@@ -31,6 +31,8 @@ interface TaskPageHeaderProps {
   canCreate: boolean;
   onCreateTask?: () => void;
   realtime: RealtimeStatus;
+  statusOptions?: Array<{ status: TaskStatus; label: string }>;
+  statusActions?: React.ReactNode;
 }
 
 /**
@@ -61,6 +63,8 @@ export const TaskPageHeader = ({
   canCreate,
   onCreateTask,
   realtime,
+  statusOptions,
+  statusActions,
 }: TaskPageHeaderProps) => {
   const segBase =
     "h-7 px-2.5 text-[11px] font-medium border flex items-center gap-1.5 transition-colors";
@@ -157,7 +161,10 @@ export const TaskPageHeader = ({
             members={members}
             allLabels={allLabels}
             showStatus={activeView === "list"}
+            statusOptions={statusOptions}
           />
+
+          {statusActions}
 
           {canCreate && (
             <button

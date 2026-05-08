@@ -8,6 +8,8 @@ import {
   Lock,
   FilePlus,
   FolderPlus,
+  Search,
+  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { relativeTime, fullDateTime } from "@/lib/format";
@@ -65,6 +67,27 @@ const countDocs = (nodes: TreeNode[]): number => {
   return count;
 };
 
+const filterTree = (
+  nodes: TreeNode[],
+  query: string,
+  status: "all" | DocStatus,
+): TreeNode[] => {
+  const q = query.trim().toLowerCase();
+  return nodes.flatMap((node) => {
+    if (node.type === "document") {
+      const matchesQuery = q.length === 0 || node.title.toLowerCase().includes(q);
+      const matchesStatus = status === "all" || node.status === status;
+      return matchesQuery && matchesStatus ? [node] : [];
+    }
+    const children = filterTree(node.children, query, status);
+    const folderMatches = q.length > 0 && node.name.toLowerCase().includes(q);
+    if (children.length > 0 || folderMatches) {
+      return [{ ...node, children }];
+    }
+    return [];
+  });
+};
+
 // Mutate helpers (returns new tree)
 const insertChild = (nodes: TreeNode[], parentId: string | null, child: TreeNode): TreeNode[] => {
   if (parentId === null) return [...nodes, child];
@@ -114,6 +137,8 @@ export const DocumentTree = ({
   const navigate = useNavigate();
   const [tree, setTree] = useState<TreeNode[]>(initialTree);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | DocStatus>("all");
 
   // Expand all on first load
   useEffect(() => {
@@ -123,6 +148,12 @@ export const DocumentTree = ({
   }, [initialTree]);
 
   const totalDocs = useMemo(() => countDocs(tree), [tree]);
+  const visibleTree = useMemo(
+    () => filterTree(tree, searchQuery, statusFilter),
+    [tree, searchQuery, statusFilter],
+  );
+  const visibleDocs = useMemo(() => countDocs(visibleTree), [visibleTree]);
+  const hasFilters = searchQuery.trim().length > 0 || statusFilter !== "all";
 
   const [createDocTarget, setCreateDocTarget] = useState<{
     parentId: string | null;
@@ -217,9 +248,12 @@ export const DocumentTree = ({
     <>
       <div className="rounded-xl border border-stone-200 bg-white shadow-sm overflow-hidden">
         {/* Tree header */}
-        <div className="flex items-center justify-between px-4 py-2.5 border-b border-stone-100 bg-stone-50/50">
+        <div className="px-4 py-2.5 border-b border-stone-100 bg-stone-50/50 space-y-2.5">
+          <div className="flex items-center justify-between">
           <span className="font-mono text-[10px] text-stone-400 tracking-[0.1em] uppercase">
-            Workspace files · {totalDocs} {totalDocs === 1 ? "doc" : "docs"}
+            Workspace files · {visibleDocs}
+            {hasFilters ? ` of ${totalDocs}` : ""}{" "}
+            {visibleDocs === 1 ? "doc" : "docs"}
           </span>
           <div className="flex items-center gap-2">
             <button
@@ -243,23 +277,65 @@ export const DocumentTree = ({
             </button>
           </div>
         </div>
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+            <div className="relative flex-1">
+              <Search className="h-3.5 w-3.5 text-stone-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+              <input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search files and folders"
+                className="h-8 w-full rounded-md border border-stone-200 bg-white pl-8 pr-8 text-[12px] text-stone-700 placeholder:text-stone-400 focus:border-teal-500/40 focus:ring-1 focus:ring-teal-500/20 focus:outline-none"
+                aria-label="Search document tree"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery("")}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-700"
+                  aria-label="Clear search"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as "all" | DocStatus)}
+              className="h-8 sm:w-40 rounded-md border border-stone-200 bg-white px-2 text-[12px] text-stone-700 focus:border-teal-500/40 focus:ring-1 focus:ring-teal-500/20 focus:outline-none"
+              aria-label="Filter documents by status"
+            >
+              <option value="all">All statuses</option>
+              <option value="draft">Draft</option>
+              <option value="submitted">Submitted</option>
+              <option value="changes_requested">Changes requested</option>
+              <option value="approved">Approved</option>
+              <option value="archived">Archived</option>
+            </select>
+          </div>
+        </div>
 
         {/* Tree */}
         <div role="tree" aria-label="Document tree" className="py-1">
-          {tree.length === 0 ? (
+          {visibleTree.length === 0 ? (
             <div className="py-12 text-center">
               <div className="h-10 w-10 rounded-xl bg-stone-100 border border-stone-200 flex items-center justify-center mx-auto">
                 <FileText className="h-5 w-5 text-stone-400" aria-hidden="true" />
               </div>
               <h3 className="text-sm font-semibold text-stone-900 mt-4">
-                {canCreate ? "No documents yet" : "No documents"}
+                {hasFilters
+                  ? "No matching results"
+                  : canCreate
+                    ? "No documents yet"
+                    : "No documents"}
               </h3>
               <p className="text-sm text-stone-500 mt-1.5 max-w-sm mx-auto">
-                {canCreate
-                  ? "Create your first document to start collaborating with your team."
-                  : "No documents have been created in this workspace yet."}
+                {hasFilters
+                  ? "Try a different search or status filter."
+                  : canCreate
+                    ? "Create your first document to start collaborating with your team."
+                    : "No documents have been created in this workspace yet."}
               </p>
-              {canCreate && (
+              {canCreate && !hasFilters && (
                 <div className="flex items-center justify-center gap-2 mt-5">
                   <button
                     type="button"
@@ -281,7 +357,7 @@ export const DocumentTree = ({
               )}
             </div>
           ) : (
-            tree.map((node) =>
+            visibleTree.map((node) =>
               node.type === "folder" ? (
                 <TreeFolderRow
                   key={node.id}

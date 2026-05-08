@@ -57,6 +57,10 @@ function groupEventsByDate(events: ActivityEvent[]): Map<string, ActivityEvent[]
 
 export function ActivityFeed({ workspaceId }: ActivityFeedProps) {
   const [page, setPage] = useState(1);
+  const [category, setCategory] = useState<"all" | "tasks" | "documents" | "members">(
+    "all",
+  );
+  const [query, setQuery] = useState("");
 
   const { data, isLoading, isError, refetch, isFetching } = useQuery({
     queryKey: ["workspace", workspaceId, "activity", "full", page],
@@ -69,10 +73,27 @@ export function ActivityFeed({ workspaceId }: ActivityFeedProps) {
   const totalPages = pagination?.totalPages ?? 1;
   const totalCount = pagination?.totalItems;
 
-  const groupedEvents = useMemo(() => groupEventsByDate(events), [events]);
+  const filteredEvents = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    return events.filter((event) => {
+      const inCategory =
+        category === "all" ||
+        (category === "tasks" && event.eventKey.startsWith("task.")) ||
+        (category === "documents" && event.eventKey.startsWith("document.")) ||
+        (category === "members" && event.eventKey.includes("member"));
+      if (!inCategory) return false;
+      if (!normalizedQuery) return true;
+      return (
+        event.summary.toLowerCase().includes(normalizedQuery) ||
+        event.actor.fullName.toLowerCase().includes(normalizedQuery) ||
+        event.resource?.title.toLowerCase().includes(normalizedQuery)
+      );
+    });
+  }, [events, category, query]);
+  const groupedEvents = useMemo(() => groupEventsByDate(filteredEvents), [filteredEvents]);
   const distinctActors = useMemo(
-    () => new Set(events.map((e) => e.actor.id)).size,
-    [events],
+    () => new Set(filteredEvents.map((e) => e.actor.id)).size,
+    [filteredEvents],
   );
 
   return (
@@ -99,6 +120,36 @@ export function ActivityFeed({ workspaceId }: ActivityFeedProps) {
           ) : null
         }
       />
+
+      <div className="rounded-xl border border-stone-200 bg-white p-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {[
+            ["all", "All"],
+            ["tasks", "Tasks"],
+            ["documents", "Documents"],
+            ["members", "Members"],
+          ].map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setCategory(value as typeof category)}
+              className={`h-7 px-2.5 rounded-md text-[11px] font-medium border transition-colors ${
+                category === value
+                  ? "border-teal-300 bg-teal-50 text-teal-700"
+                  : "border-stone-200 bg-white text-stone-600 hover:bg-stone-50"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Filter by actor, event, or resource"
+          className="h-8 w-full sm:w-64 rounded-md border border-stone-200 px-2.5 text-[12px] text-stone-700 placeholder:text-stone-400 focus:border-teal-500/40 focus:ring-1 focus:ring-teal-500/20 focus:outline-none"
+        />
+      </div>
 
       {/* Loading */}
       {isLoading && (
@@ -136,7 +187,7 @@ export function ActivityFeed({ workspaceId }: ActivityFeedProps) {
       )}
 
       {/* Empty */}
-      {!isLoading && !isError && events.length === 0 && (
+      {!isLoading && !isError && filteredEvents.length === 0 && (
         <div className="rounded-2xl border border-stone-200 bg-white shadow-sm p-10">
           <div className="flex items-start gap-5">
             <div className="h-12 w-12 rounded-2xl bg-gradient-to-br from-teal-50 to-stone-50 border border-stone-200 flex items-center justify-center flex-shrink-0">
@@ -164,7 +215,7 @@ export function ActivityFeed({ workspaceId }: ActivityFeedProps) {
       )}
 
       {/* Loaded — grouped timeline */}
-      {!isLoading && !isError && events.length > 0 && (
+      {!isLoading && !isError && filteredEvents.length > 0 && (
         <div className="space-y-8">
           {Array.from(groupedEvents.entries()).map(([dateLabel, dateEvents]) => (
             <section key={dateLabel}>
