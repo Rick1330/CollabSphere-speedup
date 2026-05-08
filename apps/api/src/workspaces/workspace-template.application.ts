@@ -1,5 +1,6 @@
 import type { Prisma, TaskStatus, WorkspaceType } from "@prisma/client";
 import { AppError } from "../common/filters/app-error.filter.js";
+import { parseTemplateEnvelopeV2 } from "../common/templates/template-schema.js";
 
 type TemplateFolderSpec = {
   key: string;
@@ -19,6 +20,12 @@ type TemplateTaskColumnSpec = {
 
 export type WorkspaceTemplateContentV2 = {
   schemaVersion: 2;
+  format?: string;
+  metadata?: {
+    title?: string;
+    category?: string;
+    kind?: string;
+  };
   folders?: TemplateFolderSpec[];
   documents?: TemplateDocumentSpec[];
   taskColumns?: TemplateTaskColumnSpec[];
@@ -39,19 +46,90 @@ const validTaskStatuses: readonly TaskStatus[] = [
   "done",
 ];
 
+type WorkspaceTemplateVariables = {
+  workspaceName: string;
+  workspaceType: WorkspaceType;
+  ownerUserId: string;
+};
+
+const sanitizeTemplateString = (value: string) => value.trim();
+
+const substituteTemplateVariables = ({
+  value,
+  variables,
+}: {
+  value: string;
+  variables: WorkspaceTemplateVariables;
+}) =>
+  value
+    .replaceAll("{{workspaceName}}", variables.workspaceName)
+    .replaceAll("{{workspaceType}}", variables.workspaceType)
+    .replaceAll("{{ownerUserId}}", variables.ownerUserId);
+
+const substituteSettingsVariables = ({
+  value,
+  variables,
+}: {
+  value: unknown;
+  variables: WorkspaceTemplateVariables;
+}): unknown => {
+  if (typeof value === "string") {
+    return substituteTemplateVariables({ value, variables });
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((entry) => substituteSettingsVariables({ value: entry, variables }));
+  }
+
+  if (isRecord(value)) {
+    const next: Record<string, unknown> = {};
+    for (const [key, entryValue] of Object.entries(value)) {
+      next[key] = substituteSettingsVariables({ value: entryValue, variables });
+    }
+    return next;
+  }
+
+  return value;
+};
+
+const resolveRawWorkspaceTemplatePayload = (raw: Record<string, unknown>) => {
+  const workspacePayload = raw.workspace;
+  if (isRecord(workspacePayload)) {
+    return {
+      ...workspacePayload,
+      schemaVersion: raw.schemaVersion,
+      format: typeof raw.format === "string" ? raw.format : undefined,
+      metadata: isRecord(raw.metadata) ? raw.metadata : undefined,
+    };
+  }
+  return raw;
+};
+
 export const parseWorkspaceTemplateContent = (raw: unknown): WorkspaceTemplateContentV2 => {
   if (!isRecord(raw)) {
     throw new AppError({ code: "TEMPLATE_INVALID" });
   }
 
-  if (raw.schemaVersion !== 2) {
-    throw new AppError({ code: "TEMPLATE_SCHEMA_UNSUPPORTED" });
-  }
+  const envelope = parseTemplateEnvelopeV2({
+    raw,
+    allowedFormats: ["workspace-v2", "structured"],
+  });
+  const payloadSource =
+    envelope.structure && Object.keys(envelope.structure).length > 0
+      ? envelope.structure
+      : raw;
+  const payload = resolveRawWorkspaceTemplatePayload({
+    ...(payloadSource as Record<string, unknown>),
+    schemaVersion: envelope.schemaVersion,
+    format: envelope.format,
+    metadata: envelope.metadata,
+  });
+  const metadataRaw = payload.metadata;
 
-  const foldersRaw = raw.folders;
-  const documentsRaw = raw.documents;
-  const taskColumnsRaw = raw.taskColumns;
-  const settingsRaw = raw.settings;
+  const foldersRaw = payload.folders;
+  const documentsRaw = payload.documents;
+  const taskColumnsRaw = payload.taskColumns;
+  const settingsRaw = payload.settings;
 
   const folders: TemplateFolderSpec[] | undefined = Array.isArray(foldersRaw)
     ? foldersRaw.map((entry) => {
@@ -63,10 +141,14 @@ export const parseWorkspaceTemplateContent = (raw: unknown): WorkspaceTemplateCo
           throw new AppError({ code: "TEMPLATE_INVALID" });
         }
         return {
-          key: entry.key.trim(),
-          name: entry.name.trim(),
+          key: sanitizeTemplateString(entry.key),
+          name: sanitizeTemplateString(entry.name),
           parentKey:
-            parentKey === undefined ? undefined : parentKey === null ? null : parentKey.trim(),
+            parentKey === undefined
+              ? undefined
+              : parentKey === null
+                ? null
+                : sanitizeTemplateString(parentKey),
         };
       })
     : undefined;
@@ -81,9 +163,13 @@ export const parseWorkspaceTemplateContent = (raw: unknown): WorkspaceTemplateCo
           throw new AppError({ code: "TEMPLATE_INVALID" });
         }
         return {
-          title: entry.title.trim(),
+          title: sanitizeTemplateString(entry.title),
           folderKey:
-            folderKey === undefined ? undefined : folderKey === null ? null : folderKey.trim(),
+            folderKey === undefined
+              ? undefined
+              : folderKey === null
+                ? null
+                : sanitizeTemplateString(folderKey),
         };
       })
     : undefined;
@@ -97,7 +183,7 @@ export const parseWorkspaceTemplateContent = (raw: unknown): WorkspaceTemplateCo
           throw new AppError({ code: "TEMPLATE_INVALID" });
         }
         return {
-          name: entry.name.trim(),
+          name: sanitizeTemplateString(entry.name),
           status: entry.status as TaskStatus,
         };
       })
@@ -109,6 +195,23 @@ export const parseWorkspaceTemplateContent = (raw: unknown): WorkspaceTemplateCo
 
   return {
     schemaVersion: 2,
+    format: typeof payload.format === "string" ? payload.format : undefined,
+    metadata: metadataRaw
+      ? {
+          title:
+            typeof metadataRaw.title === "string"
+              ? sanitizeTemplateString(metadataRaw.title)
+              : undefined,
+          category:
+            typeof metadataRaw.category === "string"
+              ? sanitizeTemplateString(metadataRaw.category)
+              : undefined,
+          kind:
+            typeof metadataRaw.kind === "string"
+              ? sanitizeTemplateString(metadataRaw.kind)
+              : undefined,
+        }
+      : undefined,
     folders,
     documents,
     taskColumns,
@@ -136,16 +239,23 @@ export const buildDefaultWorkspaceSettings = (type: WorkspaceType) => {
 export const applyWorkspaceTemplate = async ({
   tx,
   workspaceId,
+  workspaceName,
   workspaceType,
   actorUserId,
   templateContent,
 }: {
   tx: Prisma.TransactionClient;
   workspaceId: string;
+  workspaceName: string;
   workspaceType: WorkspaceType;
   actorUserId: string;
   templateContent: WorkspaceTemplateContentV2;
 }) => {
+  const variables: WorkspaceTemplateVariables = {
+    workspaceName,
+    workspaceType,
+    ownerUserId: actorUserId,
+  };
   const folderKeyToId = new Map<string, string>();
 
   const folders = templateContent.folders ?? [];
@@ -164,7 +274,10 @@ export const applyWorkspaceTemplate = async ({
     const created = await tx.folder.create({
       data: {
         workspaceId,
-        name: spec.name,
+        name: substituteTemplateVariables({
+          value: spec.name,
+          variables,
+        }),
         parentId,
         position: i + 1,
         createdById: actorUserId,
@@ -189,7 +302,10 @@ export const applyWorkspaceTemplate = async ({
       data: {
         workspaceId,
         folderId,
-        title: spec.title,
+        title: substituteTemplateVariables({
+          value: spec.title,
+          variables,
+        }),
         position: i + 1,
         createdById: actorUserId,
       },
@@ -208,7 +324,10 @@ export const applyWorkspaceTemplate = async ({
     await tx.taskColumn.createMany({
       data: taskColumns.map((col, index) => ({
         workspaceId,
-        name: col.name,
+        name: substituteTemplateVariables({
+          value: col.name,
+          variables,
+        }),
         status: col.status,
         position: index + 1,
       })),
@@ -218,7 +337,12 @@ export const applyWorkspaceTemplate = async ({
   const baseSettings = buildDefaultWorkspaceSettings(workspaceType);
   const mergedSettings = {
     ...baseSettings,
-    ...(templateContent.settings ?? {}),
+    ...((templateContent.settings
+      ? substituteSettingsVariables({
+          value: templateContent.settings,
+          variables,
+        })
+      : {}) as Record<string, unknown>),
   };
 
   await tx.workspaceSettings.update({
