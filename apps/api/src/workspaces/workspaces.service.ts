@@ -68,11 +68,11 @@ export class WorkspacesService {
         },
         select: {
           id: true,
-            kind: true,
+          kind: true,
           category: true,
-            content: true,
+          content: true,
         },
-        })
+      })
       : null;
 
     if (templateId && !template) {
@@ -135,6 +135,7 @@ export class WorkspacesService {
         await applyWorkspaceTemplate({
           tx,
           workspaceId: workspace.id,
+          workspaceName: workspace.name,
           workspaceType: type,
           actorUserId,
           templateContent: parsed,
