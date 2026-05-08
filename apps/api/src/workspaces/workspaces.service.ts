@@ -3,6 +3,11 @@ import { Injectable } from "@nestjs/common";
 import { AppError } from "../common/filters/app-error.filter.js";
 import { PrismaClientProvider } from "../common/prisma/prisma-client.provider.js";
 import { canAssignRole, canManageMember } from "./workspaces.policy.js";
+import {
+  applyWorkspaceTemplate,
+  buildDefaultWorkspaceSettings,
+  parseWorkspaceTemplateContent,
+} from "./workspace-template.application.js";
 
 type WorkspaceMembership = {
   id: string;
@@ -55,26 +60,31 @@ export class WorkspacesService {
       throw new AppError({ code: "WORKSPACE_NAME_CONFLICT" });
     }
 
-    if (templateId) {
-      const template = await this.prisma.template.findFirst({
+    const template = templateId
+      ? await this.prisma.template.findFirst({
         where: {
           id: templateId,
           isEnabled: true,
         },
         select: {
           id: true,
+            kind: true,
           category: true,
+            content: true,
         },
-      });
+        })
+      : null;
 
-      if (!template) {
-        throw new AppError({ code: "TEMPLATE_NOT_FOUND" });
-      }
+    if (templateId && !template) {
+      throw new AppError({ code: "TEMPLATE_NOT_FOUND" });
+    }
 
-      // Minimal category guard: template category should match type for v1.
-      if (template.category !== type) {
-        throw new AppError({ code: "TEMPLATE_CATEGORY_MISMATCH" });
-      }
+    if (template && template.category !== type) {
+      throw new AppError({ code: "TEMPLATE_CATEGORY_MISMATCH" });
+    }
+
+    if (template && template.kind !== "workspace") {
+      throw new AppError({ code: "TEMPLATE_INVALID" });
     }
 
     const now = new Date();
@@ -105,11 +115,11 @@ export class WorkspacesService {
       await tx.workspaceSettings.create({
         data: {
           workspaceId: workspace.id,
-          settings: {},
+          settings: buildDefaultWorkspaceSettings(type),
         },
       });
 
-      // Minimal default columns so the tasks UI has a sane baseline even before full template application.
+      // Baseline task columns for workspaces without templates.
       await tx.taskColumn.createMany({
         data: [
           { workspaceId: workspace.id, name: "Backlog", status: "backlog", position: 1 },
@@ -119,6 +129,17 @@ export class WorkspacesService {
           { workspaceId: workspace.id, name: "Done", status: "done", position: 5 },
         ],
       });
+
+      if (template) {
+        const parsed = parseWorkspaceTemplateContent(template.content);
+        await applyWorkspaceTemplate({
+          tx,
+          workspaceId: workspace.id,
+          workspaceType: type,
+          actorUserId,
+          templateContent: parsed,
+        });
+      }
 
       return workspace;
     });
