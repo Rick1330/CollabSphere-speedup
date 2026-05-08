@@ -1,4 +1,4 @@
-import type { WorkspaceRole } from "@prisma/client";
+import type { Prisma, WorkspaceRole, WorkspaceStatus, WorkspaceType } from "@prisma/client";
 import { Injectable } from "@nestjs/common";
 import { AppError } from "../common/filters/app-error.filter.js";
 import { PrismaClientProvider } from "../common/prisma/prisma-client.provider.js";
@@ -13,6 +13,263 @@ type WorkspaceMembership = {
 @Injectable()
 export class WorkspacesService {
   constructor(private readonly prisma: PrismaClientProvider) {}
+
+  async createWorkspace({
+    actorUserId,
+    name,
+    description,
+    icon,
+    type,
+    templateId,
+  }: {
+    actorUserId: string;
+    name: string;
+    description?: string | null;
+    icon?: string | null;
+    type: WorkspaceType;
+    templateId?: string | null;
+  }) {
+    const activeWorkspaceCount = await this.prisma.workspaceMember.count({
+      where: {
+        userId: actorUserId,
+        isActive: true,
+        deletedAt: null,
+        workspace: { deletedAt: null },
+      },
+    });
+
+    if (activeWorkspaceCount >= 20) {
+      throw new AppError({ code: "WORKSPACE_LIMIT_REACHED" });
+    }
+
+    const existingWorkspace = await this.prisma.workspace.findFirst({
+      where: {
+        ownerId: actorUserId,
+        name,
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+
+    if (existingWorkspace) {
+      throw new AppError({ code: "WORKSPACE_NAME_CONFLICT" });
+    }
+
+    if (templateId) {
+      const template = await this.prisma.template.findFirst({
+        where: {
+          id: templateId,
+          isEnabled: true,
+        },
+        select: {
+          id: true,
+          category: true,
+        },
+      });
+
+      if (!template) {
+        throw new AppError({ code: "TEMPLATE_NOT_FOUND" });
+      }
+
+      // Minimal category guard: template category should match type for v1.
+      if (template.category !== type) {
+        throw new AppError({ code: "TEMPLATE_CATEGORY_MISMATCH" });
+      }
+    }
+
+    const now = new Date();
+
+    const created = await this.prisma.$transaction(async (tx) => {
+      const workspace = await tx.workspace.create({
+        data: {
+          name,
+          description: description ?? null,
+          icon: icon ?? null,
+          type,
+          status: "active",
+          ownerId: actorUserId,
+        },
+      });
+
+      await tx.workspaceMember.create({
+        data: {
+          workspaceId: workspace.id,
+          userId: actorUserId,
+          role: "OWNER",
+          isActive: true,
+          joinedAt: now,
+          lastAccessedAt: now,
+        },
+      });
+
+      await tx.workspaceSettings.create({
+        data: {
+          workspaceId: workspace.id,
+          settings: {},
+        },
+      });
+
+      // Minimal default columns so the tasks UI has a sane baseline even before full template application.
+      await tx.taskColumn.createMany({
+        data: [
+          { workspaceId: workspace.id, name: "Backlog", status: "backlog", position: 1 },
+          { workspaceId: workspace.id, name: "To do", status: "todo", position: 2 },
+          { workspaceId: workspace.id, name: "In progress", status: "in_progress", position: 3 },
+          { workspaceId: workspace.id, name: "Review", status: "in_review", position: 4 },
+          { workspaceId: workspace.id, name: "Done", status: "done", position: 5 },
+        ],
+      });
+
+      return workspace;
+    });
+
+    return {
+      id: created.id,
+      name: created.name,
+      description: created.description,
+      type: created.type,
+      icon: created.icon,
+      createdAt: created.createdAt,
+    };
+  }
+
+  async updateWorkspaceSettings({
+    actorUserId,
+    workspaceId,
+    name,
+    description,
+    icon,
+  }: {
+    actorUserId: string;
+    workspaceId: string;
+    name?: string;
+    description?: string | null;
+    icon?: string | null;
+  }) {
+    const membership = await this.findActorMembership({ userId: actorUserId, workspaceId });
+    this.assertAdminOrOwner(membership.role);
+
+    const workspace = await this.getWorkspaceOrThrow(workspaceId);
+
+    const data: Prisma.WorkspaceUpdateInput = {};
+    if (name !== undefined) data.name = name;
+    if (description !== undefined) {
+      data.description = description === null ? { set: null } : description;
+    }
+    if (icon !== undefined) {
+      data.icon = icon === null ? { set: null } : icon;
+    }
+
+    const updated = await this.prisma.workspace.update({
+      where: { id: workspace.id },
+      data,
+      select: {
+        id: true,
+        updatedAt: true,
+      },
+    });
+
+    return { workspaceId: updated.id, updatedAt: updated.updatedAt };
+  }
+
+  async setWorkspaceArchivedStatus({
+    actorUserId,
+    workspaceId,
+    status,
+  }: {
+    actorUserId: string;
+    workspaceId: string;
+    status: Extract<WorkspaceStatus, "active" | "archived">;
+  }) {
+    const membership = await this.findActorMembership({ userId: actorUserId, workspaceId });
+    this.assertAdminOrOwner(membership.role);
+
+    const workspace = await this.getWorkspaceOrThrow(workspaceId);
+
+    const updated = await this.prisma.workspace.update({
+      where: { id: workspace.id },
+      data: { status },
+      select: { id: true, status: true },
+    });
+
+    return { workspaceId: updated.id, status: updated.status };
+  }
+
+  async deleteWorkspace({
+    actorUserId,
+    workspaceId,
+  }: {
+    actorUserId: string;
+    workspaceId: string;
+  }) {
+    const membership = await this.findActorMembership({ userId: actorUserId, workspaceId });
+    if (membership.role !== "OWNER") {
+      throw new AppError({ code: "FORBIDDEN" });
+    }
+
+    const workspace = await this.getWorkspaceOrThrow(workspaceId);
+    await this.prisma.workspace.update({
+      where: { id: workspace.id },
+      data: { deletedAt: new Date() },
+      select: { id: true },
+    });
+
+    return { message: "Workspace deleted. It can be restored within 90 days." };
+  }
+
+  async transferOwnership({
+    actorUserId,
+    workspaceId,
+    newOwnerUserId,
+  }: {
+    actorUserId: string;
+    workspaceId: string;
+    newOwnerUserId: string;
+  }) {
+    const membership = await this.findActorMembership({ userId: actorUserId, workspaceId });
+    if (membership.role !== "OWNER") {
+      throw new AppError({ code: "FORBIDDEN" });
+    }
+
+    if (newOwnerUserId === actorUserId) {
+      throw new AppError({ code: "INVALID_NEW_OWNER" });
+    }
+
+    const targetMembership = await this.prisma.workspaceMember.findFirst({
+      where: {
+        workspaceId,
+        userId: newOwnerUserId,
+        isActive: true,
+        deletedAt: null,
+      },
+      select: { id: true, role: true },
+    });
+
+    if (!targetMembership || (targetMembership.role !== "ADMIN" && targetMembership.role !== "MANAGER")) {
+      throw new AppError({ code: "INVALID_NEW_OWNER" });
+    }
+
+    const workspace = await this.getWorkspaceOrThrow(workspaceId);
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.workspace.update({
+        where: { id: workspace.id },
+        data: { ownerId: newOwnerUserId },
+      });
+
+      await tx.workspaceMember.updateMany({
+        where: { workspaceId, userId: newOwnerUserId },
+        data: { role: "OWNER" },
+      });
+
+      await tx.workspaceMember.updateMany({
+        where: { workspaceId, userId: actorUserId },
+        data: { role: "ADMIN" },
+      });
+    });
+
+    return { workspaceId, newOwnerUserId };
+  }
 
   async listForUser(userId: string) {
     const memberships = await this.prisma.workspaceMember.findMany({
@@ -208,5 +465,23 @@ export class WorkspacesService {
     }
 
     return membership;
+  }
+
+  private assertAdminOrOwner(role: WorkspaceRole) {
+    if (role === "OWNER" || role === "ADMIN") {
+      return;
+    }
+    throw new AppError({ code: "FORBIDDEN" });
+  }
+
+  private async getWorkspaceOrThrow(workspaceId: string) {
+    const workspace = await this.prisma.workspace.findFirst({
+      where: { id: workspaceId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!workspace) {
+      throw new AppError({ code: "WORKSPACE_NOT_FOUND" });
+    }
+    return workspace;
   }
 }
