@@ -24,6 +24,7 @@ const collectTextFromNode = (value: unknown): string[] => {
 };
 
 const readOnlyDocumentStatuses = new Set<DocumentStatus>(["approved", "archived"]);
+const reviewAllowedRoles = new Set(["OWNER", "ADMIN", "MANAGER"]);
 
 const parseRequiredBlockTypesFromProperties = (value: unknown): Set<string> => {
   if (!value || typeof value !== "object") {
@@ -465,6 +466,124 @@ export class DocumentsService {
     return result;
   }
 
+  async transitionDocumentStatus({
+    actorUserId,
+    workspaceId,
+    documentId,
+    action,
+    note,
+  }: {
+    actorUserId: string;
+    workspaceId: string;
+    documentId: string;
+    action: "submit" | "request_changes" | "approve";
+    note?: string;
+  }) {
+    const membership = await this.requireWorkspaceMembership({ actorUserId, workspaceId });
+    if (membership.workspace.status === "archived") {
+      throw new AppError({ code: "WORKSPACE_ARCHIVED_READONLY" });
+    }
+
+    const document = await this.prisma.document.findFirst({
+      where: {
+        id: documentId,
+        workspaceId,
+        deletedAt: null,
+      },
+      select: {
+        id: true,
+        title: true,
+        status: true,
+        contentPlaintext: true,
+      },
+    });
+    if (!document) {
+      throw new AppError({ code: "DOCUMENT_NOT_FOUND" });
+    }
+
+    if (action === "submit") {
+      if (!(document.status === "draft" || document.status === "changes_requested")) {
+        throw new AppError({ code: "INVALID_TRANSITION" });
+      }
+      if (document.contentPlaintext.trim().length === 0) {
+        throw new AppError({ code: "DOCUMENT_EMPTY" });
+      }
+    } else {
+      if (membership.workspace.type !== "academic") {
+        throw new AppError({ code: "WORKSPACE_NOT_ACADEMIC" });
+      }
+      if (!reviewAllowedRoles.has(membership.role)) {
+        throw new AppError({ code: "INSUFFICIENT_ROLE" });
+      }
+      if (document.status !== "submitted") {
+        throw new AppError({ code: "INVALID_TRANSITION" });
+      }
+      if (action === "request_changes" && !note?.trim()) {
+        throw new AppError({ code: "NOTE_REQUIRED" });
+      }
+    }
+
+    const nextStatus: DocumentStatus =
+      action === "submit" ? "submitted" : action === "approve" ? "approved" : "changes_requested";
+
+    const latestVersion = await this.prisma.documentVersion.findFirst({
+      where: {
+        documentId,
+      },
+      orderBy: {
+        versionNumber: "desc",
+      },
+      select: { id: true },
+    });
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const transitioned = await tx.document.update({
+        where: {
+          id: documentId,
+        },
+        data: {
+          status: nextStatus,
+          updatedById: actorUserId,
+        },
+        select: {
+          id: true,
+          status: true,
+          updatedAt: true,
+        },
+      });
+
+      const submission = await tx.documentSubmission.create({
+        data: {
+          workspaceId,
+          documentId,
+          submittedById: actorUserId,
+          snapshotVersionId: latestVersion?.id ?? null,
+          decision:
+            action === "approve"
+              ? "approved"
+              : action === "request_changes"
+                ? "changes_requested"
+                : null,
+          decidedById: action === "submit" ? null : actorUserId,
+          decidedAt: action === "submit" ? null : new Date(),
+          decisionNote: action === "request_changes" ? note?.trim() ?? null : null,
+        },
+        select: {
+          id: true,
+          decision: true,
+          submittedAt: true,
+        },
+      });
+
+      return {
+        document: transitioned,
+        submission,
+      };
+    });
+
+    return updated;
+  }
+
   private async requireWorkspaceMembership({
     actorUserId,
     workspaceId,
@@ -482,6 +601,7 @@ export class DocumentsService {
       },
       select: {
         id: true,
+        role: true,
         workspace: { select: { id: true, type: true, status: true } },
       },
     });
