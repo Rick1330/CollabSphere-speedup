@@ -1,6 +1,6 @@
 import type { DocumentStatus } from "@prisma/client";
 import { Injectable } from "@nestjs/common";
-import { AppError } from "../common/filters/app-error.filter.js";
+import { AppError, ValidationAppError } from "../common/filters/app-error.filter.js";
 import { PrismaClientProvider } from "../common/prisma/prisma-client.provider.js";
 import { parseDocumentTemplateContent } from "../common/templates/template-schema.js";
 
@@ -21,6 +21,40 @@ const collectTextFromNode = (value: unknown): string[] => {
   }
 
   return [];
+};
+
+const readOnlyDocumentStatuses = new Set<DocumentStatus>(["approved", "archived"]);
+
+const parseRequiredBlockTypesFromProperties = (value: unknown): Set<string> => {
+  if (!value || typeof value !== "object") {
+    return new Set();
+  }
+
+  const template = (value as Record<string, unknown>).template;
+  if (!template || typeof template !== "object") {
+    return new Set();
+  }
+
+  const properties = (template as Record<string, unknown>).properties;
+  if (!properties || typeof properties !== "object") {
+    return new Set();
+  }
+
+  const enforcement = (properties as Record<string, unknown>).enforcement;
+  if (!enforcement || typeof enforcement !== "object") {
+    return new Set();
+  }
+
+  const required = (enforcement as Record<string, unknown>).requiredBlockTypes;
+  if (!Array.isArray(required)) {
+    return new Set();
+  }
+
+  return new Set(
+    required
+      .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+      .filter((entry) => entry.length > 0),
+  );
 };
 
 @Injectable()
@@ -289,6 +323,146 @@ export class DocumentsService {
     });
 
     return updated;
+  }
+
+  async updateDocumentContent({
+    actorUserId,
+    workspaceId,
+    documentId,
+    contentPlaintext,
+    yjsStateBase64,
+    reason,
+    blockTypes,
+  }: {
+    actorUserId: string;
+    workspaceId: string;
+    documentId: string;
+    contentPlaintext: string;
+    yjsStateBase64?: string;
+    reason: string;
+    blockTypes?: string[];
+  }) {
+    const membership = await this.requireWorkspaceMembership({ actorUserId, workspaceId });
+    if (membership.workspace.status === "archived") {
+      throw new AppError({ code: "WORKSPACE_ARCHIVED_READONLY" });
+    }
+
+    const existing = await this.prisma.document.findFirst({
+      where: {
+        id: documentId,
+        workspaceId,
+        deletedAt: null,
+      },
+      select: {
+        id: true,
+        workspaceId: true,
+        status: true,
+        properties: true,
+        contentYjs: true,
+      },
+    });
+
+    if (!existing) {
+      throw new AppError({ code: "DOCUMENT_NOT_FOUND" });
+    }
+
+    if (readOnlyDocumentStatuses.has(existing.status)) {
+      throw new AppError({ code: "DOCUMENT_READONLY_STATUS" });
+    }
+
+    const requiredBlockTypes = parseRequiredBlockTypesFromProperties(existing.properties);
+    if (requiredBlockTypes.size > 0) {
+      const providedBlockTypes = new Set((blockTypes ?? []).map((entry) => entry.trim()).filter(Boolean));
+      const missing = [...requiredBlockTypes].filter((required) => !providedBlockTypes.has(required));
+      if (missing.length > 0) {
+        throw new ValidationAppError({
+          message: "Template required sections are missing.",
+          issues: [
+            {
+              field: "blockTypes",
+              rule: "required",
+              message: `Missing required blocks: ${missing.join(", ")}`,
+            },
+          ],
+        });
+      }
+    }
+
+    let yjsStateBuffer: Buffer = existing.contentYjs;
+    if (yjsStateBase64 !== undefined) {
+      try {
+        yjsStateBuffer = Buffer.from(yjsStateBase64, "base64");
+      } catch {
+        throw new ValidationAppError({
+          message: "yjsStateBase64 is invalid.",
+          issues: [
+            {
+              field: "yjsStateBase64",
+              rule: "format",
+              message: "yjsStateBase64 is invalid.",
+            },
+          ],
+        });
+      }
+    }
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const latestVersion = await tx.documentVersion.findFirst({
+        where: {
+          documentId: existing.id,
+        },
+        orderBy: {
+          versionNumber: "desc",
+        },
+        select: { versionNumber: true },
+      });
+      const nextVersionNumber = (latestVersion?.versionNumber ?? 0) + 1;
+
+      const updatedDocument = await tx.document.update({
+        where: {
+          id: existing.id,
+        },
+        data: {
+          contentPlaintext,
+          contentYjs: yjsStateBuffer,
+          updatedById: actorUserId,
+        },
+        select: {
+          id: true,
+          workspaceId: true,
+          title: true,
+          status: true,
+          templateId: true,
+          templateVersion: true,
+          updatedAt: true,
+        },
+      });
+
+      const createdVersion = await tx.documentVersion.create({
+        data: {
+          workspaceId,
+          documentId: existing.id,
+          versionNumber: nextVersionNumber,
+          reason,
+          yjsState: yjsStateBuffer,
+          plaintext: contentPlaintext,
+          createdById: actorUserId,
+        },
+        select: {
+          id: true,
+          versionNumber: true,
+          reason: true,
+          createdAt: true,
+        },
+      });
+
+      return {
+        document: updatedDocument,
+        version: createdVersion,
+      };
+    });
+
+    return result;
   }
 
   private async requireWorkspaceMembership({

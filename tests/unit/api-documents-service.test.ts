@@ -149,3 +149,104 @@ test("documents service updates metadata with folder/status/title", async () => 
   assert.equal(updated.title, "Renamed Doc");
   assert.equal(updated.status, "submitted");
 });
+
+test("documents service updates content and creates a version", async () => {
+  const prisma = {
+    workspaceMember: {
+      findFirst: async () => ({
+        id: "m-1",
+        workspace: { id: "ws-1", type: "professional", status: "active" },
+      }),
+    },
+    document: {
+      findFirst: async () => ({
+        id: "doc-1",
+        workspaceId: "ws-1",
+        status: "draft",
+        properties: null,
+        contentYjs: Buffer.from("old"),
+      }),
+    },
+    $transaction: async (callback: (tx: unknown) => Promise<unknown>) =>
+      callback({
+        documentVersion: {
+          findFirst: async () => ({ versionNumber: 4 }),
+          create: async ({ data }: { data: Record<string, unknown> }) => ({
+            id: "ver-5",
+            versionNumber: data.versionNumber,
+            reason: data.reason,
+            createdAt: new Date("2026-05-08T00:00:00.000Z"),
+          }),
+        },
+        document: {
+          update: async () => ({
+            id: "doc-1",
+            workspaceId: "ws-1",
+            title: "Doc A",
+            status: "draft",
+            templateId: null,
+            templateVersion: null,
+            updatedAt: new Date("2026-05-08T00:00:00.000Z"),
+          }),
+        },
+      }),
+  };
+
+  const service = new DocumentsService(prisma as never);
+  const result = await service.updateDocumentContent({
+    actorUserId: "user-1",
+    workspaceId: "ws-1",
+    documentId: "doc-1",
+    contentPlaintext: "Updated content body",
+    reason: "manual_edit",
+  });
+
+  assert.equal(result.version.versionNumber, 5);
+  assert.equal(result.document.id, "doc-1");
+});
+
+test("documents service enforces required template block types on content update", async () => {
+  const prisma = {
+    workspaceMember: {
+      findFirst: async () => ({
+        id: "m-1",
+        workspace: { id: "ws-1", type: "professional", status: "active" },
+      }),
+    },
+    document: {
+      findFirst: async () => ({
+        id: "doc-1",
+        workspaceId: "ws-1",
+        status: "draft",
+        properties: {
+          template: {
+            properties: {
+              enforcement: {
+                requiredBlockTypes: ["cover-page", "section"],
+              },
+            },
+          },
+        },
+        contentYjs: Buffer.from("old"),
+      }),
+    },
+  };
+
+  const service = new DocumentsService(prisma as never);
+  await assert.rejects(
+    () =>
+      service.updateDocumentContent({
+        actorUserId: "user-1",
+        workspaceId: "ws-1",
+        documentId: "doc-1",
+        contentPlaintext: "Updated content body",
+        reason: "manual_edit",
+        blockTypes: ["section"],
+      }),
+    (error: unknown) => {
+      assert.equal(error instanceof AppError, true);
+      assert.equal((error as AppError).code, "VALIDATION_ERROR");
+      return true;
+    },
+  );
+});
