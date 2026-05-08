@@ -28,6 +28,10 @@ type UpdateDocumentContentBody = {
   blockTypes?: string[] | null;
 };
 
+type TransitionNoteBody = {
+  note?: string | null;
+};
+
 const validDocumentStatus: DocumentStatus[] = [
   "draft",
   "submitted",
@@ -140,6 +144,66 @@ export class DocumentsNestController {
       ...payload,
     });
 
+    return wrapSuccessResponse({
+      payload: createSingleResourcePayload(data),
+      requestId: "nest-request",
+    });
+  }
+
+  @Post(":documentId/submit")
+  async submitDocument(
+    @Param("workspaceId") workspaceId: string,
+    @Param("documentId") documentId: string,
+    @Headers("x-user-id") userIdHeader: unknown,
+  ) {
+    const actorUserId = resolveRequestUserId(userIdHeader);
+    const data = await this.documentsService.transitionDocumentStatus({
+      actorUserId,
+      workspaceId,
+      documentId,
+      action: "submit",
+    });
+    return wrapSuccessResponse({
+      payload: createSingleResourcePayload(data),
+      requestId: "nest-request",
+    });
+  }
+
+  @Post(":documentId/request-changes")
+  async requestChanges(
+    @Param("workspaceId") workspaceId: string,
+    @Param("documentId") documentId: string,
+    @Headers("x-user-id") userIdHeader: unknown,
+    @Body() body: TransitionNoteBody,
+  ) {
+    const actorUserId = resolveRequestUserId(userIdHeader);
+    const note = this.validateRequiredNote(body);
+    const data = await this.documentsService.transitionDocumentStatus({
+      actorUserId,
+      workspaceId,
+      documentId,
+      action: "request_changes",
+      note,
+    });
+    return wrapSuccessResponse({
+      payload: createSingleResourcePayload(data),
+      requestId: "nest-request",
+    });
+  }
+
+  @Post(":documentId/approve")
+  async approveDocument(
+    @Param("workspaceId") workspaceId: string,
+    @Param("documentId") documentId: string,
+    @Headers("x-user-id") userIdHeader: unknown,
+  ) {
+    const actorUserId = resolveRequestUserId(userIdHeader);
+    const data = await this.documentsService.transitionDocumentStatus({
+      actorUserId,
+      workspaceId,
+      documentId,
+      action: "approve",
+    });
     return wrapSuccessResponse({
       payload: createSingleResourcePayload(data),
       requestId: "nest-request",
@@ -309,5 +373,34 @@ export class DocumentsNestController {
       reason,
       blockTypes,
     };
+  }
+
+  private validateRequiredNote(raw: TransitionNoteBody) {
+    const note = (raw?.note ?? "").toString().trim();
+    if (!note) {
+      throw new ValidationAppError({
+        message: "A review note is required.",
+        issues: [
+          {
+            field: "note",
+            rule: "required",
+            message: "A review note is required.",
+          },
+        ],
+      });
+    }
+    if (note.length > 1000) {
+      throw new ValidationAppError({
+        message: "Review note must be 1000 characters or less.",
+        issues: [
+          {
+            field: "note",
+            rule: "length",
+            message: "Review note must be 1000 characters or less.",
+          },
+        ],
+      });
+    }
+    return note;
   }
 }

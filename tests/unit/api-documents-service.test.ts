@@ -250,3 +250,89 @@ test("documents service enforces required template block types on content update
     },
   );
 });
+
+test("documents service submits draft document", async () => {
+  const prisma = {
+    workspaceMember: {
+      findFirst: async () => ({
+        id: "m-1",
+        role: "MEMBER",
+        workspace: { id: "ws-1", type: "academic", status: "active" },
+      }),
+    },
+    document: {
+      findFirst: async () => ({
+        id: "doc-1",
+        title: "Doc A",
+        status: "draft",
+        contentPlaintext: "Body",
+      }),
+    },
+    documentVersion: {
+      findFirst: async () => ({ id: "ver-1" }),
+    },
+    $transaction: async (callback: (tx: unknown) => Promise<unknown>) =>
+      callback({
+        document: {
+          update: async () => ({
+            id: "doc-1",
+            status: "submitted",
+            updatedAt: new Date("2026-05-08T00:00:00.000Z"),
+          }),
+        },
+        documentSubmission: {
+          create: async () => ({
+            id: "sub-1",
+            decision: null,
+            submittedAt: new Date("2026-05-08T00:00:00.000Z"),
+          }),
+        },
+      }),
+  };
+
+  const service = new DocumentsService(prisma as never);
+  const transitioned = await service.transitionDocumentStatus({
+    actorUserId: "user-1",
+    workspaceId: "ws-1",
+    documentId: "doc-1",
+    action: "submit",
+  });
+
+  assert.equal(transitioned.document.status, "submitted");
+});
+
+test("documents service blocks approve for non-review role", async () => {
+  const prisma = {
+    workspaceMember: {
+      findFirst: async () => ({
+        id: "m-1",
+        role: "MEMBER",
+        workspace: { id: "ws-1", type: "academic", status: "active" },
+      }),
+    },
+    document: {
+      findFirst: async () => ({
+        id: "doc-1",
+        title: "Doc A",
+        status: "submitted",
+        contentPlaintext: "Body",
+      }),
+    },
+  };
+
+  const service = new DocumentsService(prisma as never);
+  await assert.rejects(
+    () =>
+      service.transitionDocumentStatus({
+        actorUserId: "user-1",
+        workspaceId: "ws-1",
+        documentId: "doc-1",
+        action: "approve",
+      }),
+    (error: unknown) => {
+      assert.equal(error instanceof AppError, true);
+      assert.equal((error as AppError).code, "INSUFFICIENT_ROLE");
+      return true;
+    },
+  );
+});
