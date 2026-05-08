@@ -7,13 +7,39 @@ import { AppError } from "../../apps/api/src/common/filters/app-error.filter.js"
 const createController = () => {
   const service: Pick<
     WorkspacesService,
-    "listForUser" | "getByIdForUser" | "listMembersForUser" | "updateMemberRole" | "removeMember"
+    | "createWorkspace"
+    | "listForUser"
+    | "getByIdForUser"
+    | "listMembersForUser"
+    | "updateMemberRole"
+    | "removeMember"
+    | "updateWorkspaceSettings"
+    | "setWorkspaceArchivedStatus"
+    | "deleteWorkspace"
+    | "transferOwnership"
   > = {
+    createWorkspace: async ({ name, type }) => ({
+      id: "ws-1",
+      name,
+      description: null,
+      icon: null,
+      type,
+      createdAt: new Date("2026-05-08T00:00:00.000Z"),
+    }),
     listForUser: async (userId: string) => [{ id: "ws-1", userId }],
     getByIdForUser: async ({ userId, workspaceId }) => ({ workspaceId, userId }),
     listMembersForUser: async ({ workspaceId }) => [{ id: "m-1", workspaceId }],
     updateMemberRole: async ({ role }) => ({ id: "m-1", role }),
     removeMember: async ({ membershipId }) => ({ id: membershipId, isActive: false }),
+    updateWorkspaceSettings: async ({ workspaceId }) => ({
+      workspaceId,
+      updatedAt: new Date("2026-05-08T00:00:00.000Z"),
+    }),
+    setWorkspaceArchivedStatus: async ({ workspaceId, status }) => ({ workspaceId, status }),
+    deleteWorkspace: async () => ({
+      message: "Workspace deleted. It can be restored within 90 days.",
+    }),
+    transferOwnership: async ({ workspaceId, newOwnerUserId }) => ({ workspaceId, newOwnerUserId }),
   };
 
   return {
@@ -57,5 +83,19 @@ describe("api nest workspaces controller", () => {
         return true;
       },
     );
+  });
+
+  it("creates workspace and wraps created response", async () => {
+    const { controller } = createController();
+    const response = await controller.createWorkspace("user-1", {
+      name: "Project Alpha",
+      type: "professional",
+      description: null,
+      icon: "📦",
+      templateId: "tpl_professional_software_project_v1",
+    });
+
+    assert.equal(response.statusCode, 201);
+    assert.equal(response.data.resource.workspace.name, "Project Alpha");
   });
 });
