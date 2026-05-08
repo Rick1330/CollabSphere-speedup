@@ -259,6 +259,16 @@ test("documents service submits draft document", async () => {
         role: "MEMBER",
         workspace: { id: "ws-1", type: "academic", status: "active" },
       }),
+      count: async () => 1,
+    },
+    user: {
+      findUnique: async () => ({
+        id: "user-1",
+        fullName: "Alice",
+        avatarUrl: null,
+        email: "alice@example.com",
+        globalRole: "USER",
+      }),
     },
     document: {
       findFirst: async () => ({
@@ -271,8 +281,23 @@ test("documents service submits draft document", async () => {
     documentVersion: {
       findFirst: async () => ({ id: "ver-1" }),
     },
+    activityEvent: {
+      create: async () => ({ id: "act-1" }),
+    },
+    auditLog: {
+      create: async () => ({ id: "audit-1" }),
+    },
     $transaction: async (callback: (tx: unknown) => Promise<unknown>) =>
       callback({
+        documentVersion: {
+          findFirst: async () => ({
+            id: "ver-1",
+            versionNumber: 1,
+            yjsState: Buffer.from("state"),
+            plaintext: "Body",
+          }),
+          create: async () => ({ id: "ver-2" }),
+        },
         document: {
           update: async () => ({
             id: "doc-1",
@@ -332,6 +357,43 @@ test("documents service blocks approve for non-review role", async () => {
     (error: unknown) => {
       assert.equal(error instanceof AppError, true);
       assert.equal((error as AppError).code, "INSUFFICIENT_ROLE");
+      return true;
+    },
+  );
+});
+
+test("documents service rejects submit without supervisor in academic workspace", async () => {
+  const prisma = {
+    workspaceMember: {
+      findFirst: async () => ({
+        id: "m-1",
+        role: "MEMBER",
+        workspace: { id: "ws-1", type: "academic", status: "active" },
+      }),
+      count: async () => 0,
+    },
+    document: {
+      findFirst: async () => ({
+        id: "doc-1",
+        title: "Doc A",
+        status: "draft",
+        contentPlaintext: "Body",
+      }),
+    },
+  };
+
+  const service = new DocumentsService(prisma as never);
+  await assert.rejects(
+    () =>
+      service.transitionDocumentStatus({
+        actorUserId: "user-1",
+        workspaceId: "ws-1",
+        documentId: "doc-1",
+        action: "submit",
+      }),
+    (error: unknown) => {
+      assert.equal(error instanceof AppError, true);
+      assert.equal((error as AppError).code, "NO_SUPERVISOR_ASSIGNED");
       return true;
     },
   );
