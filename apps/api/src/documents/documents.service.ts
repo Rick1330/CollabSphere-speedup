@@ -508,6 +508,24 @@ export class DocumentsService {
       if (document.contentPlaintext.trim().length === 0) {
         throw new AppError({ code: "DOCUMENT_EMPTY" });
       }
+      if (membership.workspace.type === "academic" && membership.role === "MEMBER") {
+        const reviewerCount = await this.prisma.workspaceMember.count({
+          where: {
+            workspaceId,
+            isActive: true,
+            deletedAt: null,
+            role: {
+              in: ["OWNER", "ADMIN", "MANAGER"],
+            },
+            userId: {
+              not: actorUserId,
+            },
+          },
+        });
+        if (reviewerCount === 0) {
+          throw new AppError({ code: "NO_SUPERVISOR_ASSIGNED" });
+        }
+      }
     } else {
       if (membership.workspace.type !== "academic") {
         throw new AppError({ code: "WORKSPACE_NOT_ACADEMIC" });
@@ -525,18 +543,47 @@ export class DocumentsService {
 
     const nextStatus: DocumentStatus =
       action === "submit" ? "submitted" : action === "approve" ? "approved" : "changes_requested";
-
-    const latestVersion = await this.prisma.documentVersion.findFirst({
-      where: {
-        documentId,
+    const actorProfile = await this.prisma.user.findUnique({
+      where: { id: actorUserId },
+      select: {
+        id: true,
+        fullName: true,
+        avatarUrl: true,
+        email: true,
+        globalRole: true,
       },
-      orderBy: {
-        versionNumber: "desc",
-      },
-      select: { id: true },
     });
 
     const updated = await this.prisma.$transaction(async (tx) => {
+      const latestVersion = await tx.documentVersion.findFirst({
+        where: {
+          documentId,
+        },
+        orderBy: {
+          versionNumber: "desc",
+        },
+        select: { id: true, versionNumber: true, yjsState: true, plaintext: true },
+      });
+      const nextVersionNumber = (latestVersion?.versionNumber ?? 0) + 1;
+
+      let snapshotVersionId = latestVersion?.id ?? null;
+      if (action === "submit" || action === "approve") {
+        const reason = action === "submit" ? "submitted" : "approved";
+        const snapshot = await tx.documentVersion.create({
+          data: {
+            workspaceId,
+            documentId,
+            versionNumber: nextVersionNumber,
+            reason,
+            yjsState: latestVersion?.yjsState ?? Buffer.alloc(0),
+            plaintext: latestVersion?.plaintext ?? document.contentPlaintext,
+            createdById: actorUserId,
+          },
+          select: { id: true },
+        });
+        snapshotVersionId = snapshot.id;
+      }
+
       const transitioned = await tx.document.update({
         where: {
           id: documentId,
@@ -552,34 +599,114 @@ export class DocumentsService {
         },
       });
 
-      const submission = await tx.documentSubmission.create({
-        data: {
-          workspaceId,
-          documentId,
-          submittedById: actorUserId,
-          snapshotVersionId: latestVersion?.id ?? null,
-          decision:
-            action === "approve"
-              ? "approved"
-              : action === "request_changes"
-                ? "changes_requested"
-                : null,
-          decidedById: action === "submit" ? null : actorUserId,
-          decidedAt: action === "submit" ? null : new Date(),
-          decisionNote: action === "request_changes" ? note?.trim() ?? null : null,
-        },
-        select: {
-          id: true,
-          decision: true,
-          submittedAt: true,
-        },
-      });
+      const submission =
+        action === "submit"
+          ? await tx.documentSubmission.create({
+              data: {
+                workspaceId,
+                documentId,
+                submittedById: actorUserId,
+                snapshotVersionId,
+                decision: null,
+                decidedById: null,
+                decidedAt: null,
+                decisionNote: null,
+              },
+              select: {
+                id: true,
+                decision: true,
+                submittedAt: true,
+              },
+            })
+          : await (async () => {
+              const latestSubmission = await tx.documentSubmission.findFirst({
+                where: {
+                  workspaceId,
+                  documentId,
+                },
+                orderBy: {
+                  submittedAt: "desc",
+                },
+                select: {
+                  id: true,
+                },
+              });
+              if (!latestSubmission) {
+                throw new AppError({ code: "INVALID_TRANSITION" });
+              }
+              return tx.documentSubmission.update({
+                where: {
+                  id: latestSubmission.id,
+                },
+                data: {
+                  decision: action === "approve" ? "approved" : "changes_requested",
+                  decidedById: actorUserId,
+                  decidedAt: new Date(),
+                  decisionNote: action === "request_changes" ? note?.trim() ?? null : null,
+                },
+                select: {
+                  id: true,
+                  decision: true,
+                  submittedAt: true,
+                },
+              });
+            })();
 
       return {
         document: transitioned,
         submission,
       };
     });
+
+    // Best-effort telemetry: do not fail business transition when logging fails.
+    try {
+      await this.prisma.activityEvent.create({
+        data: {
+          workspaceId,
+          actorId: actorUserId,
+          actorNameSnapshot: actorProfile?.fullName ?? "Unknown user",
+          actorAvatarSnapshot: actorProfile?.avatarUrl ?? null,
+          eventKey: action === "submit" ? "document.submitted" : "document.reviewed",
+          summary:
+            action === "submit"
+              ? `${actorProfile?.fullName ?? "A user"} submitted '${document.title}' for review`
+              : `${actorProfile?.fullName ?? "A reviewer"} ${
+                  action === "approve" ? "approved" : "requested changes for"
+                } '${document.title}'`,
+          resourceType: "document",
+          resourceId: documentId,
+          resourceTitleSnapshot: document.title,
+          metadata: {
+            action,
+            status: nextStatus,
+          },
+        },
+      });
+    } catch (error) {
+      console.warn("[documents] failed to write activity event", error);
+    }
+
+    try {
+      await this.prisma.auditLog.create({
+        data: {
+          severity: "info",
+          actionKey: `document.${action}`,
+          actorId: actorUserId,
+          actorEmail: actorProfile?.email ?? null,
+          actorGlobalRole: actorProfile?.globalRole ?? null,
+          workspaceId,
+          targetType: "document",
+          targetId: documentId,
+          metadata: {
+            action,
+            fromStatus: document.status,
+            toStatus: nextStatus,
+          },
+        },
+      });
+    } catch (error) {
+      console.warn("[documents] failed to write audit log", error);
+    }
 
     return updated;
   }
