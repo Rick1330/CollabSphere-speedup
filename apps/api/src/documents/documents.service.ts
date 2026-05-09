@@ -1,8 +1,10 @@
-import type { DocumentStatus } from "@prisma/client";
+import type { DocumentStatus, Prisma, WorkspaceRole } from "@prisma/client";
 import { Injectable } from "@nestjs/common";
 import { AppError, ValidationAppError } from "../common/filters/app-error.filter.js";
 import { PrismaClientProvider } from "../common/prisma/prisma-client.provider.js";
 import { parseDocumentTemplateContent } from "../common/templates/template-schema.js";
+import { RealtimeEventsService } from "../realtime/realtime-events.service.js";
+import { canManageLocks, isDocumentReadOnly } from "../../../../packages/shared/src/collab/document-write-policy.js";
 
 const collectTextFromNode = (value: unknown): string[] => {
   if (typeof value === "string") {
@@ -23,8 +25,21 @@ const collectTextFromNode = (value: unknown): string[] => {
   return [];
 };
 
-const readOnlyDocumentStatuses = new Set<DocumentStatus>(["approved", "archived"]);
+
+const toPrismaBytes = (data: Uint8Array): Uint8Array<ArrayBuffer> => {
+  const buffer = new ArrayBuffer(data.byteLength);
+  new Uint8Array(buffer).set(data);
+  return new Uint8Array(buffer);
+};
 const reviewAllowedRoles = new Set(["OWNER", "ADMIN", "MANAGER"]);
+const assertManagerOrAbove = (role: WorkspaceRole) => {
+  if (!canManageLocks(role)) {
+    throw new AppError({
+      code: "INSUFFICIENT_ROLE",
+      message: "Manager role or higher is required.",
+    });
+  }
+};
 
 const parseRequiredBlockTypesFromProperties = (value: unknown): Set<string> => {
   if (!value || typeof value !== "object") {
@@ -60,7 +75,10 @@ const parseRequiredBlockTypesFromProperties = (value: unknown): Set<string> => {
 
 @Injectable()
 export class DocumentsService {
-  constructor(private readonly prisma: PrismaClientProvider) {}
+  constructor(
+    private readonly prisma: PrismaClientProvider,
+    private readonly realtimeEvents?: RealtimeEventsService,
+  ) {}
 
   async listDocumentsForUser({
     actorUserId,
@@ -199,19 +217,20 @@ export class DocumentsService {
     const plaintext = parsedTemplate
       ? collectTextFromNode(parsedTemplate.blocks).join(" ").slice(0, 20_000)
       : "";
-    const templateProperties = parsedTemplate
-      ? {
-          template: {
-            id: template.id,
-            version: template.version,
-            schemaVersion: template.schemaVersion,
-            format: parsedTemplate.format ?? null,
-            metadata: parsedTemplate.metadata ?? null,
-            properties: parsedTemplate.properties ?? null,
-          },
-          blocks: parsedTemplate.blocks,
-        }
-      : null;
+    const templateProperties =
+      parsedTemplate && template
+        ? {
+            template: {
+              id: template.id,
+              version: template.version,
+              schemaVersion: template.schemaVersion,
+              format: parsedTemplate.format ?? null,
+              metadata: parsedTemplate.metadata ?? null,
+              properties: parsedTemplate.properties ?? null,
+            },
+            blocks: parsedTemplate.blocks,
+          }
+        : null;
 
     const maxPosition = await this.prisma.document.findFirst({
       where: {
@@ -232,7 +251,9 @@ export class DocumentsService {
         title,
         position: nextPosition,
         contentPlaintext: plaintext,
-        properties: templateProperties ?? undefined,
+        properties: templateProperties
+          ? (JSON.parse(JSON.stringify(templateProperties)) as Prisma.InputJsonValue)
+          : undefined,
         templateId: template?.id ?? null,
         templateVersion: template?.version ?? null,
         createdById: actorUserId,
@@ -358,6 +379,7 @@ export class DocumentsService {
         id: true,
         workspaceId: true,
         status: true,
+        isLocked: true,
         properties: true,
         contentYjs: true,
       },
@@ -367,7 +389,13 @@ export class DocumentsService {
       throw new AppError({ code: "DOCUMENT_NOT_FOUND" });
     }
 
-    if (readOnlyDocumentStatuses.has(existing.status)) {
+    if (
+      isDocumentReadOnly({
+        status: existing.status,
+        isLocked: Boolean(existing.isLocked),
+        role: membership.role,
+      })
+    ) {
       throw new AppError({ code: "DOCUMENT_READONLY_STATUS" });
     }
 
@@ -389,7 +417,9 @@ export class DocumentsService {
       }
     }
 
-    let yjsStateBuffer: Buffer = existing.contentYjs;
+    let yjsStateBuffer: Uint8Array = existing.contentYjs
+      ? new Uint8Array(existing.contentYjs)
+      : new Uint8Array(0);
     if (yjsStateBase64 !== undefined) {
       try {
         yjsStateBuffer = Buffer.from(yjsStateBase64, "base64");
@@ -425,7 +455,7 @@ export class DocumentsService {
         },
         data: {
           contentPlaintext,
-          contentYjs: yjsStateBuffer,
+          contentYjs: toPrismaBytes(yjsStateBuffer),
           updatedById: actorUserId,
         },
         select: {
@@ -445,7 +475,7 @@ export class DocumentsService {
           documentId: existing.id,
           versionNumber: nextVersionNumber,
           reason,
-          yjsState: yjsStateBuffer,
+          yjsState: toPrismaBytes(yjsStateBuffer),
           plaintext: contentPlaintext,
           createdById: actorUserId,
         },
@@ -461,6 +491,18 @@ export class DocumentsService {
         document: updatedDocument,
         version: createdVersion,
       };
+    });
+    this.realtimeEvents?.emit("document:updated", {
+      workspaceId,
+      userId: actorUserId,
+      data: {
+        documentId: result.document.id,
+        title: result.document.title,
+        status: result.document.status,
+        updatedAt: result.document.updatedAt,
+        versionId: result.version.id,
+        versionNumber: result.version.versionNumber,
+      },
     });
 
     return result;
@@ -660,7 +702,7 @@ export class DocumentsService {
 
     // Best-effort telemetry: do not fail business transition when logging fails.
     try {
-      await this.prisma.activityEvent.create({
+      const activityEvent = await this.prisma.activityEvent.create({
         data: {
           workspaceId,
           actorId: actorUserId,
@@ -682,6 +724,7 @@ export class DocumentsService {
           },
         },
       });
+      this.realtimeEvents?.emitActivityFromRecord(activityEvent);
     } catch (error) {
       console.warn("[documents] failed to write activity event", error);
     }
@@ -709,6 +752,322 @@ export class DocumentsService {
     }
 
     return updated;
+  }
+
+  async getDocumentsTree({
+    actorUserId,
+    workspaceId,
+  }: {
+    actorUserId: string;
+    workspaceId: string;
+  }) {
+    await this.requireWorkspaceMembership({ actorUserId, workspaceId });
+    const [folders, documents] = await Promise.all([
+      this.prisma.folder.findMany({
+        where: { workspaceId, deletedAt: null },
+        orderBy: [{ parentId: "asc" }, { position: "asc" }],
+        select: {
+          id: true,
+          name: true,
+          parentId: true,
+          position: true,
+          createdAt: true,
+        },
+      }),
+      this.prisma.document.findMany({
+        where: { workspaceId, deletedAt: null },
+        orderBy: [{ folderId: "asc" }, { position: "asc" }],
+        select: {
+          id: true,
+          folderId: true,
+          title: true,
+          status: true,
+          position: true,
+          isLocked: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      }),
+    ]);
+    return { folders, documents };
+  }
+
+  async softDeleteDocument({
+    actorUserId,
+    workspaceId,
+    documentId,
+  }: {
+    actorUserId: string;
+    workspaceId: string;
+    documentId: string;
+  }) {
+    const membership = await this.requireWorkspaceMembership({ actorUserId, workspaceId });
+    if (membership.workspace.status === "archived") {
+      throw new AppError({ code: "WORKSPACE_ARCHIVED_READONLY" });
+    }
+    assertManagerOrAbove(membership.role);
+    const doc = await this.prisma.document.findFirst({
+      where: { id: documentId, workspaceId, deletedAt: null },
+      select: { id: true, status: true },
+    });
+    if (!doc) {
+      throw new AppError({ code: "DOCUMENT_NOT_FOUND" });
+    }
+    if (doc.status !== "draft") {
+      throw new AppError({
+        code: "DOCUMENT_READONLY_STATUS",
+        message: "Only draft documents can be deleted.",
+      });
+    }
+    await this.prisma.document.update({
+      where: { id: documentId },
+      data: { deletedAt: new Date(), updatedById: actorUserId },
+    });
+    this.realtimeEvents?.emit("document:deleted", {
+      workspaceId,
+      userId: actorUserId,
+      data: { documentId },
+    });
+    return { message: "Document deleted." };
+  }
+
+  async lockDocument({
+    actorUserId,
+    workspaceId,
+    documentId,
+  }: {
+    actorUserId: string;
+    workspaceId: string;
+    documentId: string;
+  }) {
+    const membership = await this.requireWorkspaceMembership({ actorUserId, workspaceId });
+    if (membership.workspace.status === "archived") {
+      throw new AppError({ code: "WORKSPACE_ARCHIVED_READONLY" });
+    }
+    assertManagerOrAbove(membership.role);
+    const doc = await this.prisma.document.findFirst({
+      where: { id: documentId, workspaceId, deletedAt: null },
+      select: { id: true, isLocked: true },
+    });
+    if (!doc) {
+      throw new AppError({ code: "DOCUMENT_NOT_FOUND" });
+    }
+    const now = new Date();
+    const updated = await this.prisma.document.update({
+      where: { id: documentId },
+      data: {
+        isLocked: true,
+        lockedByUserId: actorUserId,
+        lockedAt: now,
+        updatedById: actorUserId,
+      },
+      select: {
+        id: true,
+        isLocked: true,
+        lockedAt: true,
+        lockedByUserId: true,
+      },
+    });
+    this.realtimeEvents?.emit("document:locked", {
+      workspaceId,
+      userId: actorUserId,
+      data: { documentId: updated.id, isLocked: true, lockedByUserId: updated.lockedByUserId, lockedAt: updated.lockedAt },
+    });
+    return updated;
+  }
+
+  async unlockDocument({
+    actorUserId,
+    workspaceId,
+    documentId,
+  }: {
+    actorUserId: string;
+    workspaceId: string;
+    documentId: string;
+  }) {
+    const membership = await this.requireWorkspaceMembership({ actorUserId, workspaceId });
+    if (membership.workspace.status === "archived") {
+      throw new AppError({ code: "WORKSPACE_ARCHIVED_READONLY" });
+    }
+    assertManagerOrAbove(membership.role);
+    const doc = await this.prisma.document.findFirst({
+      where: { id: documentId, workspaceId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!doc) {
+      throw new AppError({ code: "DOCUMENT_NOT_FOUND" });
+    }
+    const updated = await this.prisma.document.update({
+      where: { id: documentId },
+      data: {
+        isLocked: false,
+        lockedByUserId: null,
+        lockedAt: null,
+        updatedById: actorUserId,
+      },
+      select: {
+        id: true,
+        isLocked: true,
+        lockedAt: true,
+        lockedByUserId: true,
+      },
+    });
+    this.realtimeEvents?.emit("document:locked", {
+      workspaceId,
+      userId: actorUserId,
+      data: { documentId: updated.id, isLocked: false, lockedByUserId: null, lockedAt: null },
+    });
+    return updated;
+  }
+
+  async listDocumentVersions({
+    actorUserId,
+    workspaceId,
+    documentId,
+  }: {
+    actorUserId: string;
+    workspaceId: string;
+    documentId: string;
+  }) {
+    await this.requireWorkspaceMembership({ actorUserId, workspaceId });
+    const doc = await this.prisma.document.findFirst({
+      where: { id: documentId, workspaceId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!doc) {
+      throw new AppError({ code: "DOCUMENT_NOT_FOUND" });
+    }
+    const versions = await this.prisma.documentVersion.findMany({
+      where: { documentId, workspaceId },
+      orderBy: { versionNumber: "desc" },
+      select: {
+        id: true,
+        versionNumber: true,
+        reason: true,
+        createdAt: true,
+        createdById: true,
+      },
+    });
+    return { items: versions, total: versions.length };
+  }
+
+  async restoreDocumentVersion({
+    actorUserId,
+    workspaceId,
+    documentId,
+    versionId,
+  }: {
+    actorUserId: string;
+    workspaceId: string;
+    documentId: string;
+    versionId: string;
+  }) {
+    const membership = await this.requireWorkspaceMembership({ actorUserId, workspaceId });
+    if (membership.workspace.status === "archived") {
+      throw new AppError({ code: "WORKSPACE_ARCHIVED_READONLY" });
+    }
+    assertManagerOrAbove(membership.role);
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const current = await tx.document.findFirst({
+        where: { id: documentId, workspaceId, deletedAt: null },
+        select: {
+          id: true,
+          status: true,
+          isLocked: true,
+          contentYjs: true,
+          contentPlaintext: true,
+        },
+      });
+      if (!current) {
+        throw new AppError({ code: "DOCUMENT_NOT_FOUND" });
+      }
+      if (
+        isDocumentReadOnly({
+          status: current.status,
+          isLocked: current.isLocked,
+          role: membership.role,
+        })
+      ) {
+        throw new AppError({ code: "DOCUMENT_READONLY_STATUS" });
+      }
+      const target = await tx.documentVersion.findFirst({
+        where: { id: versionId, documentId, workspaceId },
+      });
+      if (!target) {
+        throw new AppError({ code: "NOT_FOUND", message: "Version not found" });
+      }
+      const latest = await tx.documentVersion.findFirst({
+        where: { documentId },
+        orderBy: { versionNumber: "desc" },
+        select: { versionNumber: true },
+      });
+      const nextNum = (latest?.versionNumber ?? 0) + 1;
+      await tx.documentVersion.create({
+        data: {
+          workspaceId,
+          documentId,
+          versionNumber: nextNum,
+          reason: "before_restore",
+          yjsState: current.contentYjs,
+          plaintext: current.contentPlaintext,
+          createdById: actorUserId,
+        },
+      });
+      const restored = await tx.document.update({
+        where: { id: documentId },
+        data: {
+          contentYjs: target.yjsState,
+          contentPlaintext: target.plaintext ?? "",
+          updatedById: actorUserId,
+        },
+        select: {
+          id: true,
+          updatedAt: true,
+        },
+      });
+      return restored;
+    });
+    this.realtimeEvents?.emit("document:version-restored", {
+      workspaceId,
+      userId: actorUserId,
+      data: { documentId, versionId, updatedAt: result.updatedAt },
+    });
+    return result;
+  }
+
+  async listDocumentSubmissions({
+    actorUserId,
+    workspaceId,
+    documentId,
+  }: {
+    actorUserId: string;
+    workspaceId: string;
+    documentId: string;
+  }) {
+    await this.requireWorkspaceMembership({ actorUserId, workspaceId });
+    const doc = await this.prisma.document.findFirst({
+      where: { id: documentId, workspaceId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!doc) {
+      throw new AppError({ code: "DOCUMENT_NOT_FOUND" });
+    }
+    const items = await this.prisma.documentSubmission.findMany({
+      where: { workspaceId, documentId },
+      orderBy: { submittedAt: "desc" },
+      select: {
+        id: true,
+        submittedAt: true,
+        submittedById: true,
+        decision: true,
+        decidedAt: true,
+        decidedById: true,
+        decisionNote: true,
+        snapshotVersionId: true,
+      },
+    });
+    return { items, total: items.length };
   }
 
   private async requireWorkspaceMembership({

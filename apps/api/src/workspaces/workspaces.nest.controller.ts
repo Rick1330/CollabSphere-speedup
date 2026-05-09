@@ -4,14 +4,17 @@ import {
   Controller,
   Delete,
   Get,
-  Headers,
+  Inject,
   Param,
   Patch,
   Post,
   Put,
+  UseGuards,
 } from "@nestjs/common";
-import { resolveRequestUserId } from "../common/auth/request-user.js";
+import { CurrentUserId } from "../common/decorators/current-user.decorator.js";
+import { WorkspaceMembershipGuard } from "../common/guards/workspace-membership.guard.js";
 import { ValidationAppError } from "../common/filters/app-error.filter.js";
+import { ReqRequestId } from "../common/nest/request-id.decorator.js";
 import {
   createActionResponsePayload,
   createSingleResourcePayload,
@@ -46,15 +49,18 @@ const validWorkspaceRoles: WorkspaceRole[] = ["OWNER", "ADMIN", "MANAGER", "MEMB
 const validWorkspaceTypes: WorkspaceType[] = ["professional", "academic", "general"];
 
 @Controller("workspaces")
+@UseGuards(WorkspaceMembershipGuard)
 export class WorkspacesNestController {
-  constructor(private readonly workspacesService: WorkspacesService) {}
+  constructor(
+    @Inject(WorkspacesService) private readonly workspacesService: WorkspacesService,
+  ) {}
 
   @Post()
   async createWorkspace(
-    @Headers("x-user-id") userIdHeader: unknown,
+    @ReqRequestId() requestId: string,
+    @CurrentUserId() actorUserId: string,
     @Body() body: CreateWorkspaceBody,
   ) {
-    const actorUserId = resolveRequestUserId(userIdHeader);
     const payload = this.validateCreateWorkspace(body);
     const data = await this.workspacesService.createWorkspace({
       actorUserId,
@@ -65,44 +71,43 @@ export class WorkspacesNestController {
       statusCode: 201,
       ...wrapSuccessResponse({
         payload: createSingleResourcePayload({ workspace: data }),
-        requestId: "nest-request",
+        requestId,
       }),
     };
   }
 
   @Get()
-  async listWorkspaces(@Headers("x-user-id") userIdHeader: unknown) {
-    const userId = resolveRequestUserId(userIdHeader);
+  async listWorkspaces(@ReqRequestId() requestId: string, @CurrentUserId() userId: string) {
     const data = await this.workspacesService.listForUser(userId);
     return wrapSuccessResponse({
       payload: createListResponsePayload({ items: data, total: data.length }),
-      requestId: "nest-request",
+      requestId,
     });
   }
 
   @Get(":workspaceId")
   async getWorkspace(
     @Param("workspaceId") workspaceId: string,
-    @Headers("x-user-id") userIdHeader: unknown,
+    @ReqRequestId() requestId: string,
+    @CurrentUserId() userId: string,
   ) {
-    const userId = resolveRequestUserId(userIdHeader);
     const data = await this.workspacesService.getByIdForUser({ userId, workspaceId });
     return wrapSuccessResponse({
       payload: createSingleResourcePayload(data),
-      requestId: "nest-request",
+      requestId,
     });
   }
 
   @Get(":workspaceId/members")
   async listMembers(
     @Param("workspaceId") workspaceId: string,
-    @Headers("x-user-id") userIdHeader: unknown,
+    @ReqRequestId() requestId: string,
+    @CurrentUserId() userId: string,
   ) {
-    const userId = resolveRequestUserId(userIdHeader);
     const data = await this.workspacesService.listMembersForUser({ userId, workspaceId });
     return wrapSuccessResponse({
       payload: createListResponsePayload({ items: data, total: data.length }),
-      requestId: "nest-request",
+      requestId,
     });
   }
 
@@ -110,10 +115,10 @@ export class WorkspacesNestController {
   async updateMemberRole(
     @Param("workspaceId") workspaceId: string,
     @Param("membershipId") membershipId: string,
-    @Headers("x-user-id") userIdHeader: unknown,
+    @ReqRequestId() requestId: string,
+    @CurrentUserId() userId: string,
     @Body() body: UpdateWorkspaceMemberRoleBody,
   ) {
-    const userId = resolveRequestUserId(userIdHeader);
     const nextRole = this.validateRole(body);
     const data = await this.workspacesService.updateMemberRole({
       actorUserId: userId,
@@ -124,7 +129,7 @@ export class WorkspacesNestController {
 
     return wrapSuccessResponse({
       payload: createSingleResourcePayload(data),
-      requestId: "nest-request",
+      requestId,
     });
   }
 
@@ -132,9 +137,9 @@ export class WorkspacesNestController {
   async removeMember(
     @Param("workspaceId") workspaceId: string,
     @Param("membershipId") membershipId: string,
-    @Headers("x-user-id") userIdHeader: unknown,
+    @ReqRequestId() requestId: string,
+    @CurrentUserId() userId: string,
   ) {
-    const userId = resolveRequestUserId(userIdHeader);
     const data = await this.workspacesService.removeMember({
       actorUserId: userId,
       workspaceId,
@@ -143,17 +148,17 @@ export class WorkspacesNestController {
 
     return wrapSuccessResponse({
       payload: createSingleResourcePayload(data),
-      requestId: "nest-request",
+      requestId,
     });
   }
 
   @Put(":workspaceId")
   async updateWorkspace(
     @Param("workspaceId") workspaceId: string,
-    @Headers("x-user-id") userIdHeader: unknown,
+    @ReqRequestId() requestId: string,
+    @CurrentUserId() actorUserId: string,
     @Body() body: UpdateWorkspaceBody,
   ) {
-    const actorUserId = resolveRequestUserId(userIdHeader);
     const payload = this.validateUpdateWorkspace(body);
     const data = await this.workspacesService.updateWorkspaceSettings({
       actorUserId,
@@ -163,16 +168,16 @@ export class WorkspacesNestController {
 
     return wrapSuccessResponse({
       payload: createSingleResourcePayload(data),
-      requestId: "nest-request",
+      requestId,
     });
   }
 
   @Post(":workspaceId/archive")
   async archiveWorkspace(
     @Param("workspaceId") workspaceId: string,
-    @Headers("x-user-id") userIdHeader: unknown,
+    @ReqRequestId() requestId: string,
+    @CurrentUserId() actorUserId: string,
   ) {
-    const actorUserId = resolveRequestUserId(userIdHeader);
     const data = await this.workspacesService.setWorkspaceArchivedStatus({
       actorUserId,
       workspaceId,
@@ -181,16 +186,16 @@ export class WorkspacesNestController {
 
     return wrapSuccessResponse({
       payload: createSingleResourcePayload(data),
-      requestId: "nest-request",
+      requestId,
     });
   }
 
   @Post(":workspaceId/unarchive")
   async unarchiveWorkspace(
     @Param("workspaceId") workspaceId: string,
-    @Headers("x-user-id") userIdHeader: unknown,
+    @ReqRequestId() requestId: string,
+    @CurrentUserId() actorUserId: string,
   ) {
-    const actorUserId = resolveRequestUserId(userIdHeader);
     const data = await this.workspacesService.setWorkspaceArchivedStatus({
       actorUserId,
       workspaceId,
@@ -199,30 +204,30 @@ export class WorkspacesNestController {
 
     return wrapSuccessResponse({
       payload: createSingleResourcePayload(data),
-      requestId: "nest-request",
+      requestId,
     });
   }
 
   @Delete(":workspaceId")
   async deleteWorkspace(
     @Param("workspaceId") workspaceId: string,
-    @Headers("x-user-id") userIdHeader: unknown,
+    @ReqRequestId() requestId: string,
+    @CurrentUserId() actorUserId: string,
   ) {
-    const actorUserId = resolveRequestUserId(userIdHeader);
     const data = await this.workspacesService.deleteWorkspace({ actorUserId, workspaceId });
     return wrapSuccessResponse({
       payload: createActionResponsePayload({ message: data.message }),
-      requestId: "nest-request",
+      requestId,
     });
   }
 
   @Post(":workspaceId/transfer-ownership")
   async transferOwnership(
     @Param("workspaceId") workspaceId: string,
-    @Headers("x-user-id") userIdHeader: unknown,
+    @ReqRequestId() requestId: string,
+    @CurrentUserId() actorUserId: string,
     @Body() body: TransferOwnershipBody,
   ) {
-    const actorUserId = resolveRequestUserId(userIdHeader);
     const payload = this.validateTransferOwnership(body);
     const data = await this.workspacesService.transferOwnership({
       actorUserId,
@@ -232,7 +237,7 @@ export class WorkspacesNestController {
 
     return wrapSuccessResponse({
       payload: createSingleResourcePayload(data),
-      requestId: "nest-request",
+      requestId,
     });
   }
 

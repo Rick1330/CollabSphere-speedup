@@ -20,6 +20,13 @@ export interface AuthSession {
   accountId: string;
   accessToken: string;
   issuedAt: string; // ISO
+  user?: {
+    id: string;
+    email: string;
+    fullName: string;
+    avatarUrl?: string | null;
+    globalRole?: "USER" | "ADMIN";
+  };
 }
 
 function readSession(): AuthSession | null {
@@ -28,7 +35,7 @@ function readSession(): AuthSession | null {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as AuthSession;
-    if (!parsed?.accountId || !findAccountById(parsed.accountId)) return null;
+    if (!parsed?.accountId || !parsed?.accessToken) return null;
     return parsed;
   } catch {
     return null;
@@ -52,15 +59,42 @@ export const authSession = {
   get(): AuthSession | null {
     return current;
   },
+  getAccessToken(): string | null {
+    return current?.accessToken ?? null;
+  },
   getAccount(): MockAccount | null {
     if (!current) return null;
-    return findAccountById(current.accountId) ?? null;
+    const account = findAccountById(current.accountId);
+    if (account) return account;
+    if (!current.user) return null;
+    return {
+      id: current.user.id,
+      email: current.user.email,
+      password: "",
+      fullName: current.user.fullName,
+      initials: current.user.fullName
+        .split(/\s+/)
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((chunk) => chunk[0]?.toUpperCase() ?? "")
+        .join(""),
+      bio: null,
+      avatarUrl: current.user.avatarUrl ?? null,
+      globalRole: current.user.globalRole ?? "USER",
+      authProvider: "local",
+      status: "active",
+      defaultWorkspaceId: "alpha",
+      defaultWorkspaceType: "general",
+      defaultWorkspaceRole: "MEMBER",
+      blurb: "Authenticated user",
+    };
   },
-  signIn(accountId: string) {
+  signIn(accountId: string, options?: { accessToken?: string; user?: AuthSession["user"] }) {
     current = {
       accountId,
-      accessToken: `mock-token-${accountId}-${Date.now()}`,
+      accessToken: options?.accessToken ?? `mock-token-${accountId}-${Date.now()}`,
       issuedAt: new Date().toISOString(),
+      user: options?.user,
     };
     writeSession(current);
     emit();

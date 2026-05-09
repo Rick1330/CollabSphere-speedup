@@ -4,7 +4,12 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@collabsphere/shared": "workspace:*"
+    "@collabsphere/shared": "workspace:*",
+    "@hocuspocus/server": "^4.0.0",
+    "@prisma/client": "^6.7.0",
+    "@types/jsonwebtoken": "^9.0.10",
+    "jsonwebtoken": "^9.0.3",
+    "yjs": "^13.6.30"
   },
   "scripts": {
     "dev": "tsx watch src/dev.ts",

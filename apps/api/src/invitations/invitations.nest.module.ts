@@ -1,10 +1,11 @@
 import { Module } from "@nestjs/common";
-import { PrismaClientProvider } from "../common/prisma/prisma-client.provider.js";
+import { PrismaModule } from "../common/prisma/prisma.module.js";
 import { InvitationsNestController } from "./invitations.nest.controller.js";
 import { InvitationsService } from "./invitations.service.js";
 
 @Module({
+  imports: [PrismaModule],
   controllers: [InvitationsNestController],
-  providers: [PrismaClientProvider, InvitationsService],
+  providers: [InvitationsService],
 })
 export class InvitationsNestModule {}

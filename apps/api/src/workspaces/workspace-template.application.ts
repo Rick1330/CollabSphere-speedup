@@ -196,22 +196,23 @@ export const parseWorkspaceTemplateContent = (raw: unknown): WorkspaceTemplateCo
   return {
     schemaVersion: 2,
     format: typeof payload.format === "string" ? payload.format : undefined,
-    metadata: metadataRaw
-      ? {
-          title:
-            typeof metadataRaw.title === "string"
-              ? sanitizeTemplateString(metadataRaw.title)
-              : undefined,
-          category:
-            typeof metadataRaw.category === "string"
-              ? sanitizeTemplateString(metadataRaw.category)
-              : undefined,
-          kind:
-            typeof metadataRaw.kind === "string"
-              ? sanitizeTemplateString(metadataRaw.kind)
-              : undefined,
-        }
-      : undefined,
+    metadata:
+      metadataRaw && isRecord(metadataRaw)
+        ? {
+            title:
+              typeof metadataRaw.title === "string"
+                ? sanitizeTemplateString(metadataRaw.title)
+                : undefined,
+            category:
+              typeof metadataRaw.category === "string"
+                ? sanitizeTemplateString(metadataRaw.category)
+                : undefined,
+            kind:
+              typeof metadataRaw.kind === "string"
+                ? sanitizeTemplateString(metadataRaw.kind)
+                : undefined,
+          }
+        : undefined,
     folders,
     documents,
     taskColumns,

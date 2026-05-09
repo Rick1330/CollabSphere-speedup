@@ -1,21 +1,42 @@
 import { useEffect, useState } from "react";
+import {
+  joinWorkspaceRoom,
+  subscribeRealtimeStatus,
+  subscribeTaskEvents,
+  type TaskRealtimeEvent,
+} from "@/api/realtime/socket-client";
 
 export type RealtimeStatus = "connected" | "reconnecting" | "unavailable";
 
-/**
- * Mock realtime status. In production this would subscribe to a websocket
- * channel for `task:created`, `task:updated`, `task:moved`, etc. Here we
- * simulate a connected state with an occasional brief reconnect so the UI
- * banner can be visibly exercised.
- */
-export function useTaskRealtime(workspaceId: string): RealtimeStatus {
+export function useTaskRealtime(
+  workspaceId: string,
+  onTaskEvent?: (event: TaskRealtimeEvent, payload: unknown) => void,
+): RealtimeStatus {
   const [status, setStatus] = useState<RealtimeStatus>("reconnecting");
 
   useEffect(() => {
-    setStatus("reconnecting");
-    const t = window.setTimeout(() => setStatus("connected"), 600);
-    return () => window.clearTimeout(t);
-  }, [workspaceId]);
+    let cancelled = false;
+    const unsubscribe = subscribeRealtimeStatus((next) => {
+      if (!cancelled) {
+        setStatus(next);
+      }
+    });
+    const unsubscribeTaskEvents = subscribeTaskEvents((event, payload) => {
+      if (!cancelled && onTaskEvent) {
+        onTaskEvent(event, payload);
+      }
+    });
+    joinWorkspaceRoom(workspaceId).catch(() => {
+      if (!cancelled) {
+        setStatus("unavailable");
+      }
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+      unsubscribeTaskEvents();
+    };
+  }, [workspaceId, onTaskEvent]);
 
   return status;
 }

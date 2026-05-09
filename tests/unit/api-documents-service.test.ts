@@ -362,6 +362,95 @@ test("documents service blocks approve for non-review role", async () => {
   );
 });
 
+test("documents service publishes realtime event after activity creation", async () => {
+  let published = false;
+  const prisma = {
+    workspaceMember: {
+      findFirst: async () => ({
+        id: "m-1",
+        role: "MEMBER",
+        workspace: { id: "ws-1", type: "academic", status: "active" },
+      }),
+      count: async () => 1,
+    },
+    user: {
+      findUnique: async () => ({
+        id: "user-1",
+        fullName: "Alice",
+        avatarUrl: null,
+        email: "alice@example.com",
+        globalRole: "USER",
+      }),
+    },
+    document: {
+      findFirst: async () => ({
+        id: "doc-1",
+        title: "Doc A",
+        status: "draft",
+        contentPlaintext: "Body",
+      }),
+    },
+    activityEvent: {
+      create: async () => ({
+        id: "act-1",
+        workspaceId: "ws-1",
+        actorId: "user-1",
+        actorNameSnapshot: "Alice",
+        actorAvatarSnapshot: null,
+        eventKey: "document.submitted",
+        summary: "Alice submitted Doc A",
+        resourceType: "document",
+        resourceId: "doc-1",
+        resourceTitleSnapshot: "Doc A",
+        metadata: {},
+        createdAt: new Date("2026-05-08T00:00:00.000Z"),
+      }),
+    },
+    auditLog: {
+      create: async () => ({ id: "audit-1" }),
+    },
+    $transaction: async (callback: (tx: unknown) => Promise<unknown>) =>
+      callback({
+        documentVersion: {
+          findFirst: async () => ({
+            id: "ver-1",
+            versionNumber: 1,
+            yjsState: Buffer.from("state"),
+            plaintext: "Body",
+          }),
+          create: async () => ({ id: "ver-2" }),
+        },
+        document: {
+          update: async () => ({
+            id: "doc-1",
+            status: "submitted",
+            updatedAt: new Date("2026-05-08T00:00:00.000Z"),
+          }),
+        },
+        documentSubmission: {
+          create: async () => ({
+            id: "sub-1",
+            decision: null,
+            submittedAt: new Date("2026-05-08T00:00:00.000Z"),
+          }),
+        },
+      }),
+  };
+  const realtimeEvents = {
+    emitActivityFromRecord: () => {
+      published = true;
+    },
+  };
+  const service = new DocumentsService(prisma as never, realtimeEvents as never);
+  await service.transitionDocumentStatus({
+    actorUserId: "user-1",
+    workspaceId: "ws-1",
+    documentId: "doc-1",
+    action: "submit",
+  });
+  assert.equal(published, true);
+});
+
 test("documents service rejects submit without supervisor in academic workspace", async () => {
   const prisma = {
     workspaceMember: {

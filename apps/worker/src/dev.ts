@@ -1,6 +1,12 @@
 import { EnvValidationError, parseRuntimeEnv } from "../../../packages/shared/src/runtime-env.js";
 import { validateServiceEnv } from "../../../packages/shared/src/bootstrap-runtime.js";
 import { startVerificationEmailProcessor } from "./jobs/email/verification-email-processor.js";
+import { Queue, Worker } from "bullmq";
+import { Redis } from "ioredis";
+import { PrismaClient } from "@prisma/client";
+import { WORKER_QUEUES } from "./jobs/queues.js";
+import { processTaskReminderJob } from "./jobs/task-reminders.processor.js";
+import { processExportJob } from "./jobs/export.processor.js";
 
 const defaultHeartbeatMs = 5000;
 const minHeartbeatMs = 1000;
@@ -43,6 +49,20 @@ const workerEnv = validateServiceEnv({
   parser: parseRuntimeEnv,
   validationErrorClass: EnvValidationError,
 });
+const prisma = new PrismaClient();
+const redis = new Redis(workerEnv.REDIS_URL, { maxRetriesPerRequest: null });
+const exportsQueue = new Queue(WORKER_QUEUES.EXPORTS, { connection: redis });
+const remindersQueue = new Queue(WORKER_QUEUES.TASK_REMINDERS, { connection: redis });
+const exportsWorker = new Worker(
+  WORKER_QUEUES.EXPORTS,
+  (job: Parameters<typeof processExportJob>[0]) => processExportJob(job, { prisma }),
+  { connection: redis },
+);
+const remindersWorker = new Worker(
+  WORKER_QUEUES.TASK_REMINDERS,
+  (job: Parameters<typeof processTaskReminderJob>[0]) => processTaskReminderJob(job, { prisma }),
+  { connection: redis },
+);
 const stopVerificationEmailProcessor = startVerificationEmailProcessor({
   jwtAccessSecret: workerEnv.JWT_ACCESS_SECRET,
   baseUrl: workerEnv.BASE_URL,
@@ -56,12 +76,23 @@ console.log(`[worker] heartbeat interval ${heartbeatMs}ms`);
 const timer = setInterval(() => {
   console.log(`[worker] heartbeat ${new Date().toISOString()}`);
 }, heartbeatMs);
+const reminderTimer = setInterval(() => {
+  void remindersQueue.add("scan", {}, { removeOnComplete: true, removeOnFail: true });
+}, 10 * 60 * 1000);
 
 const shutdown = (signal: string) => {
   console.log(`[worker] received ${signal}, shutting down`);
   stopVerificationEmailProcessor();
   clearInterval(timer);
-  process.exit(0);
+  clearInterval(reminderTimer);
+  void Promise.all([
+    exportsWorker.close(),
+    remindersWorker.close(),
+    exportsQueue.close(),
+    remindersQueue.close(),
+    redis.quit(),
+    prisma.$disconnect(),
+  ]).finally(() => process.exit(0));
 };
 
 process.once("SIGINT", () => shutdown("SIGINT"));

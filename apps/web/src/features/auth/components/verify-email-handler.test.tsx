@@ -206,11 +206,13 @@ describe("VerifyEmailHandler", () => {
   });
 
   it("fires exactly twice when the token changes", async () => {
-    const fetchSpy = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ data: { message: "Email verified successfully." } }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
+    const fetchSpy = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ data: { message: "Email verified successfully." } }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
     );
     vi.stubGlobal("fetch", fetchSpy);
 
@@ -228,11 +230,13 @@ describe("VerifyEmailHandler", () => {
   });
 
   it("does not fire a second fetch when re-rendered with the same token (useRef idempotency guard)", async () => {
-    const fetchSpy = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ data: { message: "Email verified successfully." } }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
+    const fetchSpy = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ data: { message: "Email verified successfully." } }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
     );
     vi.stubGlobal("fetch", fetchSpy);
 

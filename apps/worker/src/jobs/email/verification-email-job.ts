@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import nodemailer from "nodemailer";
 import {
   decryptVerificationToken,
   type VerificationEmailJob,
@@ -17,9 +18,29 @@ const dispatchVerificationEmail = async ({
   fullName: string;
   verificationUrl: string;
 }) => {
-  void email;
-  void fullName;
-  void verificationUrl;
+  const smtpHost = process.env.EMAIL_SMTP_HOST?.trim();
+  const smtpPortRaw = process.env.EMAIL_SMTP_PORT?.trim();
+  if (smtpHost && smtpPortRaw) {
+    const smtpPort = Number.parseInt(smtpPortRaw, 10);
+    if (Number.isFinite(smtpPort) && smtpPort > 0) {
+      const transport = nodemailer.createTransport({
+        host: smtpHost,
+        port: smtpPort,
+        secure: false,
+      });
+      await transport.sendMail({
+        from: "no-reply@collabsphere.local",
+        to: email,
+        subject: "Verify your CollabSphere account",
+        text: `Hi ${fullName},\n\nVerify your account: ${verificationUrl}\n\nIf you did not request this, ignore this email.`,
+        html: `<p>Hi ${fullName},</p><p>Verify your account: <a href="${verificationUrl}">${verificationUrl}</a></p><p>If you did not request this, ignore this email.</p>`,
+      });
+      return;
+    }
+  }
+
+  // Keep a robust fallback for local verification even when SMTP is unavailable.
+  console.info(`[worker] email fallback (not sent via SMTP) for ${email}: ${verificationUrl}`);
 };
 
 const trimTrailingSlashes = (value: string) => {

@@ -18,6 +18,7 @@ export class ApiError extends Error {
     public readonly status: number,
     message: string,
     public readonly body?: unknown,
+    public readonly code?: string,
   ) {
     super(message);
     this.name = "ApiError";
@@ -63,6 +64,7 @@ export async function request<T>(path: string, opts: RequestOptions = {}): Promi
     headers,
     body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
     signal: opts.signal,
+    credentials: "include",
   });
 
   if (res.ok) {
@@ -76,5 +78,12 @@ export async function request<T>(path: string, opts: RequestOptions = {}): Promi
   } catch {
     body = await res.text().catch(() => undefined);
   }
-  throw new ApiError(res.status, `${opts.method ?? "GET"} ${path} → ${res.status}`, body);
+  let message = `${opts.method ?? "GET"} ${path} → ${res.status}`;
+  let code: string | undefined;
+  if (body && typeof body === "object" && "error" in body) {
+    const errorObj = (body as { error?: { message?: string; code?: string } }).error;
+    if (typeof errorObj?.message === "string") message = errorObj.message;
+    if (typeof errorObj?.code === "string") code = errorObj.code;
+  }
+  throw new ApiError(res.status, message, body, code);
 }

@@ -1,10 +1,17 @@
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { TaskPageHeader } from "./task-page-header";
 import { TaskDetailSheet, type TaskRole } from "./task-detail-sheet";
 import { CreateTaskDialog } from "./create-task-dialog";
 import { useTaskListQueryState } from "../hooks/use-task-list-query-state";
 import { useTaskRealtime } from "../hooks/use-task-realtime";
-import { SEED_TASKS, SEED_WORKSPACE_MEMBERS, getAllLabels, type TaskDetail } from "@/api/adapters/tasks";
+import {
+  getAllLabels,
+  getWorkspaceWorkflowColumns,
+  listTasksMap,
+  listWorkspaceMembers,
+  type TaskAssignee,
+  type TaskDetail,
+} from "@/api/adapters/tasks";
 import { TaskCard } from "./task-card";
 
 interface TaskCalendarProps {
@@ -18,13 +25,37 @@ export const TaskCalendar = ({
   workspaceStatus,
   myRole,
 }: TaskCalendarProps) => {
-  const [tasksMap, setTasksMap] = useState<Record<string, TaskDetail>>(SEED_TASKS);
+  const [tasksMap, setTasksMap] = useState<Record<string, TaskDetail>>({});
+  const [members, setMembers] = useState<TaskAssignee[]>([]);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [columns, setColumns] = useState(() => getWorkspaceWorkflowColumns(workspaceId));
 
   const { state, setSearch, setFilters } = useTaskListQueryState();
 
   const realtime = useTaskRealtime(workspaceId);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([listTasksMap(workspaceId), listWorkspaceMembers(workspaceId)])
+      .then(([loadedTasks, loadedMembers]) => {
+        if (cancelled) return;
+        setTasksMap(loadedTasks);
+        setMembers(loadedMembers);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setTasksMap({});
+        setMembers([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId]);
+
+  useEffect(() => {
+    setColumns(getWorkspaceWorkflowColumns(workspaceId));
+  }, [workspaceId]);
 
   const allLabels = useMemo(() => getAllLabels(tasksMap), [tasksMap]);
   const tasks = Object.values(tasksMap);
@@ -55,7 +86,7 @@ export const TaskCalendar = ({
           onSearchChange={setSearch}
           filters={state.filters}
           onFiltersChange={setFilters}
-          members={SEED_WORKSPACE_MEMBERS}
+          members={members}
           allLabels={allLabels}
           canCreate={canCreate}
           onCreateTask={() => setIsCreateOpen(true)}
@@ -90,7 +121,7 @@ export const TaskCalendar = ({
           myRole={myRole}
           allTasks={tasksMap}
           currentUserId="user-jane"
-          members={SEED_WORKSPACE_MEMBERS}
+          members={members}
           onClose={() => setActiveTaskId(null)}
           onDelete={(id) => {
             const next = { ...tasksMap };
@@ -108,10 +139,7 @@ export const TaskCalendar = ({
           onEditComment={() => {}}
           onDeleteComment={() => {}}
           statusOptions={[
-            { status: "todo", label: "To Do" },
-            { status: "in_progress", label: "In Progress" },
-            { status: "in_review", label: "Testing" },
-            { status: "done", label: "Done" },
+            ...columns.map((column) => ({ status: column.status, label: column.label })),
           ]}
         />
       )}
@@ -126,14 +154,14 @@ export const TaskCalendar = ({
             { status: "in_review", label: "Testing" },
             { status: "done", label: "Done" },
           ]}
-          members={SEED_WORKSPACE_MEMBERS}
-          assignableMembers={SEED_WORKSPACE_MEMBERS}
+          members={members}
+          assignableMembers={members}
           currentUserId="user-jane"
           onClose={() => setIsCreateOpen(false)}
           onCreated={(task) => {
             const id = `task-${Date.now()}`;
             const assignee = task.assigneeId
-              ? SEED_WORKSPACE_MEMBERS.find((m) => m.id === task.assigneeId) ?? null
+              ? members.find((m) => m.id === task.assigneeId) ?? null
               : null;
             const now = new Date().toISOString();
             setTasksMap((prev) => ({

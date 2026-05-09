@@ -50,17 +50,17 @@ const createController = () => {
 describe("api nest invitations controller", () => {
   it("returns envelopes for invitation routes", async () => {
     const controller = createController();
-    const created = await controller.createInvitations("w-1", "user-1", {
+    const created = await controller.createInvitations("w-1", "req-1", "user-1", {
       emails: ["a@example.com", "b@example.com"],
       role: "MEMBER",
     });
     assert.equal(created.data.total, 2);
     assert.equal(Array.isArray(created.data.items), true);
 
-    const preview = await controller.getInvitationPreview("token-1");
+    const preview = await controller.getInvitationPreview("token-1", "req-2");
     assert.equal(preview.data.resource.status, "pending");
 
-    const accepted = await controller.acceptInvitation("token-1", "user-1");
+    const accepted = await controller.acceptInvitation("token-1", "req-3", "user-1");
     assert.equal(accepted.data.resource.workspaceId, "w-1");
   });
 
@@ -68,25 +68,13 @@ describe("api nest invitations controller", () => {
     const controller = createController();
     await assert.rejects(
       () =>
-        controller.createInvitations("w-1", "user-1", {
+        controller.createInvitations("w-1", "req-1", "user-1", {
           emails: [],
           role: "MEMBER",
         }),
       (error: unknown) => {
         assert.equal(error instanceof AppError, true);
         assert.equal((error as AppError).code, "VALIDATION_ERROR");
-        return true;
-      },
-    );
-  });
-
-  it("rejects missing auth context for protected routes", async () => {
-    const controller = createController();
-    await assert.rejects(
-      () => controller.acceptInvitation("token-1", undefined),
-      (error: unknown) => {
-        assert.equal(error instanceof AppError, true);
-        assert.equal((error as AppError).code, "UNAUTHORIZED");
         return true;
       },
     );

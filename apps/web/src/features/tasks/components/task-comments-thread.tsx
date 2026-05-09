@@ -11,9 +11,9 @@ interface Props {
   members: TaskAssignee[];
   currentUserId: string;
   canComment: boolean;
-  onAdd: (body: CommentNode[]) => void;
-  onEdit: (id: string, body: CommentNode[]) => void;
-  onDelete: (id: string) => void;
+  onAdd: (body: CommentNode[]) => void | Promise<void>;
+  onEdit: (id: string, body: CommentNode[]) => void | Promise<void>;
+  onDelete: (id: string) => void | Promise<void>;
 }
 
 /** Editorial review-style comment thread. Oldest → newest. */
@@ -95,7 +95,7 @@ export const TaskCommentsThread = ({
                           type="button"
                           onClick={() => {
                             if (window.confirm("Delete this comment?"))
-                              onDelete(c.id);
+                              void onDelete(c.id);
                           }}
                           className="h-6 w-6 rounded-md flex items-center justify-center text-stone-400 hover:text-red-600 hover:bg-red-50 transition-colors"
                           aria-label="Delete comment"
@@ -113,7 +113,7 @@ export const TaskCommentsThread = ({
                       members={members}
                       onCancel={() => setEditingId(null)}
                       onSave={(body) => {
-                        onEdit(c.id, body);
+                        void onEdit(c.id, body);
                         setEditingId(null);
                       }}
                     />

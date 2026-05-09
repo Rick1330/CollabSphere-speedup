@@ -65,6 +65,8 @@ import {
   type TaskStatus,
   type TaskLinkedResource,
 } from "@/api/adapters/tasks";
+import { joinWorkspaceRoom, subscribeRealtimeStatus } from "@/api/realtime/socket-client";
+import { prepareDocumentCollabBootstrap } from "@/features/documents/collab/collab-bootstrap";
 
 type SidebarTab = "outline" | "readiness" | "properties" | "comments";
 
@@ -503,8 +505,10 @@ const DocumentEditorPage = () => {
     });
   };
 
+  const [collabReadOnlyReason, setCollabReadOnlyReason] = useState<ReadOnlyReason | null>(null);
   const readOnlyReason =
-    mergedDoc && workspace ? getReadOnlyReason(mergedDoc, workspace, CURRENT_USER_ID) : null;
+    collabReadOnlyReason ??
+    (mergedDoc && workspace ? getReadOnlyReason(mergedDoc, workspace, CURRENT_USER_ID) : null);
   const isEditable = state.status === "loaded" && readOnlyReason === null;
 
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
@@ -615,6 +619,7 @@ const DocumentEditorPage = () => {
     replyToThread,
     toggleResolve,
   } = useDocumentComments({
+    workspaceId,
     documentId: mergedDoc?.id ?? "",
     currentUserId: CURRENT_USER_ID,
   });
@@ -628,8 +633,32 @@ const DocumentEditorPage = () => {
   // Pending "create task from selection" snippet
   const [pendingTaskSnippet, setPendingTaskSnippet] = useState<string | null>(null);
 
-  // Connection truth (mock): cycles to demo states; in real life wired to socket.
-  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connected");
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("reconnecting");
+
+  useEffect(() => {
+    if (!workspaceId || !documentId) return;
+    let cancelled = false;
+    const unsubscribe = subscribeRealtimeStatus((status) => {
+      if (cancelled) return;
+      setConnectionStatus(status === "unavailable" ? "offline" : status);
+    });
+    joinWorkspaceRoom(workspaceId).catch(() => {
+      if (!cancelled) setConnectionStatus("offline");
+    });
+    prepareDocumentCollabBootstrap({ workspaceId, documentId }).then((result) => {
+      if (!cancelled) {
+        setCollabReadOnlyReason(result.readOnlyReason);
+      }
+    }).catch(() => {
+      if (!cancelled) {
+        setConnectionStatus("offline");
+      }
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [workspaceId, documentId]);
 
   const handleAnchorClick = (threadId: string) => {
     focusThread(threadId);

@@ -271,15 +271,22 @@ export const spawnBootstrap = ({ entryPath, cwd, envOverrides }: SpawnBootstrapO
 
 export const runTsc = (projectPath: string) => {
   if (!prismaClientGenerated) {
-    assert.ok(
-      packageManagerCli,
-      "npm_execpath is required to generate the Prisma client during isolated compile tests.",
-    );
-
-    execFileSync(process.execPath, [packageManagerCli, "--filter", "@collabsphere/database", "run", "generate"], {
-      cwd: repoRoot,
-      stdio: "inherit",
-    });
+    if (packageManagerCli) {
+      execFileSync(
+        process.execPath,
+        [packageManagerCli, "--filter", "@collabsphere/database", "run", "generate"],
+        {
+          cwd: repoRoot,
+          stdio: "inherit",
+        },
+      );
+    } else {
+      execFileSync("pnpm", ["--filter", "@collabsphere/database", "run", "generate"], {
+        cwd: repoRoot,
+        stdio: "inherit",
+        shell: process.platform === "win32",
+      });
+    }
     prismaClientGenerated = true;
   }
 

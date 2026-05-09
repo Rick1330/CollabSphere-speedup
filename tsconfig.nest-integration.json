@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "verbatimModuleSyntax": false,
+    "noEmit": true
+  },
+  "include": [
+    "tests/integration/nest-api-http.test.ts",
+    "apps/api/src/**/*.ts",
+    "apps/api/src/types/**/*.d.ts",
+    "packages/shared/src/**/*.ts"
+  ]
+}

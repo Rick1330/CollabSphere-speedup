@@ -4,10 +4,17 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@collabsphere/shared": "workspace:*"
+    "@collabsphere/shared": "workspace:*",
+    "@prisma/client": "^6.7.0",
+    "bullmq": "^5.58.5",
+    "ioredis": "^5.6.1",
+    "nodemailer": "^8.0.7"
   },
   "scripts": {
     "dev": "tsx watch src/dev.ts",
     "build": "pnpm --filter @collabsphere/database run generate && pnpm exec tsc -p tsconfig.json && tsx ../../scripts/build-bootstrap-app.ts ."
+  },
+  "devDependencies": {
+    "@types/nodemailer": "^8.0.0"
   }
 }

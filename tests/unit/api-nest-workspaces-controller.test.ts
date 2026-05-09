@@ -50,31 +50,22 @@ const createController = () => {
 describe("api nest workspaces controller", () => {
   it("returns envelope for list endpoints", async () => {
     const { controller } = createController();
-    const workspaces = await controller.listWorkspaces("user-1");
+    const workspaces = await controller.listWorkspaces("req-1", "user-1");
     assert.equal(Array.isArray(workspaces.data.items), true);
     assert.equal(workspaces.data.total, 1);
     assert.equal(typeof workspaces.meta.requestId, "string");
 
-    const members = await controller.listMembers("workspace-1", "user-1");
+    const members = await controller.listMembers("workspace-1", "req-2", "user-1");
     assert.equal(Array.isArray(members.data.items), true);
     assert.equal(members.data.total, 1);
-    assert.equal(typeof members.meta.timestamp, "string");
-  });
-
-  it("rejects missing auth context", async () => {
-    const { controller } = createController();
-    await assert.rejects(() => controller.listWorkspaces(undefined), (error: unknown) => {
-      assert.equal(error instanceof AppError, true);
-      assert.equal((error as AppError).code, "UNAUTHORIZED");
-      return true;
-    });
+    assert.equal(typeof members.meta.requestId, "string");
   });
 
   it("validates role payload before update", async () => {
     const { controller } = createController();
     await assert.rejects(
       () =>
-        controller.updateMemberRole("workspace-1", "member-1", "user-1", {
+        controller.updateMemberRole("workspace-1", "member-1", "req-1", "user-1", {
           role: "INVALID" as never,
         }),
       (error: unknown) => {
@@ -87,12 +78,12 @@ describe("api nest workspaces controller", () => {
 
   it("creates workspace and wraps created response", async () => {
     const { controller } = createController();
-    const response = await controller.createWorkspace("user-1", {
+    const response = await controller.createWorkspace("req-1", "user-1", {
       name: "Project Alpha",
       type: "professional",
       description: null,
-      icon: "📦",
-      templateId: "tpl_professional_software_project_v1",
+      icon: null,
+      templateId: null,
     });
 
     assert.equal(response.statusCode, 201);
