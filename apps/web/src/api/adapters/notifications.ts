@@ -1,28 +1,94 @@
-/**
- * Notifications API adapter.
- *
- * Canonical surface for the notification inbox: paginated reads, unread
- * count, mark-read mutations, category metadata, and shared types.
- * UI components MUST import from this module rather than the underlying
- * mocks in `@/lib/mock-notifications` / `@/lib/mock-notification-prefs`.
- */
-export {
-  fetchNotifications,
-  fetchUnreadCount,
-  fetchNotificationCategoryCounts,
-  markNotificationRead,
-  markAllNotificationsRead,
+import { request } from "@/api/client";
+import {
   NOTIFICATION_CATEGORY,
   NOTIFICATION_CATEGORY_META,
   type Notification,
-  type NotificationType,
   type NotificationCategory,
   type NotificationPage,
+  type NotificationType,
 } from "@/lib/mock-notifications";
+import { NOTIFICATION_TYPES, type NotificationPreferences } from "@/lib/mock-notification-prefs";
 
-export {
-  fetchNotificationPreferences,
-  updateNotificationPreferences,
-  NOTIFICATION_TYPES,
-  type NotificationPreferences,
-} from "@/lib/mock-notification-prefs";
+type ListEnvelope<T> = { data?: { items?: T[]; total?: number }; meta?: { pagination?: NotificationPage["meta"]["pagination"] } };
+type SingleEnvelope<T> = { data?: { resource?: T } };
+type ActionEnvelope = { data?: { extraData?: Record<string, unknown> } };
+
+export { NOTIFICATION_CATEGORY, NOTIFICATION_CATEGORY_META, NOTIFICATION_TYPES };
+export type { Notification, NotificationCategory, NotificationPage, NotificationPreferences, NotificationType };
+
+export async function fetchNotifications(params: {
+  page: number;
+  pageSize: number;
+  unreadOnly: boolean;
+  category?: NotificationCategory | "all";
+}): Promise<NotificationPage> {
+  const q = new URLSearchParams({
+    page: String(params.page),
+    pageSize: String(params.pageSize),
+    unreadOnly: String(params.unreadOnly),
+  });
+  if (params.category) q.set("category", params.category);
+  const payload = await request<ListEnvelope<Notification>>(`/notifications?${q.toString()}`);
+  return {
+    data: { items: payload.data?.items ?? [] },
+    meta: {
+      pagination:
+        payload.meta?.pagination ?? {
+          page: params.page,
+          pageSize: params.pageSize,
+          totalItems: payload.data?.total ?? 0,
+          totalPages: Math.max(1, Math.ceil((payload.data?.total ?? 0) / params.pageSize)),
+        },
+    },
+  };
+}
+
+export async function fetchUnreadCount(): Promise<{ data: { unreadCount: number } }> {
+  const payload = await request<SingleEnvelope<{ unreadCount: number }>>("/notifications/unread-count");
+  return { data: { unreadCount: payload.data?.resource?.unreadCount ?? 0 } };
+}
+
+export async function fetchNotificationCategoryCounts(unreadOnly: boolean): Promise<
+  { data: { all: number; byCategory: Record<NotificationCategory, number> } }
+> {
+  const page = await fetchNotifications({ page: 1, pageSize: 100, unreadOnly, category: "all" });
+  const byCategory: Record<NotificationCategory, number> = {
+    tasks: 0,
+    documents: 0,
+    comments: 0,
+    workspace: 0,
+    deadlines: 0,
+  };
+  for (const item of page.data.items) {
+    byCategory[NOTIFICATION_CATEGORY[item.type]] += 1;
+  }
+  return { data: { all: page.meta.pagination.totalItems, byCategory } };
+}
+
+export async function markNotificationRead(id: string): Promise<void> {
+  await request(`/notifications/${id}/read`, { method: "PATCH" });
+}
+
+export async function markAllNotificationsRead(): Promise<{ data: { updatedCount: number } }> {
+  const payload = await request<ActionEnvelope>("/notifications/read-all", { method: "PATCH" });
+  return { data: { updatedCount: Number(payload.data?.extraData?.updatedCount ?? 0) } };
+}
+
+export async function fetchNotificationPreferences(): Promise<NotificationPreferences> {
+  const payload = await request<SingleEnvelope<NotificationPreferences>>("/notifications/preferences");
+  return (
+    payload.data?.resource ?? {
+      inApp: {},
+      email: {},
+      dailyDigestEnabled: false,
+      weeklyDigestEnabled: false,
+    }
+  );
+}
+
+export async function updateNotificationPreferences(prefs: NotificationPreferences): Promise<void> {
+  await request("/notifications/preferences", {
+    method: "PATCH",
+    body: prefs,
+  });
+}

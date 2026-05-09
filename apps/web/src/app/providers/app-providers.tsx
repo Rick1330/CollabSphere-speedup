@@ -12,6 +12,8 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useThemePreference } from "@/hooks/use-theme-preference";
+import { configureApiClient } from "@/api/client";
+import { authSession } from "@/lib/auth-session";
 
 /** Mount-only component so the theme hook runs once at the root. */
 function ThemeListener() {
@@ -21,10 +23,18 @@ function ThemeListener() {
 
 export function AppProviders({ children }: { children: ReactNode }) {
   const [queryClient] = useState(() => new QueryClient());
+  const [isApiConfigured] = useState(() => {
+    configureApiClient({
+      baseUrl: import.meta.env.VITE_API_BASE_URL ?? "/api",
+      getAuthToken: () => authSession.getAccessToken(),
+    });
+    return true;
+  });
 
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
+        {isApiConfigured && null}
         <ThemeListener />
         <Toaster />
         <Sonner />

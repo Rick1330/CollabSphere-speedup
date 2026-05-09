@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { CommentNode, CommentThread } from "@/lib/mock-comments";
 import {
-  SEED_THREADS_BY_DOCUMENT,
-  type CommentNode,
-  type CommentThread,
-} from "@/lib/mock-comments";
+  createDocumentReply,
+  createDocumentThread,
+  listDocumentThreads,
+  setDocumentThreadResolved,
+} from "@/api/adapters/comments";
 
 export type CommentFilter = "open" | "resolved";
 
 interface UseDocumentCommentsArgs {
+  workspaceId: string;
   documentId: string;
   currentUserId: string;
 }
@@ -17,15 +20,29 @@ interface CreateThreadArgs {
   anchorSnippet?: string | null;
 }
 
-export function useDocumentComments({ documentId, currentUserId }: UseDocumentCommentsArgs) {
+export function useDocumentComments({ workspaceId, documentId, currentUserId }: UseDocumentCommentsArgs) {
   const [threads, setThreads] = useState<CommentThread[]>([]);
   const [filter, setFilter] = useState<CommentFilter>("open");
 
   // Reset when switching documents
   useEffect(() => {
-    setThreads(SEED_THREADS_BY_DOCUMENT[documentId] ?? []);
+    let cancelled = false;
+    if (!workspaceId || !documentId) {
+      setThreads([]);
+      return;
+    }
+    listDocumentThreads(workspaceId, documentId)
+      .then((items) => {
+        if (!cancelled) setThreads(items);
+      })
+      .catch(() => {
+        if (!cancelled) setThreads([]);
+      });
     setFilter("open");
-  }, [documentId]);
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId, documentId]);
 
   const openCount = useMemo(() => threads.filter((t) => !t.resolved).length, [threads]);
   const resolvedCount = useMemo(() => threads.filter((t) => t.resolved).length, [threads]);
@@ -41,9 +58,8 @@ export function useDocumentComments({ documentId, currentUserId }: UseDocumentCo
 
   const createThread = useCallback(
     ({ body, anchorSnippet }: CreateThreadArgs) => {
-      const id = `t-${Date.now()}`;
-      const thread: CommentThread = {
-        id,
+      const optimistic: CommentThread = {
+        id: `tmp-${Date.now()}`,
         documentId,
         anchor: anchorSnippet ? { snippet: anchorSnippet, status: "ok" } : null,
         authorId: currentUserId,
@@ -52,42 +68,48 @@ export function useDocumentComments({ documentId, currentUserId }: UseDocumentCo
         resolved: false,
         replies: [],
       };
-      setThreads((prev) => [...prev, thread]);
-      return thread;
+      setThreads((prev) => [...prev, optimistic]);
+      void createDocumentThread(workspaceId, documentId, body, anchorSnippet).then(() => {
+        void listDocumentThreads(workspaceId, documentId).then(setThreads);
+      });
+      return optimistic;
     },
-    [documentId, currentUserId],
+    [workspaceId, documentId, currentUserId],
   );
 
   const replyToThread = useCallback(
     (threadId: string, body: CommentNode[]) => {
+      const optimisticReply = {
+        id: `tmp-r-${Date.now()}`,
+        authorId: currentUserId,
+        body,
+        createdAt: new Date().toISOString(),
+      };
       setThreads((prev) =>
         prev.map((t) =>
           t.id === threadId
             ? {
                 ...t,
-                replies: [
-                  ...t.replies,
-                  {
-                    id: `r-${Date.now()}`,
-                    authorId: currentUserId,
-                    body,
-                    createdAt: new Date().toISOString(),
-                  },
-                ],
+                replies: [...t.replies, optimisticReply],
               }
             : t,
         ),
       );
+      void createDocumentReply(workspaceId, threadId, body).then(() => {
+        void listDocumentThreads(workspaceId, documentId).then(setThreads);
+      });
     },
-    [currentUserId],
+    [workspaceId, documentId, currentUserId],
   );
 
   const toggleResolve = useCallback(
     (threadId: string) => {
+      const thread = threads.find((item) => item.id === threadId);
+      const nextResolved = !thread?.resolved;
       setThreads((prev) =>
         prev.map((t) => {
           if (t.id !== threadId) return t;
-          if (t.resolved) {
+          if (nextResolved === false) {
             return { ...t, resolved: false, resolvedAt: undefined, resolvedBy: undefined };
           }
           return {
@@ -98,8 +120,11 @@ export function useDocumentComments({ documentId, currentUserId }: UseDocumentCo
           };
         }),
       );
+      void setDocumentThreadResolved(workspaceId, threadId, nextResolved).then(() => {
+        void listDocumentThreads(workspaceId, documentId).then(setThreads);
+      });
     },
-    [currentUserId],
+    [threads, workspaceId, documentId, currentUserId],
   );
 
   return {

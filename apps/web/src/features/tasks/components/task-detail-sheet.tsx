@@ -58,9 +58,9 @@ interface Props {
   onClose: () => void;
   onDelete: (taskId: string) => void;
   onUpdate: (taskId: string, patch: Partial<TaskDetail>) => void;
-  onAddComment: (taskId: string, body: CommentNode[]) => void;
-  onEditComment: (taskId: string, commentId: string, body: CommentNode[]) => void;
-  onDeleteComment: (taskId: string, commentId: string) => void;
+  onAddComment: (taskId: string, body: CommentNode[]) => void | Promise<void>;
+  onEditComment: (taskId: string, commentId: string, body: CommentNode[]) => void | Promise<void>;
+  onDeleteComment: (taskId: string, commentId: string) => void | Promise<void>;
   onUnlinkResource?: (taskId: string, resourceId: string) => void;
   mode?: "sheet" | "page";
 }
@@ -169,9 +169,9 @@ interface DetailBodyProps {
   onClose: () => void;
   onDelete: (id: string) => void;
   onUpdate: (id: string, patch: Partial<TaskDetail>) => void;
-  onAddComment: (id: string, body: CommentNode[]) => void;
-  onEditComment: (id: string, cid: string, body: CommentNode[]) => void;
-  onDeleteComment: (id: string, cid: string) => void;
+  onAddComment: (id: string, body: CommentNode[]) => void | Promise<void>;
+  onEditComment: (id: string, cid: string, body: CommentNode[]) => void | Promise<void>;
+  onDeleteComment: (id: string, cid: string) => void | Promise<void>;
   onUnlinkResource?: (id: string, rid: string) => void;
   showOpenFullPageLink?: boolean;
 }
@@ -800,9 +800,9 @@ const DetailBody = ({
             members={members}
             currentUserId={currentUserId}
             canComment={canComment}
-            onAdd={(body) => onAddComment(task.id, body)}
-            onEdit={(cid, body) => onEditComment(task.id, cid, body)}
-            onDelete={(cid) => onDeleteComment(task.id, cid)}
+            onAdd={(body) => void onAddComment(task.id, body)}
+            onEdit={(cid, body) => void onEditComment(task.id, cid, body)}
+            onDelete={(cid) => void onDeleteComment(task.id, cid)}
           />
         </div>
 

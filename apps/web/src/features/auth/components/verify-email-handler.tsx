@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { AuthStatusCard } from "./auth-status-card";
+import { AuthError, verifyEmail } from "@/api/adapters/auth";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -18,21 +19,6 @@ type CardConfig = {
   action?: CardAction;
   secondaryAction?: { label: string; href: string };
 };
-
-// ---------------------------------------------------------------------------
-// API error class
-// ---------------------------------------------------------------------------
-
-class VerifyEmailApiError extends Error {
-  constructor(
-    public readonly code: string,
-    public readonly status: number,
-    message: string,
-  ) {
-    super(message);
-    this.name = "VerifyEmailApiError";
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Component props
@@ -147,34 +133,6 @@ const resolveViewState = ({
 };
 
 // ---------------------------------------------------------------------------
-// API call
-// ---------------------------------------------------------------------------
-
-const verifyEmailToken = async (token: string) => {
-  const response = await fetch("/api/v1/auth/verify-email", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      token,
-    }),
-  });
-
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as
-      | { error?: { code?: string; message?: string } }
-      | null;
-    const code =
-      body?.error?.code ?? (response.status >= 500 ? "SERVICE_UNAVAILABLE" : "TOKEN_INVALID");
-    const message = body?.error?.message ?? "Unable to verify email address.";
-    throw new VerifyEmailApiError(code, response.status, message);
-  }
-
-  return null;
-};
-
-// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -201,7 +159,7 @@ export const VerifyEmailHandler = ({ token }: VerifyEmailHandlerProps) => {
     // No mutationKey — the useRef guard already provides idempotency and a
     // key would cause the mutation function reference to change between
     // StrictMode renders, interfering with the first run's in-flight request.
-    mutationFn: verifyEmailToken,
+    mutationFn: verifyEmail,
     retry: false,
   });
 
@@ -222,7 +180,7 @@ export const VerifyEmailHandler = ({ token }: VerifyEmailHandlerProps) => {
     transition,
   };
 
-  const errorCode = error instanceof VerifyEmailApiError ? error.code : null;
+  const errorCode = error instanceof AuthError ? error.code : null;
   const viewState = resolveViewState({
     normalizedToken,
     isPending,

@@ -1,5 +1,6 @@
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable } from "@nestjs/common";
 import { PrismaClientProvider } from "../common/prisma/prisma-client.provider.js";
+import { apiRuntimeEnv } from "../config/api-runtime.js";
 import {
   createPrismaBackedRegisterService,
   createPrismaBackedVerifyEmailService,
@@ -9,7 +10,7 @@ import { type VerifyEmailInput } from "./verify-email.dto.js";
 
 @Injectable()
 export class AuthAppService {
-  constructor(private readonly prisma: PrismaClientProvider) {}
+  constructor(@Inject(PrismaClientProvider) private readonly prisma: PrismaClientProvider) {}
 
   async register(input: {
     payload: RegisterInput;
@@ -18,8 +19,8 @@ export class AuthAppService {
   }) {
     const registerService = createPrismaBackedRegisterService({
       prisma: this.prisma,
-      bcryptCostFactor: Number.parseInt(process.env.BCRYPT_COST ?? "12", 10),
-      jwtAccessSecret: process.env.JWT_ACCESS_SECRET ?? "dev-insecure-secret",
+      bcryptCostFactor: apiRuntimeEnv.BCRYPT_COST,
+      jwtAccessSecret: apiRuntimeEnv.JWT_ACCESS_SECRET,
     });
     return registerService.register(input);
   }

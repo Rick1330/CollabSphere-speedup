@@ -6,6 +6,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { AlertCircle, ArrowRight, KeyRound, Loader2, Shield } from "lucide-react";
 import { AuthErrorBanner } from "./auth-error-banner";
 import { EmailSentCard } from "./email-sent-card";
+import { AuthError, requestPasswordReset } from "@/api/adapters/auth";
 
 const forgotSchema = z.object({
   email: z.string().min(1, "Email is required").email("Invalid email"),
@@ -33,28 +34,20 @@ export const ForgotPasswordForm = () => {
   const onSubmit = async (values: ForgotValues) => {
     setServerError(null);
     try {
-      const response = await fetch("/api/v1/auth/forgot-password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: values.email.trim().toLowerCase() }),
-      });
-      if (response.status === 429) {
+      await requestPasswordReset({ email: values.email.trim().toLowerCase() });
+      setSubmittedEmail(values.email);
+      setIsSubmitted(true);
+    } catch (error) {
+      if (error instanceof AuthError && error.code === "RATE_LIMITED") {
         setServerError("Too many requests. Please wait a moment before trying again.");
         return;
       }
-      setSubmittedEmail(values.email);
-      setIsSubmitted(true);
-    } catch {
       setServerError("Unable to connect. Check your internet and try again.");
     }
   };
 
   const handleResend = async () => {
-    await fetch("/api/v1/auth/forgot-password", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: submittedEmail }),
-    });
+    await requestPasswordReset({ email: submittedEmail });
   };
 
   const inputClass = "w-full h-11 px-3.5 rounded-lg text-sm transition-all duration-150 focus:outline-none focus:border-[color:var(--cs-teal-primary)] focus:ring-1 focus:ring-[color:var(--cs-teal-faint)]";

@@ -10,6 +10,7 @@ import { AuthDivider } from "./auth-divider";
 import { OAuthButton } from "./oauth-button";
 import { PasswordStrength, getPasswordStrength } from "./password-strength";
 import { EmailSentCard } from "./email-sent-card";
+import { AuthError, register as registerAccount } from "@/api/adapters/auth";
 
 const registerSchema = z
   .object({
@@ -84,12 +85,29 @@ export const RegisterForm = () => {
 
   const onSubmit = async (values: RegisterValues) => {
     setServerError(null);
-    // Mock registration: simulate latency, then show "check email" card
-    await new Promise((r) => setTimeout(r, 600));
-    const normalizedFullName = values.fullName.replace(/\s+/g, " ").trim();
-    setSubmittedEmail(values.email);
-    form.setValue("fullName", normalizedFullName, { shouldValidate: true });
-    setIsSubmitted(true);
+    try {
+      const normalizedFullName = values.fullName.replace(/\s+/g, " ").trim();
+      await registerAccount({
+        fullName: normalizedFullName,
+        email: values.email.trim().toLowerCase(),
+        password: values.password,
+      });
+      setSubmittedEmail(values.email);
+      form.setValue("fullName", normalizedFullName, { shouldValidate: true });
+      setIsSubmitted(true);
+    } catch (error) {
+      if (error instanceof AuthError && error.code === "EMAIL_TAKEN") {
+        setServerError({
+          type: "exists",
+          message: "An account with this email already exists.",
+        });
+        return;
+      }
+      setServerError({
+        type: "error",
+        message: "Unable to create account right now. Please try again.",
+      });
+    }
   };
 
   const handleResend = async () => {

@@ -7,6 +7,7 @@ import { AlertCircle, Eye, EyeOff, LockKeyhole, Loader2 } from "lucide-react";
 import { AuthErrorBanner } from "./auth-error-banner";
 import { AuthStatusCard } from "./auth-status-card";
 import { PasswordStrength, getPasswordStrength } from "./password-strength";
+import { AuthError, resetPassword } from "@/api/adapters/auth";
 
 const resetSchema = z
   .object({
@@ -51,50 +52,30 @@ export const ResetPasswordForm = ({ token }: ResetPasswordFormProps) => {
   const watchedPassword = form.watch("password");
   const passwordStrength = getPasswordStrength(watchedPassword);
 
-  // Validate token on mount
+  // Temporary token validation seam: keep UX behavior but avoid an extra endpoint dependency.
   useEffect(() => {
-    const validate = async () => {
-      try {
-        const res = await fetch("/api/v1/auth/reset-password/validate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ token }),
-        });
-        if (!res.ok) {
-          const body = await res.json().catch(() => ({}));
-          const code = body?.error?.code;
-          if (code === "TOKEN_EXPIRED") { setPageState({ kind: "error", errorType: "expired" }); return; }
-          if (code === "TOKEN_ALREADY_USED") { setPageState({ kind: "error", errorType: "used" }); return; }
-          setPageState({ kind: "error", errorType: "invalid" });
-          return;
-        }
-        setPageState({ kind: "form" });
-      } catch {
-        setPageState({ kind: "error", errorType: "invalid" });
-      }
-    };
-    validate();
+    if (!token.trim()) {
+      setPageState({ kind: "error", errorType: "invalid" });
+      return;
+    }
+    setPageState({ kind: "form" });
   }, [token]);
 
   const onSubmit = async (values: ResetValues) => {
     setServerError(null);
     try {
-      const res = await fetch("/api/v1/auth/reset-password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, password: values.password }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        const code = body?.error?.code;
-        if (code === "TOKEN_EXPIRED") { setPageState({ kind: "error", errorType: "expired" }); return; }
-        if (code === "TOKEN_ALREADY_USED") { setPageState({ kind: "error", errorType: "used" }); return; }
-        if (code === "TOKEN_INVALID") { setPageState({ kind: "error", errorType: "invalid" }); return; }
-        setServerError(code === "VALIDATION_ERROR" ? "Password doesn't meet requirements. Please try again." : "Something went wrong. Please try again.");
-        return;
-      }
+      await resetPassword({ token, password: values.password });
       setPageState({ kind: "success" });
-    } catch {
+    } catch (error) {
+      if (error instanceof AuthError) {
+        if (error.code === "TOKEN_EXPIRED") { setPageState({ kind: "error", errorType: "expired" }); return; }
+        if (error.code === "TOKEN_ALREADY_USED") { setPageState({ kind: "error", errorType: "used" }); return; }
+        if (error.code === "TOKEN_INVALID") { setPageState({ kind: "error", errorType: "invalid" }); return; }
+        if (error.code === "VALIDATION_ERROR") {
+          setServerError("Password doesn't meet requirements. Please try again.");
+          return;
+        }
+      }
       setServerError("Unable to connect. Check your internet and try again.");
     }
   };

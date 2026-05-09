@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   AlertCircle,
@@ -94,30 +94,31 @@ export const TaskBoard = ({
   const [members, setMembers] = useState<TaskAssignee[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isError, setIsError] = useState(false);
-  const realtime = useTaskRealtime(workspaceId);
+  const loadTaskData = useCallback(async () => {
+    setIsLoading(true);
+    setIsError(false);
+    const [data, m] = await Promise.all([listTasksMap(workspaceId), listWorkspaceMembers(workspaceId)]);
+    setTasks(data);
+    setMembers(m);
+    setIsLoading(false);
+  }, [workspaceId]);
+  const realtime = useTaskRealtime(workspaceId, () => {
+    void loadTaskData().catch(() => undefined);
+  });
   const navigate = useNavigate();
 
   useEffect(() => {
     let cancelled = false;
-    setIsLoading(true);
-    setIsError(false);
-    Promise.all([listTasksMap(workspaceId), listWorkspaceMembers(workspaceId)])
-      .then(([data, m]) => {
-        if (cancelled) return;
-        setTasks(data);
-        setMembers(m);
-        setIsLoading(false);
-      })
+    loadTaskData()
       .catch(() => {
-        if (!cancelled) {
-          setIsError(true);
-          setIsLoading(false);
-        }
+        if (cancelled) return;
+        setIsError(true);
+        setIsLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [workspaceId]);
+  }, [loadTaskData]);
 
   const [search, setSearch] = useState("");
   const [filters, setFilters] = useState<AdvancedFilterState>(EMPTY_FILTERS);
@@ -369,9 +370,10 @@ export const TaskBoard = ({
   };
 
   const refetch = () => {
-    setIsError(false);
-    setIsLoading(true);
-    globalThis.setTimeout(() => setIsLoading(false), 300);
+    void loadTaskData().catch(() => {
+      setIsError(true);
+      setIsLoading(false);
+    });
   };
 
   const sourceLink: SourceDocumentLink | null = null;

@@ -1,16 +1,8 @@
-/**
- * Auth API adapter (mock).
- *
- * Validates credentials against the seeded mock accounts and writes the
- * resulting session into `auth-session`. The adapter shape stays
- * close to a real backend so swapping to a fetch-based implementation
- * later is a one-file change.
- */
-
 import type { SessionContract, UserContract } from "@/api/contracts";
+import { ApiError, request } from "@/api/client";
+import { parseApiActionEnvelope, parseApiSingleEnvelope } from "@/api/client/envelope";
 import { authSession } from "@/lib/auth-session";
-import { fetchCurrentUser, type UserProfile } from "@/lib/mock-user";
-import { findAccountByEmail, MOCK_ACCOUNTS, type MockAccount } from "@/lib/mock-accounts";
+import type { AuthProvider } from "@/lib/mock-accounts";
 
 export class AuthError extends Error {
   constructor(
@@ -19,7 +11,14 @@ export class AuthError extends Error {
       | "EMAIL_NOT_VERIFIED"
       | "ACCOUNT_DISABLED"
       | "PROVIDER_MISMATCH"
-      | "EMAIL_TAKEN",
+      | "EMAIL_TAKEN"
+      | "UNAUTHORIZED"
+      | "RATE_LIMITED"
+      | "TOKEN_EXPIRED"
+      | "TOKEN_INVALID"
+      | "TOKEN_ALREADY_USED"
+      | "VALIDATION_ERROR"
+      | "UNKNOWN_ERROR",
     message: string,
   ) {
     super(message);
@@ -27,9 +26,17 @@ export class AuthError extends Error {
   }
 }
 
-const FAKE_REFRESH = "mock-refresh-token";
+type AuthApiUser = {
+  id: string;
+  email: string;
+  fullName: string;
+  avatarUrl?: string | null;
+  globalRole: "USER" | "ADMIN";
+  authProvider?: AuthProvider;
+  isVerified?: boolean;
+};
 
-function toUserContract(profile: UserProfile): UserContract {
+function toUserContract(profile: AuthApiUser): UserContract {
   return {
     id: profile.id,
     email: profile.email,
@@ -39,51 +46,54 @@ function toUserContract(profile: UserProfile): UserContract {
   };
 }
 
-function toSession(account: MockAccount): SessionContract {
+function toSession(accessToken: string, user: AuthApiUser): SessionContract {
   return {
-    user: {
-      id: account.id,
-      email: account.email,
-      fullName: account.fullName,
-      avatarUrl: account.avatarUrl,
-      role: account.globalRole === "ADMIN" ? "admin" : "member",
-    },
-    accessToken: `mock-token-${account.id}-${Date.now()}`,
-    refreshToken: FAKE_REFRESH,
+    user: toUserContract(user),
+    accessToken,
+    refreshToken: "",
     expiresAt: new Date(Date.now() + 1000 * 60 * 60).toISOString(),
   };
 }
 
-const delay = (ms = 350) => new Promise((r) => setTimeout(r, ms));
-const MOCK_ACCOUNTS_FALLBACK: MockAccount = MOCK_ACCOUNTS[0];
-
-function validateLocalAccount(account: MockAccount | null, password: string): MockAccount {
-  if (!account || account.password !== password) {
-    throw new AuthError("INVALID_CREDENTIALS", "Email or password is incorrect.");
-  }
-  if (account.authProvider !== "local") {
+function parseAuthError(error: unknown): never {
+  if (error instanceof ApiError) {
     throw new AuthError(
-      "PROVIDER_MISMATCH",
-      `This account uses ${account.authProvider} sign-in. Use that provider to continue.`,
+      (error.code as AuthError["code"] | undefined) ?? "UNKNOWN_ERROR",
+      error.message || "Authentication request failed.",
     );
   }
-  if (account.status === "disabled") {
-    throw new AuthError("ACCOUNT_DISABLED", "This account has been disabled. Contact your administrator.");
-  }
-  if (account.status === "unverified") {
-    throw new AuthError("EMAIL_NOT_VERIFIED", "Verify your email address to sign in.");
-  }
-  return account;
+  throw error;
 }
 
 export async function login(input: {
   email: string;
   password: string;
 }): Promise<SessionContract> {
-  await delay(450);
-  const account = validateLocalAccount(findAccountByEmail(input.email), input.password);
-  authSession.signIn(account.id);
-  return toSession(account);
+  try {
+    const payload = await request<unknown>("/auth/login", {
+      method: "POST",
+      body: { email: input.email, password: input.password },
+    });
+    const { extraData } = parseApiActionEnvelope<{ accessToken: string; user: AuthApiUser }>(payload);
+    const accessToken = extraData.accessToken;
+    const user = extraData.user;
+    if (!accessToken || !user?.id) {
+      throw new Error("Invalid auth login response payload.");
+    }
+    authSession.signIn(user.id, {
+      accessToken,
+      user: {
+        id: user.id,
+        email: user.email,
+        fullName: user.fullName,
+        avatarUrl: user.avatarUrl,
+        globalRole: user.globalRole,
+      },
+    });
+    return toSession(accessToken, user);
+  } catch (error) {
+    parseAuthError(error);
+  }
 }
 
 export async function register(input: {
@@ -91,39 +101,108 @@ export async function register(input: {
   password: string;
   fullName: string;
 }): Promise<SessionContract> {
-  await delay(500);
-  const existing = findAccountByEmail(input.email);
-  if (existing) {
-    throw new AuthError("EMAIL_TAKEN", "An account with that email already exists.");
+  try {
+    await request<unknown>("/auth/register", {
+      method: "POST",
+      body: {
+        fullName: input.fullName,
+        email: input.email,
+        password: input.password,
+        confirmPassword: input.password,
+      },
+    });
+    return {
+      user: {
+        id: "pending-verification",
+        email: input.email,
+        fullName: input.fullName,
+        role: "member",
+      },
+      accessToken: "",
+      refreshToken: "",
+      expiresAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    parseAuthError(error);
   }
-  // Mock registration does not persist a new account — it just returns the
-  // first seeded account so downstream flows can continue. The UI shows the
-  // "check your email" card as the success state.
-  return toSession(MOCK_ACCOUNTS_FALLBACK);
 }
 
-export async function requestPasswordReset(_input: { email: string }): Promise<void> {
-  await delay(250);
+export async function requestPasswordReset(input: { email: string }): Promise<void> {
+  try {
+    await request<unknown>("/auth/forgot-password", {
+      method: "POST",
+      body: input,
+    });
+  } catch (error) {
+    parseAuthError(error);
+  }
 }
 
-export async function resetPassword(_input: {
+export async function resetPassword(input: {
   token: string;
   password: string;
 }): Promise<void> {
-  await delay(250);
+  try {
+    await request<unknown>("/auth/reset-password", {
+      method: "POST",
+      body: input,
+    });
+  } catch (error) {
+    parseAuthError(error);
+  }
 }
 
-export async function verifyEmail(_token: string): Promise<{ verified: true }> {
-  await delay(250);
-  return { verified: true };
+export async function verifyEmail(token: string): Promise<{ verified: true }> {
+  try {
+    await request<unknown>("/auth/verify-email", {
+      method: "POST",
+      body: { token },
+    });
+    return { verified: true };
+  } catch (error) {
+    parseAuthError(error);
+  }
 }
 
 export async function getCurrentUser(): Promise<UserContract> {
-  const profile = await fetchCurrentUser();
-  return toUserContract(profile);
+  try {
+    const payload = await request<unknown>("/users/me");
+    const profile = parseApiSingleEnvelope<AuthApiUser>(payload);
+    return toUserContract(profile);
+  } catch (error) {
+    parseAuthError(error);
+  }
+}
+
+export async function getCollabToken(input: {
+  workspaceId: string;
+  documentId: string;
+}): Promise<{ token: string; expiresInSeconds: number }> {
+  try {
+    const payload = await request<unknown>("/auth/collab-token", {
+      method: "POST",
+      body: input,
+    });
+    const { extraData } = parseApiActionEnvelope<{ token: string; expiresInSeconds: number }>(payload);
+    if (!extraData.token) {
+      throw new Error("Missing collab token in API response.");
+    }
+    return {
+      token: extraData.token,
+      expiresInSeconds: extraData.expiresInSeconds ?? 0,
+    };
+  } catch (error) {
+    parseAuthError(error);
+  }
 }
 
 export async function logout(): Promise<void> {
-  await delay(150);
+  try {
+    await request<unknown>("/auth/logout", {
+      method: "POST",
+    });
+  } catch {
+    // Sign out locally even if server logout fails.
+  }
   authSession.signOut();
 }

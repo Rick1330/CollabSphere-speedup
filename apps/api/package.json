@@ -4,18 +4,29 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@collabsphere/shared": "workspace:*",
     "@nestjs/common": "^10.4.20",
     "@nestjs/core": "^10.4.20",
     "@nestjs/platform-express": "^10.4.20",
-    "@collabsphere/shared": "workspace:*",
+    "@nestjs/platform-socket.io": "^10.4.22",
+    "@nestjs/websockets": "^10.4.22",
     "@prisma/client": "^6.7.0",
+    "@socket.io/redis-adapter": "^8.3.0",
+    "bullmq": "^5.58.5",
     "bcryptjs": "^3.0.2",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.14.1",
+    "cookie-parser": "^1.4.7",
+    "jose": "^5.9.6",
+    "ioredis": "^5.6.1",
+    "redis": "^5.12.1",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.2"
+    "rxjs": "^7.8.2",
+    "socket.io": "^4.8.3"
   },
   "scripts": {
-    "dev": "tsx watch src/dev.ts",
-    "dev:nest": "tsx watch src/main.ts",
+    "dev": "tsx watch --tsconfig tsconfig.json src/main.ts",
+    "dev:legacy-bootstrap": "tsx watch --tsconfig tsconfig.json src/dev.ts",
     "build": "pnpm --filter @collabsphere/database run generate && pnpm exec tsc -p tsconfig.json && tsx ../../scripts/build-bootstrap-app.ts .",
     "test": "pnpm exec tsx --test --test-concurrency=1 ../../tests/unit/api-auth-register.test.ts ../../tests/unit/api-bootstrap-env.test.ts ../../tests/unit/api-email-config.test.ts ../../tests/unit/api-error-filter.test.ts ../../tests/unit/api-pagination.test.ts ../../tests/unit/api-request-id.test.ts ../../tests/unit/api-response-envelope.test.ts ../../tests/unit/api-soft-delete-prisma.test.ts ../../tests/unit/api-workspace-scope-prisma.test.ts test/pagination.e2e-spec.ts"
   }

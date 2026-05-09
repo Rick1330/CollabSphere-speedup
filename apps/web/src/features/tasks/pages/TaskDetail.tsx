@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
@@ -12,17 +12,20 @@ import { useSidebar } from "@/hooks/use-sidebar";
 import { useCommandPalette } from "@/hooks/use-command-palette";
 import {
   canTransition,
+  createTaskComment,
+  deleteTaskComment,
   getWorkspaceWorkflowColumns,
   listTasksMap,
   listWorkspaceMembers,
+  updateTaskComment,
   transitionReason,
   type TaskAssignee,
-  type TaskComment,
   type TaskDetail,
 } from "@/api/adapters/tasks";
 import type { CommentNode } from "@/lib/mock-comments";
 import { TaskDetailSheet } from "@/features/tasks/components/task-detail-sheet";
 import { resolveTaskParam, resolveWorkspaceParam } from "@/lib/route-params";
+import { useTaskRealtime } from "@/features/tasks/hooks/use-task-realtime";
 
 type Role = "OWNER" | "ADMIN" | "MANAGER" | "MEMBER" | "VIEWER";
 type WorkspaceWithRole = WorkspaceForSidebar & { myRole: Role };
@@ -67,23 +70,28 @@ const TaskDetailPage = () => {
   const [tasks, setTasks] = useState<Record<string, TaskDetail>>({});
   const [members, setMembers] = useState<TaskAssignee[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const loadTaskData = useCallback(async () => {
+    setIsLoading(true);
+    const [taskMap, loadedMembers] = await Promise.all([listTasksMap(workspaceId), listWorkspaceMembers(workspaceId)]);
+    setTasks(taskMap);
+    setMembers(loadedMembers);
+    setIsLoading(false);
+  }, [workspaceId]);
+  useTaskRealtime(workspaceId, () => {
+    void loadTaskData().catch(() => undefined);
+  });
 
   useEffect(() => {
     let cancelled = false;
-    setIsLoading(true);
-    Promise.all([listTasksMap(workspaceId), listWorkspaceMembers(workspaceId)])
-      .then(([taskMap, loadedMembers]) => {
+    loadTaskData()
+      .catch(() => {
         if (cancelled) return;
-        setTasks(taskMap);
-        setMembers(loadedMembers);
-      })
-      .finally(() => {
-        if (!cancelled) setIsLoading(false);
+        setIsLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [workspaceId]);
+  }, [loadTaskData]);
 
   const task = tasks[taskId] ?? null;
   const columns = useMemo(() => getWorkspaceWorkflowColumns(workspaceId), [workspaceId]);
@@ -118,57 +126,19 @@ const TaskDetailPage = () => {
     navigate(`/w/${workspaceId}/tasks`);
   };
 
-  const handleAddComment = (id: string, body: CommentNode[]) => {
-    setTasks((prev) => {
-      const cur = prev[id];
-      if (!cur) return prev;
-      const c: TaskComment = {
-        id: `tc-${Date.now()}`,
-        authorId: CURRENT_USER_ID,
-        body,
-        createdAt: new Date().toISOString(),
-      };
-      return {
-        ...prev,
-        [id]: {
-          ...cur,
-          comments: [...cur.comments, c],
-          commentCount: cur.comments.length + 1,
-          updatedAt: new Date().toISOString(),
-        },
-      };
-    });
+  const handleAddComment = async (id: string, body: CommentNode[]) => {
+    await createTaskComment(workspaceId, id, body);
+    await loadTaskData();
   };
 
-  const handleEditComment = (id: string, commentId: string, body: CommentNode[]) => {
-    setTasks((prev) => {
-      const cur = prev[id];
-      if (!cur) return prev;
-      return {
-        ...prev,
-        [id]: {
-          ...cur,
-          comments: cur.comments.map((c) =>
-            c.id === commentId ? { ...c, body, updatedAt: new Date().toISOString() } : c,
-          ),
-        },
-      };
-    });
+  const handleEditComment = async (_id: string, commentId: string, body: CommentNode[]) => {
+    await updateTaskComment(workspaceId, commentId, body);
+    await loadTaskData();
   };
 
-  const handleDeleteComment = (id: string, commentId: string) => {
-    setTasks((prev) => {
-      const cur = prev[id];
-      if (!cur) return prev;
-      return {
-        ...prev,
-        [id]: {
-          ...cur,
-          comments: cur.comments.filter((c) => c.id !== commentId),
-          commentCount: Math.max(0, (cur.commentCount || cur.comments.length) - 1),
-        },
-      };
-    });
+  const handleDeleteComment = async (_id: string, commentId: string) => {
+    await deleteTaskComment(workspaceId, commentId);
+    await loadTaskData();
   };
 
   const handleUnlinkResource = (id: string, resourceId: string) => {

@@ -1,7 +1,10 @@
 import type { WorkspaceRole } from "@prisma/client";
-import { Body, Controller, Get, Headers, Param, Post } from "@nestjs/common";
-import { resolveRequestUserId } from "../common/auth/request-user.js";
+import { Body, Controller, Get, Inject, Param, Post, UseGuards } from "@nestjs/common";
+import { CurrentUserId } from "../common/decorators/current-user.decorator.js";
+import { Public } from "../common/decorators/public.decorator.js";
+import { WorkspaceMembershipGuard } from "../common/guards/workspace-membership.guard.js";
 import { ValidationAppError } from "../common/filters/app-error.filter.js";
+import { ReqRequestId } from "../common/nest/request-id.decorator.js";
 import {
   createListResponsePayload,
   createSingleResourcePayload,
@@ -18,15 +21,18 @@ const validWorkspaceRoles: WorkspaceRole[] = ["OWNER", "ADMIN", "MANAGER", "MEMB
 
 @Controller()
 export class InvitationsNestController {
-  constructor(private readonly invitationsService: InvitationsService) {}
+  constructor(
+    @Inject(InvitationsService) private readonly invitationsService: InvitationsService,
+  ) {}
 
   @Post("workspaces/:workspaceId/invitations")
+  @UseGuards(WorkspaceMembershipGuard)
   async createInvitations(
     @Param("workspaceId") workspaceId: string,
-    @Headers("x-user-id") userIdHeader: unknown,
+    @ReqRequestId() requestId: string,
+    @CurrentUserId() actorUserId: string,
     @Body() body: CreateInvitationsBody,
   ) {
-    const actorUserId = resolveRequestUserId(userIdHeader);
     const payload = this.validateCreatePayload(body);
     const created = await this.invitationsService.createInvitations({
       workspaceId,
@@ -37,39 +43,44 @@ export class InvitationsNestController {
 
     return wrapSuccessResponse({
       payload: createListResponsePayload({ items: created, total: created.length }),
-      requestId: "nest-request",
+      requestId,
     });
   }
 
+  @Public()
   @Get("invitations/:token")
-  async getInvitationPreview(@Param("token") token: string) {
+  async getInvitationPreview(
+    @Param("token") token: string,
+    @ReqRequestId() requestId: string,
+  ) {
     const preview = await this.invitationsService.getInvitationPreviewByToken(token);
     return wrapSuccessResponse({
       payload: createSingleResourcePayload(preview),
-      requestId: "nest-request",
+      requestId,
     });
   }
 
   @Post("invitations/:token/accept")
   async acceptInvitation(
     @Param("token") token: string,
-    @Headers("x-user-id") userIdHeader: unknown,
+    @ReqRequestId() requestId: string,
+    @CurrentUserId() userId: string,
   ) {
-    const userId = resolveRequestUserId(userIdHeader);
     const data = await this.invitationsService.acceptInvitationByToken({ token, userId });
     return wrapSuccessResponse({
       payload: createSingleResourcePayload(data),
-      requestId: "nest-request",
+      requestId,
     });
   }
 
   @Post("workspaces/:workspaceId/invitations/:invitationId/resend")
+  @UseGuards(WorkspaceMembershipGuard)
   async resendInvitation(
     @Param("workspaceId") workspaceId: string,
     @Param("invitationId") invitationId: string,
-    @Headers("x-user-id") userIdHeader: unknown,
+    @ReqRequestId() requestId: string,
+    @CurrentUserId() actorUserId: string,
   ) {
-    const actorUserId = resolveRequestUserId(userIdHeader);
     const data = await this.invitationsService.resendInvitation({
       workspaceId,
       invitationId,
@@ -77,17 +88,18 @@ export class InvitationsNestController {
     });
     return wrapSuccessResponse({
       payload: createSingleResourcePayload(data),
-      requestId: "nest-request",
+      requestId,
     });
   }
 
   @Post("workspaces/:workspaceId/invitations/:invitationId/revoke")
+  @UseGuards(WorkspaceMembershipGuard)
   async revokeInvitation(
     @Param("workspaceId") workspaceId: string,
     @Param("invitationId") invitationId: string,
-    @Headers("x-user-id") userIdHeader: unknown,
+    @ReqRequestId() requestId: string,
+    @CurrentUserId() actorUserId: string,
   ) {
-    const actorUserId = resolveRequestUserId(userIdHeader);
     const data = await this.invitationsService.revokeInvitation({
       workspaceId,
       invitationId,
@@ -95,7 +107,7 @@ export class InvitationsNestController {
     });
     return wrapSuccessResponse({
       payload: createSingleResourcePayload(data),
-      requestId: "nest-request",
+      requestId,
     });
   }
 

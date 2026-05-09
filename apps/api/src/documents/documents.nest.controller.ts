@@ -1,8 +1,22 @@
 import type { DocumentStatus } from "@prisma/client";
-import { Body, Controller, Get, Headers, Param, Post, Put, Query } from "@nestjs/common";
-import { resolveRequestUserId } from "../common/auth/request-user.js";
-import { ValidationAppError } from "../common/filters/app-error.filter.js";
 import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Inject,
+  Param,
+  Post,
+  Put,
+  Query,
+  UseGuards,
+} from "@nestjs/common";
+import { CurrentUserId } from "../common/decorators/current-user.decorator.js";
+import { WorkspaceMembershipGuard } from "../common/guards/workspace-membership.guard.js";
+import { ValidationAppError } from "../common/filters/app-error.filter.js";
+import { ReqRequestId } from "../common/nest/request-id.decorator.js";
+import {
+  createActionResponsePayload,
   createListResponsePayload,
   createSingleResourcePayload,
   wrapSuccessResponse,
@@ -41,16 +55,19 @@ const validDocumentStatus: DocumentStatus[] = [
 ];
 
 @Controller("workspaces/:workspaceId/documents")
+@UseGuards(WorkspaceMembershipGuard)
 export class DocumentsNestController {
-  constructor(private readonly documentsService: DocumentsService) {}
+  constructor(
+    @Inject(DocumentsService) private readonly documentsService: DocumentsService,
+  ) {}
 
   @Get()
   async listDocuments(
     @Param("workspaceId") workspaceId: string,
-    @Headers("x-user-id") userIdHeader: unknown,
+    @ReqRequestId() requestId: string,
+    @CurrentUserId() actorUserId: string,
     @Query("folderId") folderIdQuery?: string,
   ) {
-    const actorUserId = resolveRequestUserId(userIdHeader);
     const folderId = folderIdQuery ? folderIdQuery.trim() : undefined;
     const items = await this.documentsService.listDocumentsForUser({
       actorUserId,
@@ -60,7 +77,23 @@ export class DocumentsNestController {
 
     return wrapSuccessResponse({
       payload: createListResponsePayload({ items, total: items.length }),
-      requestId: "nest-request",
+      requestId,
+    });
+  }
+
+  @Get("tree")
+  async getTree(
+    @Param("workspaceId") workspaceId: string,
+    @ReqRequestId() requestId: string,
+    @CurrentUserId() actorUserId: string,
+  ) {
+    const data = await this.documentsService.getDocumentsTree({
+      actorUserId,
+      workspaceId,
+    });
+    return wrapSuccessResponse({
+      payload: createSingleResourcePayload(data),
+      requestId,
     });
   }
 
@@ -68,9 +101,9 @@ export class DocumentsNestController {
   async getDocument(
     @Param("workspaceId") workspaceId: string,
     @Param("documentId") documentId: string,
-    @Headers("x-user-id") userIdHeader: unknown,
+    @ReqRequestId() requestId: string,
+    @CurrentUserId() actorUserId: string,
   ) {
-    const actorUserId = resolveRequestUserId(userIdHeader);
     const document = await this.documentsService.getDocumentByIdForUser({
       actorUserId,
       workspaceId,
@@ -79,17 +112,17 @@ export class DocumentsNestController {
 
     return wrapSuccessResponse({
       payload: createSingleResourcePayload({ document }),
-      requestId: "nest-request",
+      requestId,
     });
   }
 
   @Post()
   async createDocument(
     @Param("workspaceId") workspaceId: string,
-    @Headers("x-user-id") userIdHeader: unknown,
+    @ReqRequestId() requestId: string,
+    @CurrentUserId() actorUserId: string,
     @Body() body: CreateDocumentBody,
   ) {
-    const actorUserId = resolveRequestUserId(userIdHeader);
     const payload = this.validateCreatePayload(body);
     const document = await this.documentsService.createDocument({
       actorUserId,
@@ -101,7 +134,7 @@ export class DocumentsNestController {
       statusCode: 201,
       ...wrapSuccessResponse({
         payload: createSingleResourcePayload({ document }),
-        requestId: "nest-request",
+        requestId,
       }),
     };
   }
@@ -110,10 +143,10 @@ export class DocumentsNestController {
   async updateDocument(
     @Param("workspaceId") workspaceId: string,
     @Param("documentId") documentId: string,
-    @Headers("x-user-id") userIdHeader: unknown,
+    @ReqRequestId() requestId: string,
+    @CurrentUserId() actorUserId: string,
     @Body() body: UpdateDocumentBody,
   ) {
-    const actorUserId = resolveRequestUserId(userIdHeader);
     const payload = this.validateUpdatePayload(body);
     const document = await this.documentsService.updateDocumentMetadata({
       actorUserId,
@@ -124,7 +157,7 @@ export class DocumentsNestController {
 
     return wrapSuccessResponse({
       payload: createSingleResourcePayload({ document }),
-      requestId: "nest-request",
+      requestId,
     });
   }
 
@@ -132,10 +165,10 @@ export class DocumentsNestController {
   async updateDocumentContent(
     @Param("workspaceId") workspaceId: string,
     @Param("documentId") documentId: string,
-    @Headers("x-user-id") userIdHeader: unknown,
+    @ReqRequestId() requestId: string,
+    @CurrentUserId() actorUserId: string,
     @Body() body: UpdateDocumentContentBody,
   ) {
-    const actorUserId = resolveRequestUserId(userIdHeader);
     const payload = this.validateContentUpdatePayload(body);
     const data = await this.documentsService.updateDocumentContent({
       actorUserId,
@@ -146,7 +179,117 @@ export class DocumentsNestController {
 
     return wrapSuccessResponse({
       payload: createSingleResourcePayload(data),
-      requestId: "nest-request",
+      requestId,
+    });
+  }
+
+  @Delete(":documentId")
+  async deleteDocument(
+    @Param("workspaceId") workspaceId: string,
+    @Param("documentId") documentId: string,
+    @ReqRequestId() requestId: string,
+    @CurrentUserId() actorUserId: string,
+  ) {
+    const data = await this.documentsService.softDeleteDocument({
+      actorUserId,
+      workspaceId,
+      documentId,
+    });
+    return wrapSuccessResponse({
+      payload: createActionResponsePayload({ message: data.message }),
+      requestId,
+    });
+  }
+
+  @Post(":documentId/lock")
+  async lockDocument(
+    @Param("workspaceId") workspaceId: string,
+    @Param("documentId") documentId: string,
+    @ReqRequestId() requestId: string,
+    @CurrentUserId() actorUserId: string,
+  ) {
+    const document = await this.documentsService.lockDocument({
+      actorUserId,
+      workspaceId,
+      documentId,
+    });
+    return wrapSuccessResponse({
+      payload: createSingleResourcePayload({ document }),
+      requestId,
+    });
+  }
+
+  @Post(":documentId/unlock")
+  async unlockDocument(
+    @Param("workspaceId") workspaceId: string,
+    @Param("documentId") documentId: string,
+    @ReqRequestId() requestId: string,
+    @CurrentUserId() actorUserId: string,
+  ) {
+    const document = await this.documentsService.unlockDocument({
+      actorUserId,
+      workspaceId,
+      documentId,
+    });
+    return wrapSuccessResponse({
+      payload: createSingleResourcePayload({ document }),
+      requestId,
+    });
+  }
+
+  @Get(":documentId/versions")
+  async listVersions(
+    @Param("workspaceId") workspaceId: string,
+    @Param("documentId") documentId: string,
+    @ReqRequestId() requestId: string,
+    @CurrentUserId() actorUserId: string,
+  ) {
+    const { items, total } = await this.documentsService.listDocumentVersions({
+      actorUserId,
+      workspaceId,
+      documentId,
+    });
+    return wrapSuccessResponse({
+      payload: createListResponsePayload({ items, total }),
+      requestId,
+    });
+  }
+
+  @Post(":documentId/versions/:versionId/restore")
+  async restoreVersion(
+    @Param("workspaceId") workspaceId: string,
+    @Param("documentId") documentId: string,
+    @Param("versionId") versionId: string,
+    @ReqRequestId() requestId: string,
+    @CurrentUserId() actorUserId: string,
+  ) {
+    const document = await this.documentsService.restoreDocumentVersion({
+      actorUserId,
+      workspaceId,
+      documentId,
+      versionId,
+    });
+    return wrapSuccessResponse({
+      payload: createSingleResourcePayload({ document }),
+      requestId,
+    });
+  }
+
+  @Get(":documentId/submissions")
+  async listSubmissions(
+    @Param("workspaceId") workspaceId: string,
+    @Param("documentId") documentId: string,
+    @ReqRequestId() requestId: string,
+    @CurrentUserId() actorUserId: string,
+  ) {
+    const { items, total } = await this.documentsService.listDocumentSubmissions({
+      actorUserId,
+      workspaceId,
+      documentId,
+    });
+    return wrapSuccessResponse({
+      payload: createListResponsePayload({ items, total }),
+      requestId,
     });
   }
 
@@ -154,9 +297,9 @@ export class DocumentsNestController {
   async submitDocument(
     @Param("workspaceId") workspaceId: string,
     @Param("documentId") documentId: string,
-    @Headers("x-user-id") userIdHeader: unknown,
+    @ReqRequestId() requestId: string,
+    @CurrentUserId() actorUserId: string,
   ) {
-    const actorUserId = resolveRequestUserId(userIdHeader);
     const data = await this.documentsService.transitionDocumentStatus({
       actorUserId,
       workspaceId,
@@ -165,7 +308,7 @@ export class DocumentsNestController {
     });
     return wrapSuccessResponse({
       payload: createSingleResourcePayload(data),
-      requestId: "nest-request",
+      requestId,
     });
   }
 
@@ -173,10 +316,10 @@ export class DocumentsNestController {
   async requestChanges(
     @Param("workspaceId") workspaceId: string,
     @Param("documentId") documentId: string,
-    @Headers("x-user-id") userIdHeader: unknown,
+    @ReqRequestId() requestId: string,
+    @CurrentUserId() actorUserId: string,
     @Body() body: TransitionNoteBody,
   ) {
-    const actorUserId = resolveRequestUserId(userIdHeader);
     const note = this.validateRequiredNote(body);
     const data = await this.documentsService.transitionDocumentStatus({
       actorUserId,
@@ -187,7 +330,7 @@ export class DocumentsNestController {
     });
     return wrapSuccessResponse({
       payload: createSingleResourcePayload(data),
-      requestId: "nest-request",
+      requestId,
     });
   }
 
@@ -195,9 +338,9 @@ export class DocumentsNestController {
   async approveDocument(
     @Param("workspaceId") workspaceId: string,
     @Param("documentId") documentId: string,
-    @Headers("x-user-id") userIdHeader: unknown,
+    @ReqRequestId() requestId: string,
+    @CurrentUserId() actorUserId: string,
   ) {
-    const actorUserId = resolveRequestUserId(userIdHeader);
     const data = await this.documentsService.transitionDocumentStatus({
       actorUserId,
       workspaceId,
@@ -206,7 +349,7 @@ export class DocumentsNestController {
     });
     return wrapSuccessResponse({
       payload: createSingleResourcePayload(data),
-      requestId: "nest-request",
+      requestId,
     });
   }
 
