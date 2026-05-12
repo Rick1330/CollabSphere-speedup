@@ -1,27 +1,42 @@
-import { Body, Controller, Delete, Inject, Param, Patch, Post } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Delete,
+  HttpCode,
+  HttpStatus,
+  Inject,
+  Param,
+  Patch,
+  Post,
+} from "@nestjs/common";
 import { CurrentUserId } from "../common/decorators/current-user.decorator.js";
 import { ReqRequestId } from "../common/nest/request-id.decorator.js";
-import { createActionResponsePayload, createSingleResourcePayload, wrapSuccessResponse } from "../common/interceptors/response-envelope.interceptor.js";
+import {
+  createActionResponsePayload,
+  createSingleResourcePayload,
+  wrapSuccessResponse,
+} from "../common/interceptors/response-envelope.interceptor.js";
 import { FoldersService } from "./folders.service.js";
+import { CreateFolderDto, RenameFolderDto } from "./folders.dto.js";
 
 @Controller("workspaces/:workspaceId/folders")
 export class FoldersNestController {
   constructor(@Inject(FoldersService) private readonly foldersService: FoldersService) {}
 
   @Post()
+  @HttpCode(HttpStatus.CREATED)
   async create(
     @Param("workspaceId") workspaceId: string,
     @ReqRequestId() requestId: string,
     @CurrentUserId() actorUserId: string,
-    @Body() body: { name: string; parentId?: string | null },
+    @Body() body: CreateFolderDto,
   ) {
     const folder = await this.foldersService.createFolder({
       actorUserId,
       workspaceId,
-      name: String(body?.name ?? ""),
-      parentId: body?.parentId === undefined ? undefined : (body.parentId || null),
+      ...body,
     });
-    return { statusCode: 201, ...wrapSuccessResponse({ payload: createSingleResourcePayload({ folder }), requestId }) };
+    return wrapSuccessResponse({ payload: createSingleResourcePayload({ folder }), requestId });
   }
 
   @Patch(":folderId")
@@ -30,9 +45,14 @@ export class FoldersNestController {
     @Param("folderId") folderId: string,
     @ReqRequestId() requestId: string,
     @CurrentUserId() actorUserId: string,
-    @Body() body: { name: string },
+    @Body() body: RenameFolderDto,
   ) {
-    const folder = await this.foldersService.renameFolder({ actorUserId, workspaceId, folderId, name: String(body?.name ?? "") });
+    const folder = await this.foldersService.renameFolder({
+      actorUserId,
+      workspaceId,
+      folderId,
+      name: body.name,
+    });
     return wrapSuccessResponse({ payload: createSingleResourcePayload({ folder }), requestId });
   }
 
