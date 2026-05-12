@@ -1,0 +1,152 @@
+# Phase 0 Divergence Report
+
+Generated at: 2026-05-09T14:19:03.580Z
+
+## Summary
+- Spec endpoints without implementation: 36
+- Implemented endpoints missing from spec: 24
+- Implemented endpoints without test evidence: 78
+
+## Spec endpoint gaps
+- DELETE /api/v1/admin/workspaces/:workspaceId
+- DELETE /api/v1/workspaces/:workspaceId/comments/:commentId
+- DELETE /api/v1/workspaces/:workspaceId/files/:fileId
+- GET /api/v1/admin/workspaces/:workspaceId
+- GET /api/v1/exports/:exportJobId
+- GET /api/v1/invitations/:token
+- GET /api/v1/notification-preferences
+- GET /api/v1/search
+- GET /api/v1/templates/:templateId
+- GET /api/v1/workspaces/:workspaceId/attachments
+- GET /api/v1/workspaces/:workspaceId/document-links/:linkId
+- GET /api/v1/workspaces/:workspaceId/files
+- GET /api/v1/workspaces/:workspaceId/files/:fileId/download
+- GET /api/v1/workspaces/:workspaceId/tasks/:taskId/links
+- PATCH /api/v1/notifications/:id/read
+- PATCH /api/v1/notifications/mark-all-read
+- PATCH /api/v1/workspaces/:workspaceId/documents/:documentId
+- POST /api/v1/admin/users/:userId/deactivate
+- POST /api/v1/admin/users/:userId/reactivate
+- POST /api/v1/admin/users/:userId/revoke-sessions
+- POST /api/v1/admin/workspaces/:workspaceId/archive
+- POST /api/v1/admin/workspaces/:workspaceId/unarchive
+- POST /api/v1/invitations/:token/accept
+- POST /api/v1/workspaces/:workspaceId/attachments
+- POST /api/v1/workspaces/:workspaceId/comment-threads/:threadId/resolve
+- POST /api/v1/workspaces/:workspaceId/comments
+- POST /api/v1/workspaces/:workspaceId/documents/:documentId/export
+- POST /api/v1/workspaces/:workspaceId/documents/:documentId/review
+- POST /api/v1/workspaces/:workspaceId/files/:fileId/complete
+- POST /api/v1/workspaces/:workspaceId/files/upload-intent
+- POST /api/v1/workspaces/:workspaceId/invitations
+- POST /api/v1/workspaces/:workspaceId/invitations/:invitationId/resend
+- POST /api/v1/workspaces/:workspaceId/invitations/:invitationId/revoke
+- POST /api/v1/workspaces/:workspaceId/tasks/bulk
+- PUT /api/v1/notification-preferences
+- PUT /api/v1/users/me/avatar
+
+## Implementation not in spec
+- GET /api/v1/health (apps/api/src/health/health.nest.controller.ts)
+- GET /api/v1/notifications/preferences (apps/api/src/notifications/notifications.nest.controller.ts)
+- GET /api/v1/templates/:id (apps/api/src/templates/templates.nest.controller.ts)
+- GET /api/v1/workspaces/:workspaceId/documents (apps/api/src/documents/documents.nest.controller.ts)
+- GET /api/v1/workspaces/:workspaceId/search (apps/api/src/search/search.nest.controller.ts)
+- PATCH /api/v1/admin/users/:userId/deactivate (apps/api/src/admin/admin.nest.controller.ts)
+- PATCH /api/v1/admin/users/:userId/demote (apps/api/src/admin/admin.nest.controller.ts)
+- PATCH /api/v1/admin/users/:userId/promote (apps/api/src/admin/admin.nest.controller.ts)
+- PATCH /api/v1/admin/users/:userId/reactivate (apps/api/src/admin/admin.nest.controller.ts)
+- PATCH /api/v1/admin/workspaces/:workspaceId/archive (apps/api/src/admin/admin.nest.controller.ts)
+- PATCH /api/v1/admin/workspaces/:workspaceId/force-delete (apps/api/src/admin/admin.nest.controller.ts)
+- PATCH /api/v1/admin/workspaces/:workspaceId/unarchive (apps/api/src/admin/admin.nest.controller.ts)
+- PATCH /api/v1/notifications/:notificationId/read (apps/api/src/notifications/notifications.nest.controller.ts)
+- PATCH /api/v1/notifications/preferences (apps/api/src/notifications/notifications.nest.controller.ts)
+- PATCH /api/v1/notifications/read-all (apps/api/src/notifications/notifications.nest.controller.ts)
+- PATCH /api/v1/workspaces/:workspaceId/comments/:commentId/delete (apps/api/src/comments/comments.nest.controller.ts)
+- PATCH /api/v1/workspaces/:workspaceId/comments/threads/:threadId/resolve (apps/api/src/comments/comments.nest.controller.ts)
+- POST /api/v1/auth/collab-token (apps/api/src/auth/auth.nest.controller.ts)
+- POST /api/v1/workspaces/:workspaceId/comments/threads (apps/api/src/comments/comments.nest.controller.ts)
+- POST /api/v1/workspaces/:workspaceId/comments/threads/:threadId/replies (apps/api/src/comments/comments.nest.controller.ts)
+- POST /api/v1/workspaces/:workspaceId/documents/:documentId/approve (apps/api/src/documents/documents.nest.controller.ts)
+- POST /api/v1/workspaces/:workspaceId/documents/:documentId/request-changes (apps/api/src/documents/documents.nest.controller.ts)
+- PUT /api/v1/workspaces/:workspaceId/documents/:documentId (apps/api/src/documents/documents.nest.controller.ts)
+- PUT /api/v1/workspaces/:workspaceId/documents/:documentId/content (apps/api/src/documents/documents.nest.controller.ts)
+
+## Implemented but untested
+- DELETE /api/v1/workspaces/:workspaceId (apps/api/src/workspaces/workspaces.nest.controller.ts)
+- DELETE /api/v1/workspaces/:workspaceId/documents/:documentId (apps/api/src/documents/documents.nest.controller.ts)
+- DELETE /api/v1/workspaces/:workspaceId/folders/:folderId (apps/api/src/folders/folders.nest.controller.ts)
+- DELETE /api/v1/workspaces/:workspaceId/members/:membershipId (apps/api/src/workspaces/workspaces.nest.controller.ts)
+- DELETE /api/v1/workspaces/:workspaceId/tasks/:taskId (apps/api/src/tasks/tasks.nest.controller.ts)
+- GET /api/v1/admin/audit (apps/api/src/admin/admin.nest.controller.ts)
+- GET /api/v1/admin/overview (apps/api/src/admin/admin.nest.controller.ts)
+- GET /api/v1/admin/users (apps/api/src/admin/admin.nest.controller.ts)
+- GET /api/v1/admin/users/:userId (apps/api/src/admin/admin.nest.controller.ts)
+- GET /api/v1/admin/workspaces (apps/api/src/admin/admin.nest.controller.ts)
+- GET /api/v1/auth/google (apps/api/src/auth/auth.nest.controller.ts)
+- GET /api/v1/auth/google/callback (apps/api/src/auth/auth.nest.controller.ts)
+- GET /api/v1/notifications (apps/api/src/notifications/notifications.nest.controller.ts)
+- GET /api/v1/notifications/preferences (apps/api/src/notifications/notifications.nest.controller.ts)
+- GET /api/v1/notifications/unread-count (apps/api/src/notifications/notifications.nest.controller.ts)
+- GET /api/v1/templates (apps/api/src/templates/templates.nest.controller.ts)
+- GET /api/v1/templates/:id (apps/api/src/templates/templates.nest.controller.ts)
+- GET /api/v1/users/me (apps/api/src/users/users.nest.controller.ts)
+- GET /api/v1/workspaces/:workspaceId (apps/api/src/workspaces/workspaces.nest.controller.ts)
+- GET /api/v1/workspaces/:workspaceId/activity (apps/api/src/activity/activity.nest.controller.ts)
+- GET /api/v1/workspaces/:workspaceId/comments (apps/api/src/comments/comments.nest.controller.ts)
+- GET /api/v1/workspaces/:workspaceId/documents (apps/api/src/documents/documents.nest.controller.ts)
+- GET /api/v1/workspaces/:workspaceId/documents/:documentId (apps/api/src/documents/documents.nest.controller.ts)
+- GET /api/v1/workspaces/:workspaceId/documents/:documentId/submissions (apps/api/src/documents/documents.nest.controller.ts)
+- GET /api/v1/workspaces/:workspaceId/documents/:documentId/versions (apps/api/src/documents/documents.nest.controller.ts)
+- GET /api/v1/workspaces/:workspaceId/documents/tree (apps/api/src/documents/documents.nest.controller.ts)
+- GET /api/v1/workspaces/:workspaceId/members (apps/api/src/workspaces/workspaces.nest.controller.ts)
+- GET /api/v1/workspaces/:workspaceId/search (apps/api/src/search/search.nest.controller.ts)
+- GET /api/v1/workspaces/:workspaceId/tasks (apps/api/src/tasks/tasks.nest.controller.ts)
+- GET /api/v1/workspaces/:workspaceId/tasks/:taskId (apps/api/src/tasks/tasks.nest.controller.ts)
+- PATCH /api/v1/admin/users/:userId/deactivate (apps/api/src/admin/admin.nest.controller.ts)
+- PATCH /api/v1/admin/users/:userId/demote (apps/api/src/admin/admin.nest.controller.ts)
+- PATCH /api/v1/admin/users/:userId/promote (apps/api/src/admin/admin.nest.controller.ts)
+- PATCH /api/v1/admin/users/:userId/reactivate (apps/api/src/admin/admin.nest.controller.ts)
+- PATCH /api/v1/admin/workspaces/:workspaceId/archive (apps/api/src/admin/admin.nest.controller.ts)
+- PATCH /api/v1/admin/workspaces/:workspaceId/force-delete (apps/api/src/admin/admin.nest.controller.ts)
+- PATCH /api/v1/admin/workspaces/:workspaceId/unarchive (apps/api/src/admin/admin.nest.controller.ts)
+- PATCH /api/v1/notifications/:notificationId/read (apps/api/src/notifications/notifications.nest.controller.ts)
+- PATCH /api/v1/notifications/preferences (apps/api/src/notifications/notifications.nest.controller.ts)
+- PATCH /api/v1/notifications/read-all (apps/api/src/notifications/notifications.nest.controller.ts)
+- PATCH /api/v1/workspaces/:workspaceId/comments/:commentId (apps/api/src/comments/comments.nest.controller.ts)
+- PATCH /api/v1/workspaces/:workspaceId/comments/:commentId/delete (apps/api/src/comments/comments.nest.controller.ts)
+- PATCH /api/v1/workspaces/:workspaceId/comments/threads/:threadId/resolve (apps/api/src/comments/comments.nest.controller.ts)
+- PATCH /api/v1/workspaces/:workspaceId/folders/:folderId (apps/api/src/folders/folders.nest.controller.ts)
+- PATCH /api/v1/workspaces/:workspaceId/members/:membershipId/role (apps/api/src/workspaces/workspaces.nest.controller.ts)
+- PATCH /api/v1/workspaces/:workspaceId/tasks/:taskId (apps/api/src/tasks/tasks.nest.controller.ts)
+- PATCH /api/v1/workspaces/:workspaceId/tasks/:taskId/assign (apps/api/src/tasks/tasks.nest.controller.ts)
+- PATCH /api/v1/workspaces/:workspaceId/tasks/:taskId/status (apps/api/src/tasks/tasks.nest.controller.ts)
+- POST /api/v1/auth/collab-token (apps/api/src/auth/auth.nest.controller.ts)
+- POST /api/v1/auth/forgot-password (apps/api/src/auth/auth.nest.controller.ts)
+- POST /api/v1/auth/login (apps/api/src/auth/auth.nest.controller.ts)
+- POST /api/v1/auth/logout (apps/api/src/auth/auth.nest.controller.ts)
+- POST /api/v1/auth/logout-all (apps/api/src/auth/auth.nest.controller.ts)
+- POST /api/v1/auth/refresh (apps/api/src/auth/auth.nest.controller.ts)
+- POST /api/v1/auth/register (apps/api/src/auth/auth.nest.controller.ts)
+- POST /api/v1/auth/resend-verification (apps/api/src/auth/auth.nest.controller.ts)
+- POST /api/v1/auth/reset-password (apps/api/src/auth/auth.nest.controller.ts)
+- POST /api/v1/auth/verify-email (apps/api/src/auth/auth.nest.controller.ts)
+- POST /api/v1/workspaces (apps/api/src/workspaces/workspaces.nest.controller.ts)
+- POST /api/v1/workspaces/:workspaceId/archive (apps/api/src/workspaces/workspaces.nest.controller.ts)
+- POST /api/v1/workspaces/:workspaceId/comments/threads (apps/api/src/comments/comments.nest.controller.ts)
+- POST /api/v1/workspaces/:workspaceId/comments/threads/:threadId/replies (apps/api/src/comments/comments.nest.controller.ts)
+- POST /api/v1/workspaces/:workspaceId/documents (apps/api/src/documents/documents.nest.controller.ts)
+- POST /api/v1/workspaces/:workspaceId/documents/:documentId/approve (apps/api/src/documents/documents.nest.controller.ts)
+- POST /api/v1/workspaces/:workspaceId/documents/:documentId/lock (apps/api/src/documents/documents.nest.controller.ts)
+- POST /api/v1/workspaces/:workspaceId/documents/:documentId/request-changes (apps/api/src/documents/documents.nest.controller.ts)
+- POST /api/v1/workspaces/:workspaceId/documents/:documentId/submit (apps/api/src/documents/documents.nest.controller.ts)
+- POST /api/v1/workspaces/:workspaceId/documents/:documentId/unlock (apps/api/src/documents/documents.nest.controller.ts)
+- POST /api/v1/workspaces/:workspaceId/documents/:documentId/versions/:versionId/restore (apps/api/src/documents/documents.nest.controller.ts)
+- POST /api/v1/workspaces/:workspaceId/folders (apps/api/src/folders/folders.nest.controller.ts)
+- POST /api/v1/workspaces/:workspaceId/tasks (apps/api/src/tasks/tasks.nest.controller.ts)
+- POST /api/v1/workspaces/:workspaceId/transfer-ownership (apps/api/src/workspaces/workspaces.nest.controller.ts)
+- POST /api/v1/workspaces/:workspaceId/unarchive (apps/api/src/workspaces/workspaces.nest.controller.ts)
+- PUT /api/v1/users/me (apps/api/src/users/users.nest.controller.ts)
+- PUT /api/v1/users/me/password (apps/api/src/users/users.nest.controller.ts)
+- PUT /api/v1/workspaces/:workspaceId (apps/api/src/workspaces/workspaces.nest.controller.ts)
+- PUT /api/v1/workspaces/:workspaceId/documents/:documentId (apps/api/src/documents/documents.nest.controller.ts)
+- PUT /api/v1/workspaces/:workspaceId/documents/:documentId/content (apps/api/src/documents/documents.nest.controller.ts)
