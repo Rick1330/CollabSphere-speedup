@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useState } from "react";
+import { forwardRef, useCallback, useEffect, useState } from "react";
 import { Activity } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SectionError } from "@/components/shared/section-error";
@@ -25,21 +25,25 @@ type State = "loading" | "loaded" | "empty" | "error";
 export const DashboardActivity = () => {
   const [state, setState] = useState<State>("loading");
   const [events, setEvents] = useState<ActivityEvent[]>([]);
+  const [loadError, setLoadError] = useState<unknown>(undefined);
 
-  useEffect(() => {
-    let cancelled = false;
+  const load = useCallback(() => {
     setState("loading");
+    setLoadError(undefined);
     getDashboardActivity()
       .then((data) => {
-        if (cancelled) return;
         setEvents(data);
         setState(data.length === 0 ? "empty" : "loaded");
       })
-      .catch(() => {
-        if (!cancelled) setState("error");
+      .catch((err: unknown) => {
+        setLoadError(err);
+        setState("error");
       });
-    return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   return (
     <section aria-labelledby="activity-heading">
@@ -54,7 +58,7 @@ export const DashboardActivity = () => {
       {state === "loading" && <Loading />}
       {state === "empty" && <Empty />}
       {state === "error" && (
-        <SectionError sectionName="activity" requestId="req_a93b41ee" onRetry={() => setState("loaded")} />
+        <SectionError sectionName="activity" error={loadError} onRetry={() => load()} />
       )}
       {state === "loaded" && (
         <div>

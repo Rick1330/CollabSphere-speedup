@@ -1,15 +1,25 @@
 import { AlertCircle, RefreshCw } from "lucide-react";
+import { getFetchErrorDetails } from "@/lib/fetch-error-details";
 
 interface SectionErrorProps {
   sectionName: string;
-  requestId?: string;
+  /** When set, message / requestId are derived from the underlying error. */
+  error?: unknown;
   onRetry: () => void;
 }
 
-export const SectionError = ({ sectionName, requestId, onRetry }: SectionErrorProps) => (
+export const SectionError = ({ sectionName, error, onRetry }: SectionErrorProps) => {
+  const { message, requestId, hint } = error !== undefined ? getFetchErrorDetails(error) : { message: "", requestId: undefined, hint: undefined };
+  return (
   <div role="alert" className="rounded-xl border border-red-200 bg-red-50/50 p-6 text-center">
     <AlertCircle className="h-6 w-6 text-red-400 mx-auto" />
     <p className="text-sm text-stone-700 mt-2 font-medium">Couldn't load {sectionName}</p>
+    {message && (
+      <p className="text-xs text-stone-600 mt-2 max-w-md mx-auto">{message}</p>
+    )}
+    {hint && (
+      <p className="text-xs text-stone-500 mt-1.5 max-w-md mx-auto">{hint}</p>
+    )}
     {requestId && (
       <p className="text-xs text-stone-500 mt-1 font-mono">Request ID: {requestId}</p>
     )}
@@ -23,4 +33,5 @@ export const SectionError = ({ sectionName, requestId, onRetry }: SectionErrorPr
       Try again
     </button>
   </div>
-);
+  );
+};

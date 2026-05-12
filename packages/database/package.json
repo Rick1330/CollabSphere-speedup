@@ -12,7 +12,7 @@
     "seed": "node prisma/seed.mjs"
   },
   "scripts": {
-    "generate": "prisma generate",
+    "generate": "node ../../scripts/prisma-generate-retry.mjs",
     "validate": "prisma validate",
     "migrate:dev": "prisma migrate dev",
     "migrate:deploy": "prisma migrate deploy",

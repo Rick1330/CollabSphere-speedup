@@ -62,10 +62,12 @@ describe("api/adapters/auth wiring", () => {
   it("uses register/forgot/reset/verify/me API routes", async () => {
     requestMock.mockResolvedValue({});
     parseSingleMock.mockReturnValue({
-      id: "u1",
-      email: "user@example.com",
-      fullName: "User",
-      globalRole: "USER",
+      user: {
+        id: "u1",
+        email: "user@example.com",
+        fullName: "User",
+        globalRole: "USER",
+      },
     });
     const { register, requestPasswordReset, resetPassword, verifyEmail, getCurrentUser } =
       await import("./auth");

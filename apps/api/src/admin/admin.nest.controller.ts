@@ -1,7 +1,8 @@
-import { Controller, Get, Inject, Param, Patch, Query } from "@nestjs/common";
+import { Controller, Get, Headers, Inject, Ip, Param, Patch, Query } from "@nestjs/common";
 import { Transform } from "class-transformer";
 import { IsIn, IsInt, IsOptional, IsString, Max, Min } from "class-validator";
 import { AdminOnly } from "../common/decorators/admin-only.decorator.js";
+import { CurrentUser, type RequestUser } from "../common/decorators/current-user.decorator.js";
 import { ReqRequestId } from "../common/nest/request-id.decorator.js";
 import {
   createActionResponsePayload,
@@ -79,8 +80,20 @@ export class AdminNestController {
   }
 
   @Patch("users/:userId/deactivate")
-  async deactivate(@ReqRequestId() requestId: string, @Param("userId") userId: string) {
-    await this.adminService.setUserActive(userId, false);
+  async deactivate(
+    @ReqRequestId() requestId: string,
+    @Param("userId") userId: string,
+    @CurrentUser() actor: RequestUser,
+    @Ip() ipAddress: string,
+    @Headers("user-agent") userAgent: string | undefined,
+  ) {
+    await this.adminService.setUserActive(userId, false, {
+      id: actor.sub,
+      email: actor.email,
+      globalRole: actor.globalRole,
+      ipAddress,
+      userAgent,
+    });
     return wrapSuccessResponse({
       payload: createActionResponsePayload({ message: "User deactivated." }),
       requestId,
@@ -88,8 +101,20 @@ export class AdminNestController {
   }
 
   @Patch("users/:userId/reactivate")
-  async reactivate(@ReqRequestId() requestId: string, @Param("userId") userId: string) {
-    await this.adminService.setUserActive(userId, true);
+  async reactivate(
+    @ReqRequestId() requestId: string,
+    @Param("userId") userId: string,
+    @CurrentUser() actor: RequestUser,
+    @Ip() ipAddress: string,
+    @Headers("user-agent") userAgent: string | undefined,
+  ) {
+    await this.adminService.setUserActive(userId, true, {
+      id: actor.sub,
+      email: actor.email,
+      globalRole: actor.globalRole,
+      ipAddress,
+      userAgent,
+    });
     return wrapSuccessResponse({
       payload: createActionResponsePayload({ message: "User reactivated." }),
       requestId,
@@ -97,8 +122,20 @@ export class AdminNestController {
   }
 
   @Patch("users/:userId/promote")
-  async promote(@ReqRequestId() requestId: string, @Param("userId") userId: string) {
-    await this.adminService.setUserRole(userId, "ADMIN");
+  async promote(
+    @ReqRequestId() requestId: string,
+    @Param("userId") userId: string,
+    @CurrentUser() actor: RequestUser,
+    @Ip() ipAddress: string,
+    @Headers("user-agent") userAgent: string | undefined,
+  ) {
+    await this.adminService.setUserRole(userId, "ADMIN", {
+      id: actor.sub,
+      email: actor.email,
+      globalRole: actor.globalRole,
+      ipAddress,
+      userAgent,
+    });
     return wrapSuccessResponse({
       payload: createActionResponsePayload({ message: "User promoted." }),
       requestId,
@@ -106,8 +143,20 @@ export class AdminNestController {
   }
 
   @Patch("users/:userId/demote")
-  async demote(@ReqRequestId() requestId: string, @Param("userId") userId: string) {
-    await this.adminService.setUserRole(userId, "USER");
+  async demote(
+    @ReqRequestId() requestId: string,
+    @Param("userId") userId: string,
+    @CurrentUser() actor: RequestUser,
+    @Ip() ipAddress: string,
+    @Headers("user-agent") userAgent: string | undefined,
+  ) {
+    await this.adminService.setUserRole(userId, "USER", {
+      id: actor.sub,
+      email: actor.email,
+      globalRole: actor.globalRole,
+      ipAddress,
+      userAgent,
+    });
     return wrapSuccessResponse({
       payload: createActionResponsePayload({ message: "User demoted." }),
       requestId,
@@ -130,8 +179,20 @@ export class AdminNestController {
   }
 
   @Patch("workspaces/:workspaceId/archive")
-  async archive(@ReqRequestId() requestId: string, @Param("workspaceId") workspaceId: string) {
-    await this.adminService.setWorkspaceArchived(workspaceId, true);
+  async archive(
+    @ReqRequestId() requestId: string,
+    @Param("workspaceId") workspaceId: string,
+    @CurrentUser() actor: RequestUser,
+    @Ip() ipAddress: string,
+    @Headers("user-agent") userAgent: string | undefined,
+  ) {
+    await this.adminService.setWorkspaceArchived(workspaceId, true, {
+      id: actor.sub,
+      email: actor.email,
+      globalRole: actor.globalRole,
+      ipAddress,
+      userAgent,
+    });
     return wrapSuccessResponse({
       payload: createActionResponsePayload({ message: "Workspace archived." }),
       requestId,
@@ -139,8 +200,20 @@ export class AdminNestController {
   }
 
   @Patch("workspaces/:workspaceId/unarchive")
-  async unarchive(@ReqRequestId() requestId: string, @Param("workspaceId") workspaceId: string) {
-    await this.adminService.setWorkspaceArchived(workspaceId, false);
+  async unarchive(
+    @ReqRequestId() requestId: string,
+    @Param("workspaceId") workspaceId: string,
+    @CurrentUser() actor: RequestUser,
+    @Ip() ipAddress: string,
+    @Headers("user-agent") userAgent: string | undefined,
+  ) {
+    await this.adminService.setWorkspaceArchived(workspaceId, false, {
+      id: actor.sub,
+      email: actor.email,
+      globalRole: actor.globalRole,
+      ipAddress,
+      userAgent,
+    });
     return wrapSuccessResponse({
       payload: createActionResponsePayload({ message: "Workspace unarchived." }),
       requestId,
@@ -148,8 +221,20 @@ export class AdminNestController {
   }
 
   @Patch("workspaces/:workspaceId/force-delete")
-  async forceDelete(@ReqRequestId() requestId: string, @Param("workspaceId") workspaceId: string) {
-    await this.adminService.forceDeleteWorkspace(workspaceId);
+  async forceDelete(
+    @ReqRequestId() requestId: string,
+    @Param("workspaceId") workspaceId: string,
+    @CurrentUser() actor: RequestUser,
+    @Ip() ipAddress: string,
+    @Headers("user-agent") userAgent: string | undefined,
+  ) {
+    await this.adminService.forceDeleteWorkspace(workspaceId, {
+      id: actor.sub,
+      email: actor.email,
+      globalRole: actor.globalRole,
+      ipAddress,
+      userAgent,
+    });
     return wrapSuccessResponse({
       payload: createActionResponsePayload({ message: "Workspace deleted." }),
       requestId,
@@ -157,8 +242,20 @@ export class AdminNestController {
   }
 
   @Get("audit")
-  async audit(@ReqRequestId() requestId: string, @Query() query: AuditQueryDto) {
-    const result = await this.adminService.listAudit(query.page, query.pageSize, query.severity, query.q);
+  async audit(
+    @ReqRequestId() requestId: string,
+    @Query() query: AuditQueryDto,
+    @CurrentUser() actor: RequestUser,
+    @Ip() ipAddress: string,
+    @Headers("user-agent") userAgent: string | undefined,
+  ) {
+    const result = await this.adminService.listAudit(query.page, query.pageSize, query.severity, query.q, {
+      id: actor.sub,
+      email: actor.email,
+      globalRole: actor.globalRole,
+      ipAddress,
+      userAgent,
+    });
     return wrapSuccessResponse({
       payload: createListResponsePayload({
         items: result.items,

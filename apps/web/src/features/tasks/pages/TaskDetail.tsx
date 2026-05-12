@@ -4,12 +4,11 @@ import { ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
 import { TopNav } from "@/app/shell/top-nav";
 import { CommandPalette } from "@/app/shell/command-palette";
-import {
-  WorkspaceSidebar,
-  type WorkspaceForSidebar,
-} from "@/features/workspace/components/workspace-sidebar";
+import { WorkspaceSidebar } from "@/features/workspace/components/workspace-sidebar";
 import { useSidebar } from "@/hooks/use-sidebar";
 import { useCommandPalette } from "@/hooks/use-command-palette";
+import { useWorkspaceRouteContext } from "@/hooks/use-workspace-route-context";
+import { useCurrentAccount } from "@/lib/auth-session";
 import {
   canTransition,
   createTaskComment,
@@ -27,35 +26,6 @@ import { TaskDetailSheet } from "@/features/tasks/components/task-detail-sheet";
 import { resolveTaskParam, resolveWorkspaceParam } from "@/lib/route-params";
 import { useTaskRealtime } from "@/features/tasks/hooks/use-task-realtime";
 
-type Role = "OWNER" | "ADMIN" | "MANAGER" | "MEMBER" | "VIEWER";
-type WorkspaceWithRole = WorkspaceForSidebar & { myRole: Role };
-
-const MOCK_USER = { fullName: "Elshaday Tesfaye", email: "jane@collabsphere.app" };
-const CURRENT_USER_ID = "user-jane";
-
-const WORKSPACES: Record<string, WorkspaceWithRole> = {
-  alpha: {
-    id: "alpha", name: "Project Alpha", description: "", icon: "📦",
-    type: "professional", roleLabel: "TECH LEAD", status: "active", myRole: "ADMIN",
-    permissions: { canCreateContent: true, canEditSettings: true, canViewAnalytics: true },
-  },
-  thesis: {
-    id: "thesis", name: "Thesis", description: "", icon: "🎓",
-    type: "academic", roleLabel: "STUDENT", status: "active", myRole: "MEMBER",
-    permissions: { canCreateContent: true, canEditSettings: false, canViewAnalytics: false },
-  },
-  personal: {
-    id: "personal", name: "Personal Notes", description: "", icon: "📝",
-    type: "general", roleLabel: "OWNER", status: "active", myRole: "OWNER",
-    permissions: { canCreateContent: true, canEditSettings: true, canViewAnalytics: false },
-  },
-  research: {
-    id: "research", name: "Research Group", description: "", icon: "🔬",
-    type: "academic", roleLabel: "REVIEWER", status: "archived", myRole: "MEMBER",
-    permissions: { canCreateContent: false, canEditSettings: true, canViewAnalytics: false },
-  },
-};
-
 const TaskDetailPage = () => {
   const params = useParams();
   const workspaceId = resolveWorkspaceParam(params.workspaceId);
@@ -63,9 +33,16 @@ const TaskDetailPage = () => {
   const navigate = useNavigate();
   const { collapsed, toggle } = useSidebar();
   const palette = useCommandPalette();
+  const account = useCurrentAccount();
+  const { sidebar, myRole, isLoading: shellLoading, isError: shellError, refetch } =
+    useWorkspaceRouteContext();
 
-  const workspace = WORKSPACES[workspaceId] ?? { ...WORKSPACES.alpha, id: workspaceId };
-  const isArchived = workspace.status === "archived";
+  const currentUserId = account?.id ?? "";
+  const currentUser = account
+    ? { fullName: account.fullName, email: account.email }
+    : { fullName: "Guest", email: "" };
+
+  const isArchived = sidebar?.status === "archived";
 
   const [tasks, setTasks] = useState<Record<string, TaskDetail>>({});
   const [members, setMembers] = useState<TaskAssignee[]>([]);
@@ -82,6 +59,7 @@ const TaskDetailPage = () => {
   });
 
   useEffect(() => {
+    if (shellLoading || shellError || !sidebar) return undefined;
     let cancelled = false;
     loadTaskData()
       .catch(() => {
@@ -91,7 +69,7 @@ const TaskDetailPage = () => {
     return () => {
       cancelled = true;
     };
-  }, [loadTaskData]);
+  }, [loadTaskData, shellLoading, shellError, sidebar]);
 
   const task = tasks[taskId] ?? null;
   const columns = useMemo(() => getWorkspaceWorkflowColumns(workspaceId), [workspaceId]);
@@ -116,6 +94,29 @@ const TaskDetailPage = () => {
       };
     });
   };
+
+  if (shellLoading) {
+    return (
+      <div className="app-light min-h-screen flex items-center justify-center gap-2 text-stone-500 text-sm">
+        Loading workspace…
+      </div>
+    );
+  }
+
+  if (shellError || !sidebar || !myRole) {
+    return (
+      <div className="app-light min-h-screen flex flex-col items-center justify-center gap-4 px-6 text-center">
+        <p className="text-stone-700 font-medium">Couldn’t load task workspace.</p>
+        <button
+          type="button"
+          onClick={() => refetch()}
+          className="h-10 px-4 rounded-lg bg-teal-600 text-white text-sm font-medium hover:bg-teal-500"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
 
   const handleDelete = (id: string) => {
     setTasks((prev) => {
@@ -157,9 +158,9 @@ const TaskDetailPage = () => {
 
   return (
     <div className="app-light min-h-screen flex bg-stone-50">
-      <WorkspaceSidebar workspace={workspace} collapsed={collapsed} onToggle={toggle} />
+      <WorkspaceSidebar workspace={sidebar} collapsed={collapsed} onToggle={toggle} />
       <div className="flex-1 min-w-0 flex flex-col h-screen">
-        <TopNav user={MOCK_USER} unreadCount={3} onOpenPalette={palette.toggle} />
+        <TopNav user={currentUser} unreadCount={3} onOpenPalette={palette.toggle} />
         <main className="flex-1 min-h-0 overflow-hidden flex flex-col">
           <div className="border-b border-stone-200 bg-white">
             <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-3">
@@ -181,8 +182,8 @@ const TaskDetailPage = () => {
                 task={task}
                 isLoading={isLoading}
                 isArchived={isArchived}
-                myRole={workspace.myRole}
-                currentUserId={CURRENT_USER_ID}
+                myRole={myRole}
+                currentUserId={currentUserId}
                 members={members}
                 onClose={() => navigate(`/w/${workspaceId}/tasks`)}
                 onDelete={handleDelete}

@@ -22,10 +22,11 @@ import {
 } from "lucide-react";
 import { TopNav } from "@/app/shell/top-nav";
 import { CommandPalette } from "@/app/shell/command-palette";
-import { WorkspaceSidebar, type WorkspaceForSidebar } from "@/features/workspace/components/workspace-sidebar";
+import { WorkspaceSidebar } from "@/features/workspace/components/workspace-sidebar";
 import { useSidebar } from "@/hooks/use-sidebar";
 import { useCommandPalette } from "@/hooks/use-command-palette";
-import { useStoredWorkspaces } from "@/features/workspace/store/workspace-store";
+import { useWorkspaceRouteContext } from "@/hooks/use-workspace-route-context";
+import { useCurrentAccount } from "@/lib/auth-session";
 import {
   Dialog,
   DialogContent,
@@ -43,60 +44,27 @@ import { PageHeader } from "@/components/shared/page-header";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
-const MOCK_USER = { fullName: "Elshaday Tesfaye", email: "jane@collabsphere.app" };
-
 type TabKey = "workspace" | "document";
 
-const FALLBACK_WS: WorkspaceForSidebar = {
-  id: "alpha",
-  name: "Project Alpha",
-  description: "Building the next-gen collaboration platform.",
-  icon: "📦",
-  type: "professional",
-  roleLabel: "TECH LEAD",
-  status: "active",
-  permissions: { canCreateContent: true, canEditSettings: true, canViewAnalytics: true },
-};
-
 const Templates = () => {
-  const { workspaceId = "alpha" } = useParams<{ workspaceId: string }>();
+  const params = useParams<{ workspaceId: string }>();
+  const paramWorkspaceId = params.workspaceId?.trim() ?? "";
   const { collapsed, toggle } = useSidebar();
   const palette = useCommandPalette();
   const navigate = useNavigate();
-  const stored = useStoredWorkspaces();
+  const account = useCurrentAccount();
+  const { workspaceId, sidebar, myRole, isLoading, isError, refetch } = useWorkspaceRouteContext();
 
-  const workspace = useMemo<WorkspaceForSidebar>(() => {
-    const fromStore = stored.find((w) => w.id === workspaceId);
-    if (fromStore) {
-      return {
-        id: fromStore.id,
-        name: fromStore.name,
-        description: fromStore.description || "",
-        icon: fromStore.icon || "✨",
-        type: fromStore.type,
-        roleLabel: fromStore.roleLabel,
-        status: fromStore.status,
-        permissions: { canCreateContent: true, canEditSettings: true, canViewAnalytics: true },
-      };
-    }
-    return { ...FALLBACK_WS, id: workspaceId };
-  }, [workspaceId, stored]);
+  const currentUser = account
+    ? { fullName: account.fullName, email: account.email }
+    : { fullName: "Guest", email: "" };
+
+  const workspace = sidebar;
 
   const [tab, setTab] = useState<TabKey>("workspace");
   const [query, setQuery] = useState("");
   const [previewWs, setPreviewWs] = useState<WorkspaceTemplate | null>(null);
   const [previewDoc, setPreviewDoc] = useState<DocumentTemplate | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    document.title = `Templates — ${workspace.name} — CollabSphere`;
-  }, [workspace.name]);
-
-  useEffect(() => {
-    setLoading(true);
-    const t = setTimeout(() => setLoading(false), 280);
-    return () => clearTimeout(t);
-  }, [tab]);
 
   const wsFiltered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -120,11 +88,51 @@ const Templates = () => {
     );
   }, [query]);
 
+  useEffect(() => {
+    if (workspace?.name) {
+      document.title = `Templates — ${workspace.name} — CollabSphere`;
+    }
+  }, [workspace?.name]);
+
+  if (!paramWorkspaceId) {
+    return (
+      <div className="app-light min-h-screen flex items-center justify-center text-stone-500 text-sm">
+        Missing workspace in URL.
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="app-light min-h-screen flex items-center justify-center gap-2 text-stone-500 text-sm">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        Loading workspace…
+      </div>
+    );
+  }
+
+  if (isError || !workspace || !myRole) {
+    return (
+      <div className="app-light min-h-screen flex flex-col items-center justify-center gap-4 px-6 text-center">
+        <p className="text-stone-700 font-medium">Couldn’t load templates for this workspace.</p>
+        <button
+          type="button"
+          onClick={() => refetch()}
+          className="h-10 px-4 rounded-lg bg-teal-600 text-white text-sm font-medium hover:bg-teal-500"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+  const loading = false;
+
   return (
     <div className="app-light min-h-screen flex">
       <WorkspaceSidebar workspace={workspace} collapsed={collapsed} onToggle={toggle} />
       <div className="flex-1 min-w-0 flex flex-col">
-        <TopNav user={MOCK_USER} unreadCount={3} onOpenPalette={palette.toggle} />
+        <TopNav user={currentUser} unreadCount={3} onOpenPalette={palette.toggle} />
 
         <main className="px-4 sm:px-6 lg:px-10 py-6 lg:py-10 max-w-7xl mx-auto w-full">
           <PageHeader

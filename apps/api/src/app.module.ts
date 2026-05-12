@@ -21,6 +21,7 @@ import { SearchNestModule } from "./search/search.nest.module.js";
 import { AdminNestModule } from "./admin/admin.nest.module.js";
 import { AdminOnlyGuard } from "./common/guards/admin-only.guard.js";
 import { ExportsNestModule } from "./exports/exports.nest.module.js";
+import { HttpObservabilityMiddleware } from "./common/observability/http-observability.middleware.js";
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { ExportsNestModule } from "./exports/exports.nest.module.js";
   ],
   providers: [
     NestRequestIdMiddleware,
+    HttpObservabilityMiddleware,
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard,
@@ -57,6 +59,8 @@ import { ExportsNestModule } from "./exports/exports.nest.module.js";
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
-    consumer.apply(NestRequestIdMiddleware).forRoutes({ path: "*", method: RequestMethod.ALL });
+    consumer
+      .apply(NestRequestIdMiddleware, HttpObservabilityMiddleware)
+      .forRoutes({ path: "*", method: RequestMethod.ALL });
   }
 }

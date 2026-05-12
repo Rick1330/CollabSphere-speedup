@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import {
+  Loader2,
   FilePlus,
   FolderPlus,
   Folder,
@@ -12,10 +13,7 @@ import {
 } from "lucide-react";
 import { TopNav } from "@/app/shell/top-nav";
 import { CommandPalette } from "@/app/shell/command-palette";
-import {
-  WorkspaceSidebar,
-  type WorkspaceForSidebar,
-} from "@/features/workspace/components/workspace-sidebar";
+import { WorkspaceSidebar } from "@/features/workspace/components/workspace-sidebar";
 import {
   DocumentTree,
   type TreeNode,
@@ -25,72 +23,27 @@ import { useSidebar } from "@/hooks/use-sidebar";
 import { useCommandPalette } from "@/hooks/use-command-palette";
 import { CountChip, MetaStat, PageHeader } from "@/components/shared/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
-
-const MOCK_USER = { fullName: "Elshaday Tesfaye", email: "jane@collabsphere.app" };
-
-const WORKSPACES: Record<string, WorkspaceForSidebar & { memberCount: number }> = {
-  alpha: {
-    id: "alpha",
-    name: "Project Alpha",
-    description: "Building the next-gen collaboration platform.",
-    icon: "📦",
-    type: "professional",
-    roleLabel: "TECH LEAD",
-    status: "active",
-    memberCount: 6,
-    permissions: { canCreateContent: true, canEditSettings: true, canViewAnalytics: true },
-  },
-  thesis: {
-    id: "thesis",
-    name: "Thesis — Distributed Systems",
-    description: "Final year research workspace.",
-    icon: "🎓",
-    type: "academic",
-    roleLabel: "STUDENT",
-    status: "active",
-    memberCount: 4,
-    permissions: { canCreateContent: true, canEditSettings: false, canViewAnalytics: false },
-  },
-  personal: {
-    id: "personal",
-    name: "Personal Notes",
-    description: "Private notebook for ideas and drafts.",
-    icon: "📝",
-    type: "general",
-    roleLabel: "OWNER",
-    status: "active",
-    memberCount: 1,
-    permissions: { canCreateContent: true, canEditSettings: true, canViewAnalytics: false },
-  },
-  research: {
-    id: "research",
-    name: "Research Group",
-    description: "ML paper collaboration workspace.",
-    icon: "🔬",
-    type: "academic",
-    roleLabel: "REVIEWER",
-    status: "archived",
-    memberCount: 5,
-    permissions: { canCreateContent: false, canEditSettings: true, canViewAnalytics: false },
-  },
-};
-
-const FALLBACK = WORKSPACES.alpha;
+import { useWorkspaceRouteContext } from "@/hooks/use-workspace-route-context";
+import { useCurrentAccount } from "@/lib/auth-session";
 
 const Documents = () => {
-  const { workspaceId } = useParams<{ workspaceId: string }>();
+  const params = useParams<{ workspaceId: string }>();
+  const paramWorkspaceId = params.workspaceId?.trim() ?? "";
   const { collapsed, toggle } = useSidebar();
   const palette = useCommandPalette();
+  const account = useCurrentAccount();
+  const { workspaceId, sidebar, myRole, isLoading, isError, refetch } = useWorkspaceRouteContext();
 
-  const workspace = useMemo(
-    () => (workspaceId && WORKSPACES[workspaceId]) || { ...FALLBACK, id: workspaceId || "alpha" },
-    [workspaceId],
-  );
+  const currentUser = account
+    ? { fullName: account.fullName, email: account.email }
+    : { fullName: "Guest", email: "" };
+
+  const workspace = sidebar;
 
   const canCreate =
-    workspace.permissions.canCreateContent && workspace.status === "active";
+    Boolean(workspace?.permissions.canCreateContent) && workspace?.status === "active";
 
-  const { tree, state: treeState } = useDocumentTree(workspace.id);
+  const { tree, state: treeState } = useDocumentTree(workspaceId);
 
   // Compute richer stats from the tree for the hero strip.
   const stats = useMemo(() => {
@@ -117,15 +70,49 @@ const Documents = () => {
   }, [tree]);
 
   useEffect(() => {
-    document.title = `Documents — ${workspace.name} — CollabSphere`;
-  }, [workspace.name]);
+    if (workspace?.name) {
+      document.title = `Documents — ${workspace.name} — CollabSphere`;
+    }
+  }, [workspace?.name]);
+
+  if (!paramWorkspaceId) {
+    return (
+      <div className="app-light min-h-screen flex items-center justify-center text-stone-500 text-sm">
+        Missing workspace in URL.
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="app-light min-h-screen flex items-center justify-center gap-2 text-stone-500 text-sm">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        Loading workspace…
+      </div>
+    );
+  }
+
+  if (isError || !workspace || !myRole) {
+    return (
+      <div className="app-light min-h-screen flex flex-col items-center justify-center gap-4 px-6 text-center">
+        <p className="text-stone-700 font-medium">Couldn’t load documents for this workspace.</p>
+        <button
+          type="button"
+          onClick={() => refetch()}
+          className="h-10 px-4 rounded-lg bg-teal-600 text-white text-sm font-medium hover:bg-teal-500"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="app-light min-h-screen flex">
       <WorkspaceSidebar workspace={workspace} collapsed={collapsed} onToggle={toggle} />
 
       <div className="flex-1 min-w-0 flex flex-col">
-        <TopNav user={MOCK_USER} unreadCount={3} onOpenPalette={palette.toggle} />
+        <TopNav user={currentUser} unreadCount={3} onOpenPalette={palette.toggle} />
 
         <main className="px-4 sm:px-6 lg:px-10 py-6 lg:py-10 max-w-7xl mx-auto w-full">
           <PageHeader

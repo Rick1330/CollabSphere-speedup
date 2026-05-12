@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
+import { Loader2 } from "lucide-react";
 import {
   Activity as ActivityIcon,
   ArrowDownRight,
@@ -15,10 +16,11 @@ import {
 } from "lucide-react";
 import { TopNav } from "@/app/shell/top-nav";
 import { CommandPalette } from "@/app/shell/command-palette";
-import { WorkspaceSidebar, type WorkspaceForSidebar } from "@/features/workspace/components/workspace-sidebar";
+import { WorkspaceSidebar } from "@/features/workspace/components/workspace-sidebar";
 import { useSidebar } from "@/hooks/use-sidebar";
 import { useCommandPalette } from "@/hooks/use-command-palette";
-import { useStoredWorkspaces } from "@/features/workspace/store/workspace-store";
+import { useWorkspaceRouteContext } from "@/hooks/use-workspace-route-context";
+import { useCurrentAccount } from "@/lib/auth-session";
 import { PageHeader } from "@/components/shared/page-header";
 import {
   fetchAnalyticsSnapshot,
@@ -29,19 +31,6 @@ import { useQuery } from "@tanstack/react-query";
 import { relativeTime, getInitials, getAvatarColor } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
-const MOCK_USER = { fullName: "Elshaday Tesfaye", email: "jane@collabsphere.app" };
-
-const FALLBACK_WS: WorkspaceForSidebar = {
-  id: "alpha",
-  name: "Project Alpha",
-  description: "Building the next-gen collaboration platform.",
-  icon: "📦",
-  type: "professional",
-  roleLabel: "TECH LEAD",
-  status: "active",
-  permissions: { canCreateContent: true, canEditSettings: true, canViewAnalytics: true },
-};
-
 const DOC_STATUS_META: Record<string, { label: string; cls: string }> = {
   draft:               { label: "Draft",             cls: "bg-stone-100 text-stone-700" },
   submitted:           { label: "Submitted",         cls: "bg-amber-100 text-amber-700" },
@@ -51,47 +40,71 @@ const DOC_STATUS_META: Record<string, { label: string; cls: string }> = {
 };
 
 const Analytics = () => {
-  const { workspaceId = "alpha" } = useParams<{ workspaceId: string }>();
+  const params = useParams<{ workspaceId: string }>();
+  const paramWorkspaceId = params.workspaceId?.trim() ?? "";
   const { collapsed, toggle } = useSidebar();
   const palette = useCommandPalette();
-  const stored = useStoredWorkspaces();
+  const account = useCurrentAccount();
+  const { workspaceId, sidebar, myRole, isLoading, isError, refetch } = useWorkspaceRouteContext();
 
-  const workspace = useMemo<WorkspaceForSidebar>(() => {
-    const fromStore = stored.find((w) => w.id === workspaceId);
-    if (fromStore) {
-      return {
-        id: fromStore.id,
-        name: fromStore.name,
-        description: fromStore.description || "",
-        icon: fromStore.icon || "✨",
-        type: fromStore.type,
-        roleLabel: fromStore.roleLabel,
-        status: fromStore.status,
-        permissions: { canCreateContent: true, canEditSettings: true, canViewAnalytics: true },
-      };
-    }
-    return { ...FALLBACK_WS, id: workspaceId };
-  }, [workspaceId, stored]);
+  const currentUser = account
+    ? { fullName: account.fullName, email: account.email }
+    : { fullName: "Guest", email: "" };
 
-  const isAcademic = workspace.type === "academic";
+  const workspace = sidebar;
 
   const { data, isLoading: snapshotLoading } = useQuery({
-    queryKey: ["analytics", workspaceId, workspace.type],
-    queryFn: () => fetchAnalyticsSnapshot(workspaceId, workspace.type),
+    queryKey: ["analytics", workspaceId, workspace?.type],
+    queryFn: () => fetchAnalyticsSnapshot(workspaceId, workspace!.type),
+    enabled: Boolean(workspaceId && workspace?.type),
   });
 
   const loading = snapshotLoading || !data;
   useEffect(() => {
-    document.title = `Analytics — ${workspace.name} — CollabSphere`;
-  }, [workspace.name]);
+    if (workspace?.name) {
+      document.title = `Analytics — ${workspace.name} — CollabSphere`;
+    }
+  }, [workspace?.name]);
 
-  const canView = workspace.permissions.canViewAnalytics;
+  const canView = Boolean(workspace?.permissions.canViewAnalytics);
+
+  if (!paramWorkspaceId) {
+    return (
+      <div className="app-light min-h-screen flex items-center justify-center text-stone-500 text-sm">
+        Missing workspace in URL.
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="app-light min-h-screen flex items-center justify-center gap-2 text-stone-500 text-sm">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        Loading workspace…
+      </div>
+    );
+  }
+
+  if (isError || !workspace || !myRole) {
+    return (
+      <div className="app-light min-h-screen flex flex-col items-center justify-center gap-4 px-6 text-center">
+        <p className="text-stone-700 font-medium">Couldn’t load analytics for this workspace.</p>
+        <button
+          type="button"
+          onClick={() => refetch()}
+          className="h-10 px-4 rounded-lg bg-teal-600 text-white text-sm font-medium hover:bg-teal-500"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="app-light min-h-screen flex">
       <WorkspaceSidebar workspace={workspace} collapsed={collapsed} onToggle={toggle} />
       <div className="flex-1 min-w-0 flex flex-col">
-        <TopNav user={MOCK_USER} unreadCount={3} onOpenPalette={palette.toggle} />
+        <TopNav user={currentUser} unreadCount={3} onOpenPalette={palette.toggle} />
 
         <main className="px-4 sm:px-6 lg:px-10 py-6 lg:py-10 max-w-7xl mx-auto w-full">
           <PageHeader

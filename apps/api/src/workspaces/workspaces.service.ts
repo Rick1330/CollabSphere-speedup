@@ -1,5 +1,5 @@
 import type { Prisma, WorkspaceRole, WorkspaceStatus, WorkspaceType } from "@prisma/client";
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable } from "@nestjs/common";
 import { AppError } from "../common/filters/app-error.filter.js";
 import { PrismaClientProvider } from "../common/prisma/prisma-client.provider.js";
 import { canAssignRole, canManageMember } from "./workspaces.policy.js";
@@ -17,7 +17,7 @@ type WorkspaceMembership = {
 
 @Injectable()
 export class WorkspacesService {
-  constructor(private readonly prisma: PrismaClientProvider) {}
+  constructor(@Inject(PrismaClientProvider) private readonly prisma: PrismaClientProvider) {}
 
   async createWorkspace({
     actorUserId,
@@ -294,6 +294,12 @@ export class WorkspacesService {
   }
 
   async listForUser(userId: string) {
+    const memberWhere = {
+      isActive: true,
+      deletedAt: null,
+      leftAt: null,
+    } as const;
+
     const memberships = await this.prisma.workspaceMember.findMany({
       where: {
         userId,
@@ -302,18 +308,47 @@ export class WorkspacesService {
         workspace: { deletedAt: null },
       },
       include: {
-        workspace: true,
+        workspace: {
+          include: {
+            _count: {
+              select: {
+                documents: true,
+                tasks: true,
+                members: { where: memberWhere },
+              },
+            },
+            members: {
+              where: memberWhere,
+              take: 4,
+              orderBy: [{ role: "asc" }, { joinedAt: "asc" }],
+              include: {
+                user: { select: { id: true, fullName: true } },
+              },
+            },
+          },
+        },
       },
       orderBy: {
         updatedAt: "desc",
       },
     });
 
-    return memberships.map((membership) => ({
-      membershipId: membership.id,
-      role: membership.role,
-      workspace: membership.workspace,
-    }));
+    return memberships.map((membership) => {
+      const ws = membership.workspace;
+      const { _count, members: previewMembers, ...workspaceCore } = ws;
+      return {
+        membershipId: membership.id,
+        role: membership.role,
+        workspace: workspaceCore,
+        memberCount: _count.members,
+        documentCount: _count.documents,
+        taskCount: _count.tasks,
+        recentMembers: previewMembers.map((row) => ({
+          id: row.user.id,
+          fullName: row.user.fullName,
+        })),
+      };
+    });
   }
 
   async getByIdForUser({ userId, workspaceId }: { userId: string; workspaceId: string }) {

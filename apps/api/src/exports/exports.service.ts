@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable } from "@nestjs/common";
 import { Queue } from "bullmq";
 import { Redis } from "ioredis";
 import { AppError } from "../common/filters/app-error.filter.js";
@@ -8,7 +8,7 @@ import { PrismaClientProvider } from "../common/prisma/prisma-client.provider.js
 export class ExportsService {
   private readonly queue: Queue;
 
-  constructor(private readonly prisma: PrismaClientProvider) {
+  constructor(@Inject(PrismaClientProvider) private readonly prisma: PrismaClientProvider) {
     const redisUrl = process.env.REDIS_URL ?? "redis://127.0.0.1:6379";
     this.queue = new Queue("exports", {
       connection: new Redis(redisUrl, { maxRetriesPerRequest: null }),
@@ -54,7 +54,20 @@ export class ExportsService {
         status: "queued",
       },
     });
-    await this.queue.add("export", { exportJobId: created.id }, { removeOnComplete: 100, removeOnFail: 100 });
+    await this.queue.add(
+      "export",
+      { exportJobId: created.id },
+      {
+        jobId: `export:${created.id}`,
+        attempts: 5,
+        backoff: {
+          type: "exponential",
+          delay: 5_000,
+        },
+        removeOnComplete: 100,
+        removeOnFail: 100,
+      },
+    );
     return created;
   }
 

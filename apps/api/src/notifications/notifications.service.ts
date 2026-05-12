@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable } from "@nestjs/common";
 import { AppError } from "../common/filters/app-error.filter.js";
 import { PrismaClientProvider } from "../common/prisma/prisma-client.provider.js";
 import { RealtimeEventsService } from "../realtime/realtime-events.service.js";
@@ -6,7 +6,7 @@ import { RealtimeEventsService } from "../realtime/realtime-events.service.js";
 @Injectable()
 export class NotificationsService {
   constructor(
-    private readonly prisma: PrismaClientProvider,
+    @Inject(PrismaClientProvider) private readonly prisma: PrismaClientProvider,
     private readonly realtimeEvents: RealtimeEventsService,
   ) {}
 
@@ -24,6 +24,8 @@ export class NotificationsService {
     unreadOnly?: boolean;
     category?: string;
   }) {
+    const page = Math.max(1, Number(input.page) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number(input.pageSize) || 20));
     const where = {
       recipientId: input.actorUserId,
       deletedAt: null,
@@ -36,15 +38,39 @@ export class NotificationsService {
           }
         : {}),
     };
-    const [total, items] = await Promise.all([
+    const [total, rows] = await Promise.all([
       this.prisma.notification.count({ where }),
       this.prisma.notification.findMany({
         where,
         orderBy: { createdAt: "desc" },
-        skip: (input.page - 1) * input.pageSize,
-        take: input.pageSize,
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        select: {
+          id: true,
+          type: true,
+          title: true,
+          body: true,
+          workspaceId: true,
+          url: true,
+          isRead: true,
+          readAt: true,
+          createdAt: true,
+          workspace: { select: { name: true } },
+        },
       }),
     ]);
+    const items = rows.map((row) => ({
+      id: row.id,
+      type: row.type,
+      title: row.title,
+      body: row.body,
+      workspaceId: row.workspaceId ?? "global",
+      workspaceName: row.workspace?.name ?? "Workspace",
+      url: row.url ?? "/notifications",
+      isRead: row.isRead,
+      readAt: row.readAt,
+      createdAt: row.createdAt,
+    }));
     return { items, total };
   }
 

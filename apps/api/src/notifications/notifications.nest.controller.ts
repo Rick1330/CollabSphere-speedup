@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Inject, Param, Patch, Query } from "@nestjs/common";
-import { Transform } from "class-transformer";
+import { Transform, Type } from "class-transformer";
 import { IsBoolean, IsInt, IsObject, IsOptional, IsString, Max, Min } from "class-validator";
 import { CurrentUserId } from "../common/decorators/current-user.decorator.js";
 import { ReqRequestId } from "../common/nest/request-id.decorator.js";
@@ -12,12 +12,12 @@ import {
 import { NotificationsService } from "./notifications.service.js";
 
 class ListNotificationsQueryDto {
-  @Transform(({ value }) => Number(value ?? 1))
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   page = 1;
 
-  @Transform(({ value }) => Number(value ?? 20))
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(100)
@@ -84,7 +84,7 @@ export class NotificationsNestController {
         items: result.items,
         total: result.total,
         pagination: {
-          ...paginationMeta(query.page, query.pageSize, result.total),
+          ...paginationMeta(Number(query.page), Number(query.pageSize), result.total),
         },
       }),
       requestId,

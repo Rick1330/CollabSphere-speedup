@@ -26,4 +26,45 @@ export default tseslint.config(
       "@typescript-eslint/no-require-imports": "off",
     },
   },
+  {
+    files: [
+      "src/app/**/*.{ts,tsx}",
+      "src/components/**/*.{ts,tsx}",
+      "src/hooks/**/*.{ts,tsx}",
+    ],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["@/features/*/mocks/*", "@/lib/mock-*", "@/api/mocks/*"],
+              message:
+                "Production UI code must consume data via adapters, not direct mock imports.",
+            },
+          ],
+        },
+      ],
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "CallExpression[callee.name='fetch']",
+          message:
+            "Feature-level UI must route API access through adapters instead of direct fetch.",
+        },
+      ],
+    },
+  },
+  {
+    files: [
+      "src/api/client/**/*.{ts,tsx}",
+      "src/**/*.test.{ts,tsx}",
+      "src/test/**/*.{ts,tsx}",
+      "vitest.config.ts",
+    ],
+    rules: {
+      "no-restricted-imports": "off",
+      "no-restricted-syntax": "off",
+    },
+  },
 );

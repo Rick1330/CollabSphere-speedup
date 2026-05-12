@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, Link } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
+import { Loader2 } from "lucide-react";
 import {
   Archive,
   ChevronDown,
@@ -26,12 +28,13 @@ import {
 } from "lucide-react";
 import { TopNav } from "@/app/shell/top-nav";
 import { CommandPalette } from "@/app/shell/command-palette";
-import { WorkspaceSidebar, type WorkspaceForSidebar } from "@/features/workspace/components/workspace-sidebar";
+import { WorkspaceSidebar } from "@/features/workspace/components/workspace-sidebar";
 import { useSidebar } from "@/hooks/use-sidebar";
 import { useCommandPalette } from "@/hooks/use-command-palette";
-import { useStoredWorkspaces } from "@/features/workspace/store/workspace-store";
 import { PageHeader, MetaStat, MetaDivider } from "@/components/shared/page-header";
-import { MOCK_FILES, formatBytes, type FileItem, type FileKind } from "@/api/adapters/files";
+import { listWorkspaceFiles, formatBytes, type FileItem, type FileKind } from "@/api/adapters/files";
+import { useWorkspaceRouteContext } from "@/hooks/use-workspace-route-context";
+import { useCurrentAccount } from "@/lib/auth-session";
 import { relativeTime, getInitials, getAvatarColor, fullDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -43,19 +46,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 
-const MOCK_USER = { fullName: "Elshaday Tesfaye", email: "jane@collabsphere.app" };
 const PAGE_SIZE = 25;
-
-const FALLBACK_WS: WorkspaceForSidebar = {
-  id: "alpha",
-  name: "Project Alpha",
-  description: "Building the next-gen collaboration platform.",
-  icon: "📦",
-  type: "professional",
-  roleLabel: "TECH LEAD",
-  status: "active",
-  permissions: { canCreateContent: true, canEditSettings: true, canViewAnalytics: true },
-};
 
 const KIND_META: Record<FileKind, { label: string; Icon: any; color: string }> = {
   pdf:     { label: "PDF",     Icon: FileText,        color: "text-red-600 bg-red-50 border-red-200" },
@@ -70,70 +61,101 @@ const KIND_META: Record<FileKind, { label: string; Icon: any; color: string }> =
 };
 
 const Files = () => {
-  const { workspaceId = "alpha" } = useParams<{ workspaceId: string }>();
+  const params = useParams<{ workspaceId: string }>();
+  const paramWorkspaceId = params.workspaceId?.trim() ?? "";
   const { collapsed, toggle } = useSidebar();
   const palette = useCommandPalette();
-  const stored = useStoredWorkspaces();
+  const account = useCurrentAccount();
+  const { workspaceId, sidebar, myRole, isLoading, isError, refetch } = useWorkspaceRouteContext();
 
-  const workspace = useMemo<WorkspaceForSidebar>(() => {
-    const fromStore = stored.find((w) => w.id === workspaceId);
-    if (fromStore) {
-      return {
-        id: fromStore.id,
-        name: fromStore.name,
-        description: fromStore.description || "",
-        icon: fromStore.icon || "✨",
-        type: fromStore.type,
-        roleLabel: fromStore.roleLabel,
-        status: fromStore.status,
-        permissions: { canCreateContent: true, canEditSettings: true, canViewAnalytics: true },
-      };
-    }
-    return { ...FALLBACK_WS, id: workspaceId };
-  }, [workspaceId, stored]);
+  const currentUser = account
+    ? { fullName: account.fullName, email: account.email }
+    : { fullName: "Guest", email: "" };
 
-  const isArchived = workspace.status === "archived";
-  const canUpload = workspace.permissions.canCreateContent && !isArchived;
+  const filesQ = useQuery({
+    queryKey: ["workspace-files", workspaceId],
+    queryFn: () => listWorkspaceFiles(workspaceId),
+    enabled: workspaceId.length > 0,
+    staleTime: 20_000,
+  });
+
+  const files = filesQ.data ?? [];
+
+  const workspace = sidebar;
+
+  const isArchived = workspace?.status === "archived";
+  const canUpload = Boolean(workspace?.permissions.canCreateContent) && !isArchived;
 
   const [view, setView] = useState<"list" | "grid">("list");
   const [query, setQuery] = useState("");
   const [kindFilter, setKindFilter] = useState<FileKind | "all">("all");
   const [uploaderFilter, setUploaderFilter] = useState<string>("all");
   const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(true);
   const [showUpload, setShowUpload] = useState(false);
 
   useEffect(() => {
-    document.title = `Files — ${workspace.name} — CollabSphere`;
-  }, [workspace.name]);
-
-  useEffect(() => {
-    setLoading(true);
-    const t = setTimeout(() => setLoading(false), 300);
-    return () => clearTimeout(t);
-  }, []);
+    if (workspace?.name) {
+      document.title = `Files — ${workspace.name} — CollabSphere`;
+    }
+  }, [workspace?.name]);
 
   const uploaders = useMemo(() => {
     const map = new Map<string, string>();
-    MOCK_FILES.forEach((f) => map.set(f.uploadedBy.id, f.uploadedBy.fullName));
+    files.forEach((f) => map.set(f.uploadedBy.id, f.uploadedBy.fullName));
     return Array.from(map.entries());
-  }, []);
+  }, [files]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return MOCK_FILES.filter((f) => {
+    return files.filter((f) => {
       if (kindFilter !== "all" && f.kind !== kindFilter) return false;
       if (uploaderFilter !== "all" && f.uploadedBy.id !== uploaderFilter) return false;
       if (q && !f.name.toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [query, kindFilter, uploaderFilter]);
-  const hasSeedFiles = MOCK_FILES.length > 0;
+  }, [files, query, kindFilter, uploaderFilter]);
+  const hasSeedFiles = files.length > 0;
   const isEmptyResult = filtered.length === 0;
+  const loading = filesQ.isPending;
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
   const visible = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+
+  if (!paramWorkspaceId) {
+    return (
+      <div className="app-light min-h-screen flex items-center justify-center text-stone-500 text-sm">
+        Missing workspace in URL.
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="app-light min-h-screen flex items-center justify-center gap-2 text-stone-500 text-sm">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        Loading workspace…
+      </div>
+    );
+  }
+
+  if (isError || !workspace || !myRole) {
+    return (
+      <div className="app-light min-h-screen flex flex-col items-center justify-center gap-4 px-6 text-center">
+        <p className="text-stone-700 font-medium">Couldn’t load files for this workspace.</p>
+        <button
+          type="button"
+          onClick={() => {
+            refetch();
+            void filesQ.refetch();
+          }}
+          className="h-10 px-4 rounded-lg bg-teal-600 text-white text-sm font-medium hover:bg-teal-500"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
 
   const handleUpload = () => setShowUpload(true);
 
@@ -161,7 +183,7 @@ const Files = () => {
     <div className="app-light min-h-screen flex">
       <WorkspaceSidebar workspace={workspace} collapsed={collapsed} onToggle={toggle} />
       <div className="flex-1 min-w-0 flex flex-col">
-        <TopNav user={MOCK_USER} unreadCount={3} onOpenPalette={palette.toggle} />
+        <TopNav user={currentUser} unreadCount={3} onOpenPalette={palette.toggle} />
 
         <main className="px-4 sm:px-6 lg:px-10 py-6 lg:py-10 max-w-7xl mx-auto w-full">
           <PageHeader
@@ -189,10 +211,10 @@ const Files = () => {
             }
             meta={
               <>
-                <MetaStat icon={FolderOpen} value={MOCK_FILES.length} label="files" />
+                <MetaStat icon={FolderOpen} value={files.length} label="files" />
                 <MetaDivider />
                 <MetaStat
-                  value={formatBytes(MOCK_FILES.reduce((a, f) => a + f.sizeBytes, 0))}
+                  value={formatBytes(files.reduce((a, f) => a + f.sizeBytes, 0))}
                   label="total"
                 />
               </>

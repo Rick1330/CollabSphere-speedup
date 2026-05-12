@@ -13,6 +13,14 @@ async function bootstrap() {
     logger: ["error", "warn", "log"],
   });
   app.use(cookieParser());
+  /**
+   * Local dev serves the SPA on :8080 and the API on :3001. The web app may
+   * call the API cross-origin while using credentialed cookies; enable permissive
+   * CORS in non-production only (see apps/web browser dev API base URL).
+   */
+  if ((process.env.NODE_ENV ?? "development") !== "production") {
+    app.enableCors({ origin: true, credentials: true });
+  }
   app.setGlobalPrefix("api/v1");
   app.useGlobalFilters(new NestAppErrorFilter());
   app.useGlobalInterceptors(new HttpSuccessStatusInterceptor());

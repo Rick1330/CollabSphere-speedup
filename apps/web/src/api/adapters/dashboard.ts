@@ -1,11 +1,13 @@
 /**
- * Dashboard API adapter.
- *
- * The dashboard surfaces cross-cutting summary data (workspaces, my tasks,
- * recent activity). Today these come from local fixtures inside the
- * dashboard slice; this adapter is the canonical async seam, and lets the
- * dashboard widgets stay free of direct fixture imports.
+ * Dashboard API adapter — workspaces, assigned tasks, and cross-workspace activity.
  */
+import type { ActivityEvent as ApiActivityEvent } from "@/api/adapters/activity";
+import { fetchWorkspaceActivityPaginated } from "@/api/adapters/activity";
+import { fetchCurrentUser } from "@/api/adapters/settings";
+import { listTasksMap } from "@/api/adapters/tasks";
+import type { TaskDetail } from "@/features/tasks/mocks/tasks";
+import { getWorkspaceRoleLabel } from "@/lib/role-labels";
+import { listMineWorkspaceRows } from "@/api/adapters/workspaces";
 
 export type DashboardWorkspaceSummary = {
   id: string;
@@ -40,98 +42,121 @@ export type DashboardActivityEvent = {
   createdAt: string;
 };
 
-const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString();
-const min = (offset: number) => new Date(Date.now() - offset * 60_000).toISOString();
-const hr = (offset: number) => new Date(Date.now() - offset * 3_600_000).toISOString();
-
-const MOCK_WORKSPACES: DashboardWorkspaceSummary[] = [
-  {
-    id: "alpha",
-    name: "Project Alpha",
-    description: "Q4 product launch & GTM coordination",
-    type: "professional",
-    docs: 24,
-    tasks: 12,
-    memberCount: 8,
-    recentMembers: [
-      { id: "1", fullName: "Elshaday Tesfaye" },
-      { id: "2", fullName: "Marco Silva" },
-      { id: "3", fullName: "Aiko Tanaka" },
-      { id: "4", fullName: "Priya Reddy" },
-    ],
-    roleLabel: "OWNER",
-    lastAccessedAt: new Date(Date.now() - 12 * 60_000).toISOString(),
-  },
-  {
-    id: "thesis",
-    name: "Thesis — Distributed Systems",
-    description: "Consensus algorithms research notes",
-    type: "academic",
-    docs: 41,
-    tasks: 5,
-    memberCount: 3,
-    recentMembers: [
-      { id: "5", fullName: "Elshaday Tesfaye" },
-      { id: "6", fullName: "Prof. Hadid" },
-      { id: "7", fullName: "Lukas Berger" },
-    ],
-    roleLabel: "EDITOR",
-    lastAccessedAt: new Date(Date.now() - 3 * 3600_000).toISOString(),
-  },
-  {
-    id: "design-ops",
-    name: "Design Ops",
-    description: "Component library & design tokens",
-    type: "professional",
-    docs: 18,
-    tasks: 9,
-    memberCount: 6,
-    recentMembers: [
-      { id: "8", fullName: "Sasha Lee" },
-      { id: "9", fullName: "Diego Martín" },
-      { id: "10", fullName: "Nora Khan" },
-    ],
-    roleLabel: "EDITOR",
-    lastAccessedAt: new Date(Date.now() - 26 * 3600_000).toISOString(),
-  },
-  {
-    id: "personal",
-    name: "Personal Notes",
-    description: "Reading list, ideas, journal",
-    type: "general",
-    docs: 7,
-    tasks: 2,
-    memberCount: 1,
-    recentMembers: [{ id: "11", fullName: "Elshaday Tesfaye" }],
-    roleLabel: "OWNER",
-    lastAccessedAt: new Date(Date.now() - 4 * 86_400_000).toISOString(),
-  },
-];
-
-const MOCK_TASKS: DashboardTask[] = [
-  { id: "t1", title: "Finalize Q4 launch deck", workspaceId: "alpha", workspaceName: "Project Alpha", priority: "urgent", status: "in_progress", dueDate: day(-1) },
-  { id: "t2", title: "Review consensus chapter draft", workspaceId: "thesis", workspaceName: "Thesis", priority: "high", status: "in_review", dueDate: day(0) },
-  { id: "t3", title: "Update onboarding flow tokens", workspaceId: "design-ops", workspaceName: "Design Ops", priority: "medium", status: "todo", dueDate: day(2) },
-  { id: "t4", title: "Sync with marketing on copy", workspaceId: "alpha", workspaceName: "Project Alpha", priority: "medium", status: "in_progress", dueDate: day(3) },
-  { id: "t5", title: "Reorganise reading list", workspaceId: "personal", workspaceName: "Personal Notes", priority: "low", status: "todo" },
-];
-
-const MOCK_EVENTS: DashboardActivityEvent[] = [
-  { id: "e1", actor: { id: "u2", fullName: "Marco Silva" }, action: "commented", resource: { type: "doc", title: "Q4 Roadmap" }, workspaceName: "Project Alpha", createdAt: min(8) },
-  { id: "e2", actor: { id: "u3", fullName: "Aiko Tanaka" }, action: "completed", resource: { type: "task", title: "Wire up auth callbacks" }, workspaceName: "Project Alpha", createdAt: min(42) },
-  { id: "e3", actor: { id: "u4", fullName: "Priya Reddy" }, action: "created", resource: { type: "doc", title: "Launch checklist" }, workspaceName: "Project Alpha", createdAt: hr(2) },
-  { id: "e4", actor: { id: "u5", fullName: "Prof. Hadid" }, action: "updated", resource: { type: "doc", title: "Chapter 3 draft" }, workspaceName: "Thesis", createdAt: hr(5) },
-  { id: "e5", actor: { id: "u6", fullName: "Sasha Lee" }, action: "shared", resource: { type: "doc", title: "Token spec v2" }, workspaceName: "Design Ops", createdAt: hr(9) },
-];
-
 export async function getDashboardWorkspaces(): Promise<DashboardWorkspaceSummary[]> {
-  return MOCK_WORKSPACES;
+  const rows = await listMineWorkspaceRows();
+  return rows.map((row) => ({
+    id: row.workspace.id,
+    name: row.workspace.name,
+    description: row.workspace.description ?? "",
+    type: row.workspace.type,
+    icon: row.workspace.icon ?? undefined,
+    docs: row.documentCount,
+    tasks: row.taskCount,
+    memberCount: row.memberCount,
+    recentMembers: row.recentMembers,
+    roleLabel: getWorkspaceRoleLabel(row.workspace.type, row.role),
+    lastAccessedAt: row.workspace.updatedAt,
+  }));
+}
+
+function mapTaskStatus(s: string): DashboardTask["status"] {
+  if (s === "in_review") return "in_review";
+  if (s === "in_progress") return "in_progress";
+  return "todo";
+}
+
+function mapTaskPriority(p: string): DashboardTask["priority"] {
+  if (p === "urgent" || p === "high" || p === "medium" || p === "low") return p;
+  return "medium";
 }
 
 export async function getDashboardTasks(): Promise<DashboardTask[]> {
-  return MOCK_TASKS;
+  let meId: string;
+  try {
+    meId = (await fetchCurrentUser()).id;
+  } catch {
+    return [];
+  }
+  const rows = await listMineWorkspaceRows();
+  const acc: DashboardTask[] = [];
+  const seen = new Set<string>();
+
+  for (const row of rows.slice(0, 8)) {
+    let map;
+    try {
+      map = await listTasksMap(row.workspace.id);
+    } catch {
+      continue;
+    }
+    for (const t of Object.values(map) as TaskDetail[]) {
+      if (t.status === "done" || t.status === "backlog") continue;
+      if (t.assignee?.id !== meId) continue;
+      const key = `${row.workspace.id}:${t.id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      acc.push({
+        id: t.id,
+        title: t.title,
+        workspaceId: row.workspace.id,
+        workspaceName: row.workspace.name,
+        priority: mapTaskPriority(t.priority),
+        status: mapTaskStatus(t.status),
+        dueDate: t.dueDate ?? undefined,
+      });
+    }
+  }
+
+  acc.sort((a, b) => String(b.dueDate ?? "").localeCompare(String(a.dueDate ?? "")));
+  return acc.slice(0, 24);
+}
+
+function deriveDashboardAction(eventKey: ApiActivityEvent["eventKey"]): DashboardActivityEvent["action"] {
+  if (
+    eventKey.startsWith("comment.") ||
+    eventKey === "comment.created" ||
+    eventKey.includes("comment")
+  ) {
+    return "commented";
+  }
+  if (eventKey.includes("completed")) return "completed";
+  if (eventKey.includes(".created") || eventKey.endsWith("_created")) return "created";
+  if (eventKey.includes("shared")) return "shared";
+  return "updated";
+}
+
+function mapApiActivityToDashboard(e: ApiActivityEvent, workspaceName: string): DashboardActivityEvent | null {
+  const action = deriveDashboardAction(e.eventKey);
+  let resource: DashboardActivityEvent["resource"];
+  const r = e.resource;
+  if (r?.type === "document") {
+    resource = { type: "doc", title: r.title };
+  } else if (r?.type === "task") {
+    resource = { type: "task", title: r.title };
+  }
+  return {
+    id: e.id,
+    actor: { id: e.actor.id, fullName: e.actor.fullName },
+    action,
+    resource,
+    workspaceName,
+    createdAt: e.createdAt,
+  };
 }
 
 export async function getDashboardActivity(): Promise<DashboardActivityEvent[]> {
-  return MOCK_EVENTS;
+  const rows = await listMineWorkspaceRows();
+  const merged: DashboardActivityEvent[] = [];
+  for (const row of rows.slice(0, 5)) {
+    try {
+      const page = await fetchWorkspaceActivityPaginated(row.workspace.id, { page: 1, pageSize: 10 });
+      for (const e of page.data.items) {
+        const mapped = mapApiActivityToDashboard(e, row.workspace.name);
+        if (mapped) merged.push(mapped);
+      }
+    } catch {
+      continue;
+    }
+  }
+  merged.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  return merged.slice(0, 16);
 }

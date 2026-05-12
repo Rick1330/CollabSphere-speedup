@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable } from "@nestjs/common";
 import type { Socket } from "socket.io";
 import { JwtAccessService } from "../auth/jwt-access.service.js";
 import { AppError } from "../common/filters/app-error.filter.js";
@@ -9,7 +9,7 @@ import type { RealtimeAuthUser } from "./realtime.types.js";
 export class RealtimeSessionService {
   constructor(
     private readonly jwtAccessService: JwtAccessService,
-    private readonly prisma: PrismaClientProvider,
+    @Inject(PrismaClientProvider) private readonly prisma: PrismaClientProvider,
   ) {}
 
   async authenticateSocket(client: Socket): Promise<RealtimeAuthUser> {

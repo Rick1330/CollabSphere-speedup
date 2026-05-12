@@ -1,4 +1,7 @@
 import type { Server } from "node:http";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const defaultHost = "127.0.0.1";
 
@@ -24,6 +27,67 @@ export interface ValidateServiceEnvOptions<TEnv, TError extends Error> {
 }
 
 type ListenError = NodeJS.ErrnoException & { code?: string };
+
+const isBlankOrComment = (line: string) => line.length === 0 || line.startsWith("#");
+const isSupportedQuote = (value: string) => value === '"' || value === "'";
+const unwrapQuotedValue = (value: string) => {
+  if (value.length < 2) return value;
+  const quote = value.at(0);
+  if (!quote || !isSupportedQuote(quote)) return value;
+  if (value.at(-1) !== quote) return value;
+  return value.slice(1, -1);
+};
+
+const parseEnvFile = (filePath: string): Record<string, string> => {
+  const parsed: Record<string, string> = {};
+  const lines = readFileSync(filePath, "utf8").split(/\r?\n/u);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (isBlankOrComment(trimmed)) continue;
+    const idx = trimmed.indexOf("=");
+    if (idx <= 0) continue;
+    const key = trimmed.slice(0, idx).trim();
+    if (!key) continue;
+    parsed[key] = unwrapQuotedValue(trimmed.slice(idx + 1).trim());
+  }
+  return parsed;
+};
+
+const shouldOverrideDatabaseUrl = (current: string | undefined) => {
+  const v = current?.trim() ?? "";
+  if (!v) return true;
+  // Prevent accidental use of a global developer/test DATABASE_URL.
+  if (v.includes("://postgres:postgres@") || v.endsWith("/test")) return true;
+  return false;
+};
+
+const loadRepoLocalEnv = () => {
+  try {
+    const here = dirname(fileURLToPath(import.meta.url));
+    // packages/shared/src -> repo root
+    const repoRoot = resolve(here, "..", "..", "..");
+    const envPaths = [resolve(repoRoot, ".env"), resolve(repoRoot, ".env.local")];
+    const loaded: Record<string, string> = {};
+    for (const p of envPaths) {
+      if (!existsSync(p)) continue;
+      Object.assign(loaded, parseEnvFile(p));
+    }
+    if (Object.keys(loaded).length === 0) return;
+    for (const [key, value] of Object.entries(loaded)) {
+      if (key === "DATABASE_URL") {
+        if (shouldOverrideDatabaseUrl(process.env.DATABASE_URL)) {
+          process.env.DATABASE_URL = value;
+        }
+        continue;
+      }
+      if (process.env[key] === undefined) {
+        process.env[key] = value;
+      }
+    }
+  } catch {
+    // best-effort only
+  }
+};
 
 const warnInvalidPort = (service: string, value: string | undefined, fallback: number) => {
   console.warn(`[${service}] invalid PORT value "${value}", falling back to ${fallback}`);
@@ -151,6 +215,11 @@ export const validateServiceEnv = <TEnv, TError extends Error>({
   validationErrorClass,
   input = process.env,
 }: ValidateServiceEnvOptions<TEnv, TError>): TEnv => {
+  // Ensure local `.env` is loaded for dev/test runs. This prevents
+  // shell-level overrides from breaking local bootstrap.
+  if (input === process.env) {
+    loadRepoLocalEnv();
+  }
   try {
     return parser(input);
   } catch (error) {

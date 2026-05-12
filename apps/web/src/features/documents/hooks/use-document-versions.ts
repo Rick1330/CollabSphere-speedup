@@ -9,7 +9,7 @@ import {
 
 export type VersionsState = "loading" | "loaded" | "error";
 
-export function useDocumentVersions(documentId: string) {
+export function useDocumentVersions(workspaceId: string, documentId: string) {
   const [versions, setVersions] = useState<DocumentVersion[]>([]);
   const [state, setState] = useState<VersionsState>("loading");
   const [tick, setTick] = useState(0);
@@ -17,7 +17,7 @@ export function useDocumentVersions(documentId: string) {
   useEffect(() => {
     let cancelled = false;
     setState("loading");
-    listDocumentVersions(documentId)
+    listDocumentVersions(workspaceId, documentId)
       .then((data) => {
         if (cancelled) return;
         setVersions(data);
@@ -29,7 +29,7 @@ export function useDocumentVersions(documentId: string) {
     return () => {
       cancelled = true;
     };
-  }, [documentId, tick]);
+  }, [workspaceId, documentId, tick]);
 
   return {
     versions,

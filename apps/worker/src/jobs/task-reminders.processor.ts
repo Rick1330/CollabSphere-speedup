@@ -23,6 +23,22 @@ export const processTaskReminderJob = async (
   });
   for (const task of tasks) {
     const type = task.dueDate && task.dueDate < now ? "deadline.overdue" : "deadline.reminder";
+    const dedupeSince = new Date(now.getTime() - 20 * 60 * 60 * 1000);
+    const existing = await deps.prisma.notification.findFirst({
+      where: {
+        recipientId: task.assigneeId!,
+        workspaceId: task.workspaceId,
+        type,
+        resourceType: "task",
+        resourceId: task.id,
+        createdAt: { gte: dedupeSince },
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+    if (existing) {
+      continue;
+    }
     await deps.prisma.notification.create({
       data: {
         recipientId: task.assigneeId!,

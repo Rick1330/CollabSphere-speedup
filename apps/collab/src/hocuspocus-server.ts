@@ -130,6 +130,7 @@ export const createCollabHooks = (input: {
     connectionConfig,
     context,
   }: onAuthenticatePayload<Partial<CollabContext>>) => {
+    const startedAt = process.hrtime.bigint();
     const documentId = parseRoomDocumentId(documentName);
     const claims = resolveCollabJwtClaims(token, input.jwtSecret);
     const userId = claims.userId;
@@ -160,11 +161,29 @@ export const createCollabHooks = (input: {
     context.workspaceId = access.document.workspaceId;
     context.documentId = documentId;
     context.readOnly = readOnly;
+    console.info(
+      JSON.stringify({
+        event: "collab.authenticate.ok",
+        userId,
+        workspaceId: access.document.workspaceId,
+        documentId,
+        latencyMs: Number((Number(process.hrtime.bigint() - startedAt) / 1_000_000).toFixed(2)),
+      }),
+    );
   };
 
   const onLoadDocument = async ({ documentName }: onLoadDocumentPayload<CollabContext>) => {
+    const startedAt = process.hrtime.bigint();
     const documentId = parseRoomDocumentId(documentName);
     const record = await input.adapter.findDocumentById({ documentId });
+    console.info(
+      JSON.stringify({
+        event: "collab.document.load",
+        documentId,
+        found: Boolean(record),
+        latencyMs: Number((Number(process.hrtime.bigint() - startedAt) / 1_000_000).toFixed(2)),
+      }),
+    );
     return record?.contentYjs ?? new Uint8Array(0);
   };
 
@@ -173,6 +192,7 @@ export const createCollabHooks = (input: {
     documentName,
     lastContext,
   }: onStoreDocumentPayload<CollabContext>) => {
+    const startedAt = process.hrtime.bigint();
     const documentId = parseRoomDocumentId(documentName);
     const state = encodeStateAsUpdate(document);
     await input.adapter.persistDocument({
@@ -182,6 +202,15 @@ export const createCollabHooks = (input: {
       contentPlaintext: extractPlaintext(state),
       updatedAt: new Date(),
     });
+    console.info(
+      JSON.stringify({
+        event: "collab.document.persist",
+        documentId,
+        userId: lastContext.userId,
+        workspaceId: lastContext.workspaceId,
+        latencyMs: Number((Number(process.hrtime.bigint() - startedAt) / 1_000_000).toFixed(2)),
+      }),
+    );
   };
 
   return {
@@ -214,11 +243,12 @@ export const createCollabServer = (input: {
       if (request.url === "/" || request.url === "/health") {
         response.writeHead(200, { "content-type": "application/json; charset=utf-8" });
         response.end(JSON.stringify({ service: "collab", status: "ok", mode: "hocuspocus" }));
-        return;
+        throw null;
       }
 
       response.writeHead(404, { "content-type": "application/json; charset=utf-8" });
       response.end(JSON.stringify({ code: "NOT_FOUND" }));
+      throw null;
     },
     onDisconnect: async ({ instance }) => {
       instance.flushPendingStores();

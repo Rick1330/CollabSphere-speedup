@@ -1,20 +1,51 @@
 /**
- * Mock auth session store.
+ * Auth session store.
  *
- * Source of truth for "who is signed in right now". Persisted to
- * localStorage so reloads keep the session, and exposed as a
- * `useSyncExternalStore` hook so React components react instantly to
- * sign-in / sign-out / profile-update events.
- *
- * The session is intentionally minimal: an account id + a fake token +
- * an issued-at timestamp. Profile data is looked up from `mock-accounts`
- * when needed so a single source of truth stays canonical.
+ * Source of truth for "who is signed in right now", backed by auth API data.
  */
 
 import { useSyncExternalStore } from "react";
-import { findAccountById, type MockAccount } from "@/lib/mock-accounts";
+
+import type { WorkspaceRoleKey, WorkspaceType } from "@/lib/persona-scenario";
+import { MOCK_ACCOUNTS } from "@/lib/mock-accounts";
 
 const STORAGE_KEY = "cs-auth-session";
+
+export interface SessionAccount {
+  id: string;
+  email: string;
+  password: string;
+  fullName: string;
+  initials: string;
+  bio: string | null;
+  avatarUrl: string | null;
+  globalRole: "USER" | "ADMIN";
+  authProvider: "local" | "google";
+  status: "active";
+  defaultWorkspaceId: string;
+  defaultWorkspaceType: WorkspaceType;
+  defaultWorkspaceRole: WorkspaceRoleKey;
+  blurb: string;
+}
+
+function demoAccountToSession(demo: (typeof MOCK_ACCOUNTS)[number]): SessionAccount {
+  return {
+    id: demo.id,
+    email: demo.email,
+    password: "",
+    fullName: demo.fullName,
+    initials: demo.initials,
+    bio: demo.bio,
+    avatarUrl: demo.avatarUrl,
+    globalRole: demo.globalRole,
+    authProvider: demo.authProvider,
+    status: "active",
+    defaultWorkspaceId: demo.defaultWorkspaceId,
+    defaultWorkspaceType: demo.defaultWorkspaceType,
+    defaultWorkspaceRole: demo.defaultWorkspaceRole,
+    blurb: demo.blurb,
+  };
+}
 
 export interface AuthSession {
   accountId: string;
@@ -51,7 +82,46 @@ function writeSession(s: AuthSession | null) {
 let current: AuthSession | null = readSession();
 const listeners = new Set<() => void>();
 
+function buildResolvedAccountSnapshot(): SessionAccount | null {
+  if (!current) return null;
+  const demo = current.user
+    ? MOCK_ACCOUNTS.find((a) => a.id === current.user!.id)
+    : MOCK_ACCOUNTS.find((a) => a.id === current.accountId);
+
+  if (current.user) {
+    const initials = current.user.fullName
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((chunk) => chunk[0]?.toUpperCase() ?? "")
+      .join("");
+    return {
+      id: current.user.id,
+      email: current.user.email,
+      password: "",
+      fullName: current.user.fullName,
+      initials,
+      bio: demo?.bio ?? null,
+      avatarUrl: current.user.avatarUrl ?? null,
+      globalRole: current.user.globalRole ?? "USER",
+      authProvider: "local",
+      status: "active",
+      defaultWorkspaceId: demo?.defaultWorkspaceId ?? "alpha",
+      defaultWorkspaceType: demo?.defaultWorkspaceType ?? "general",
+      defaultWorkspaceRole: demo?.defaultWorkspaceRole ?? "MEMBER",
+      blurb: demo?.blurb ?? "API-authenticated user",
+    };
+  }
+
+  if (demo) return demoAccountToSession(demo);
+  return null;
+}
+
+/** Cached between session updates so useSyncExternalStore snapshots stay referentially stable. */
+let resolvedAccountSnapshot: SessionAccount | null = buildResolvedAccountSnapshot();
+
 function emit() {
+  resolvedAccountSnapshot = buildResolvedAccountSnapshot();
   for (const l of listeners) l();
 }
 
@@ -62,32 +132,8 @@ export const authSession = {
   getAccessToken(): string | null {
     return current?.accessToken ?? null;
   },
-  getAccount(): MockAccount | null {
-    if (!current) return null;
-    const account = findAccountById(current.accountId);
-    if (account) return account;
-    if (!current.user) return null;
-    return {
-      id: current.user.id,
-      email: current.user.email,
-      password: "",
-      fullName: current.user.fullName,
-      initials: current.user.fullName
-        .split(/\s+/)
-        .filter(Boolean)
-        .slice(0, 2)
-        .map((chunk) => chunk[0]?.toUpperCase() ?? "")
-        .join(""),
-      bio: null,
-      avatarUrl: current.user.avatarUrl ?? null,
-      globalRole: current.user.globalRole ?? "USER",
-      authProvider: "local",
-      status: "active",
-      defaultWorkspaceId: "alpha",
-      defaultWorkspaceType: "general",
-      defaultWorkspaceRole: "MEMBER",
-      blurb: "Authenticated user",
-    };
+  getAccount(): SessionAccount | null {
+    return resolvedAccountSnapshot;
   },
   signIn(accountId: string, options?: { accessToken?: string; user?: AuthSession["user"] }) {
     current = {
@@ -126,10 +172,12 @@ export function useAuthSession(): AuthSession | null {
   );
 }
 
-export function useCurrentAccount(): MockAccount | null {
-  const session = useAuthSession();
-  if (!session) return null;
-  return findAccountById(session.accountId) ?? null;
+export function useCurrentAccount(): SessionAccount | null {
+  return useSyncExternalStore(
+    authSession.subscribe,
+    () => authSession.getAccount(),
+    () => null,
+  );
 }
 
 export function useIsAuthenticated(): boolean {

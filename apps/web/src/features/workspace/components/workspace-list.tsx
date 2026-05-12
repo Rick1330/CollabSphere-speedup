@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import {
   AlertCircle,
   ChevronLeft,
@@ -20,117 +21,31 @@ import { cn } from "@/lib/utils";
 import { WorkspaceCard, type WorkspaceSummary } from "./workspace-card";
 import { useStoredWorkspaces, workspaceStore } from "@/features/workspace/store/workspace-store";
 import { CountChip, MetaDivider, MetaStat, PageHeader } from "@/components/shared/page-header";
+import { listMineWorkspaceRows, type MineWorkspaceRow } from "@/api/adapters/workspaces";
+import { getFetchErrorDetails } from "@/lib/fetch-error-details";
+import { getWorkspaceRoleLabel } from "@/lib/role-labels";
 
 type State = "loading" | "loaded" | "empty" | "error";
 
-const MOCK_WORKSPACES: WorkspaceSummary[] = [
-  {
-    id: "alpha",
-    name: "Project Alpha",
-    description: "Q4 product launch & GTM coordination",
-    type: "professional",
-    status: "active",
-    docs: 24,
-    tasks: 12,
-    memberCount: 8,
-    recentMembers: [
-      { id: "1", fullName: "Elshaday Tesfaye" },
-      { id: "2", fullName: "Marco Silva" },
-      { id: "3", fullName: "Aiko Tanaka" },
-      { id: "4", fullName: "Priya Reddy" },
-    ],
-    roleLabel: "OWNER",
-    lastAccessedAt: new Date(Date.now() - 12 * 60_000).toISOString(),
-    isAdminOrOwner: true,
-  },
-  {
-    id: "senior-project",
-    name: "Senior Project",
-    description: "Final year thesis workspace for systems research",
-    type: "academic",
-    status: "active",
-    docs: 6,
-    tasks: 3,
-    memberCount: 4,
-    recentMembers: [
-      { id: "5", fullName: "Sasha Chen" },
-      { id: "6", fullName: "Marco Silva" },
-      { id: "7", fullName: "Lukas Berger" },
-    ],
-    roleLabel: "STUDENT",
-    lastAccessedAt: new Date(Date.now() - 26 * 3_600_000).toISOString(),
-    isAdminOrOwner: false,
-  },
-  {
-    id: "design-ops",
-    name: "Design Ops",
-    description: "Component library & design tokens",
-    type: "professional",
-    status: "active",
-    docs: 18,
-    tasks: 9,
-    memberCount: 6,
-    recentMembers: [
-      { id: "8", fullName: "Sasha Lee" },
-      { id: "9", fullName: "Diego Martín" },
-      { id: "10", fullName: "Nora Khan" },
-    ],
-    roleLabel: "EDITOR",
-    lastAccessedAt: new Date(Date.now() - 2 * 3_600_000).toISOString(),
-    isAdminOrOwner: true,
-  },
-  {
-    id: "client-q4",
-    name: "Client Project",
-    description: "Q4 website redesign for Acme Corp",
-    type: "professional",
-    status: "active",
-    docs: 4,
-    tasks: 12,
-    memberCount: 3,
-    recentMembers: [
-      { id: "11", fullName: "Elshaday Tesfaye" },
-      { id: "12", fullName: "Ben Kim" },
-    ],
-    roleLabel: "DEVELOPER",
-    lastAccessedAt: new Date(Date.now() - 3 * 86_400_000).toISOString(),
-    isAdminOrOwner: false,
-  },
-  {
-    id: "side-quest",
-    name: "Side Quest",
-    description: "Weekend hack project",
-    type: "general",
-    status: "active",
-    docs: 1,
-    tasks: 0,
-    memberCount: 1,
-    recentMembers: [{ id: "13", fullName: "Elshaday Tesfaye" }],
-    roleLabel: "OWNER",
-    lastAccessedAt: new Date(Date.now() - 5 * 86_400_000).toISOString(),
-    isAdminOrOwner: true,
-  },
-  {
-    id: "research-group",
-    name: "Research Group",
-    description: "ML paper collab",
-    type: "academic",
-    status: "archived",
-    docs: 8,
-    tasks: 2,
-    memberCount: 5,
-    recentMembers: [
-      { id: "14", fullName: "Sasha Chen" },
-      { id: "15", fullName: "Aiko Tanaka" },
-    ],
-    roleLabel: "REVIEWER",
-    lastAccessedAt: new Date(Date.now() - 14 * 86_400_000).toISOString(),
-    isAdminOrOwner: true,
-  },
-];
+function mineRowToSummary(row: MineWorkspaceRow, lastAccessedAt: string): WorkspaceSummary {
+  return {
+    id: row.workspace.id,
+    name: row.workspace.name,
+    description: row.workspace.description ?? "",
+    type: row.workspace.type,
+    status: row.workspace.status,
+    icon: row.workspace.icon ?? undefined,
+    docs: row.documentCount,
+    tasks: row.taskCount,
+    memberCount: row.memberCount,
+    recentMembers: row.recentMembers,
+    roleLabel: getWorkspaceRoleLabel(row.workspace.type, row.role),
+    lastAccessedAt,
+    isAdminOrOwner: row.role === "OWNER" || row.role === "ADMIN",
+  };
+}
 
 export const WorkspaceList = () => {
-  const [state] = useState<State>("loaded");
   const [searchQuery, setSearchQuery] = useState("");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [page, setPage] = useState(1);
@@ -138,30 +53,50 @@ export const WorkspaceList = () => {
   const stored = useStoredWorkspaces();
   const [overrides, setOverrides] = useState<Record<string, "active" | "archived">>({});
 
-  // Merge user-created workspaces (from store) with mock workspaces.
-  // Stored ones come first so the freshly created workspace shows at top.
+  const mineQ = useQuery({
+    queryKey: ["workspaces", "mine"],
+    queryFn: listMineWorkspaceRows,
+    staleTime: 30_000,
+  });
+
   const workspaces = useMemo<WorkspaceSummary[]>(() => {
-    const fromStore: WorkspaceSummary[] = stored.map((w) => ({
-      id: w.id,
-      name: w.name,
-      description: w.description,
-      type: w.type,
-      status: overrides[w.id] ?? w.status,
-      icon: w.icon,
-      docs: 0,
-      tasks: 0,
-      memberCount: 1,
-      recentMembers: [{ id: "self", fullName: "Elshaday Tesfaye" }],
-      roleLabel: w.roleLabel,
-      lastAccessedAt: w.lastAccessedAt,
-      isAdminOrOwner: true,
-    }));
-    const mocks = MOCK_WORKSPACES.map((w) => ({
+    const fromApi = (mineQ.data ?? []).map((row) => {
+      const touched = stored.find((s) => s.id === row.workspace.id);
+      const lastAccess = touched?.lastAccessedAt ?? row.workspace.updatedAt;
+      return mineRowToSummary(row, lastAccess);
+    });
+    const apiIds = new Set(fromApi.map((w) => w.id));
+    const localOnly: WorkspaceSummary[] = stored
+      .filter((w) => !apiIds.has(w.id))
+      .map((w) => ({
+        id: w.id,
+        name: w.name,
+        description: w.description,
+        type: w.type,
+        status: overrides[w.id] ?? w.status,
+        icon: w.icon,
+        docs: 0,
+        tasks: 0,
+        memberCount: 1,
+        recentMembers: [],
+        roleLabel: w.roleLabel,
+        lastAccessedAt: w.lastAccessedAt,
+        isAdminOrOwner: true,
+      }));
+    const merged = [...localOnly, ...fromApi];
+    return merged.map((w) => ({
       ...w,
       status: overrides[w.id] ?? w.status,
     }));
-    return [...fromStore, ...mocks];
-  }, [stored, overrides]);
+  }, [mineQ.data, stored, overrides]);
+
+  const state: State = mineQ.isLoading
+    ? "loading"
+    : mineQ.isError
+      ? "error"
+      : workspaces.length === 0
+        ? "empty"
+        : "loaded";
 
   const filteredWorkspaces = useMemo(() => {
     if (!searchQuery.trim()) return workspaces;
@@ -357,7 +292,9 @@ export const WorkspaceList = () => {
 
       <div className="mt-8">
         {state === "loading" && <LoadingGrid />}
-        {state === "error" && <ErrorState onRetry={() => {}} />}
+        {state === "error" && (
+          <ErrorState error={mineQ.error} onRetry={() => void mineQ.refetch()} />
+        )}
         {isEmpty && <EmptyWorkspaces />}
         {state === "loaded" && !isEmpty && sortedWorkspaces.length === 0 && (
           <EmptySearch query={searchQuery} onClear={() => setSearchQuery("")} />
@@ -552,7 +489,9 @@ const EmptySearch = ({
   </div>
 );
 
-const ErrorState = ({ onRetry }: { onRetry: () => void }) => (
+const ErrorState = ({ error, onRetry }: { error?: unknown; onRetry: () => void }) => {
+  const { message, requestId, hint } = getFetchErrorDetails(error);
+  return (
   <div
     role="alert"
     className="rounded-xl border border-red-200 bg-red-50/50 p-6 text-center"
@@ -561,9 +500,11 @@ const ErrorState = ({ onRetry }: { onRetry: () => void }) => (
     <p className="text-sm text-stone-700 mt-2 font-medium">
       Couldn't load workspaces
     </p>
-    <p className="text-xs text-stone-500 mt-1 font-mono">
-      Request ID: req_4f8a2c9d
-    </p>
+    <p className="text-xs text-stone-600 mt-2 max-w-md mx-auto">{message}</p>
+    {hint && <p className="text-xs text-stone-500 mt-1.5 max-w-md mx-auto">{hint}</p>}
+    {requestId && (
+      <p className="text-xs text-stone-500 mt-1 font-mono">Request ID: {requestId}</p>
+    )}
     <button
       type="button"
       onClick={onRetry}
@@ -575,4 +516,5 @@ const ErrorState = ({ onRetry }: { onRetry: () => void }) => (
       Try again
     </button>
   </div>
-);
+  );
+};

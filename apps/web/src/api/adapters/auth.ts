@@ -2,7 +2,8 @@ import type { SessionContract, UserContract } from "@/api/contracts";
 import { ApiError, request } from "@/api/client";
 import { parseApiActionEnvelope, parseApiSingleEnvelope } from "@/api/client/envelope";
 import { authSession } from "@/lib/auth-session";
-import type { AuthProvider } from "@/lib/mock-accounts";
+
+type AuthProvider = "email" | "google";
 
 export class AuthError extends Error {
   constructor(
@@ -167,8 +168,11 @@ export async function verifyEmail(token: string): Promise<{ verified: true }> {
 export async function getCurrentUser(): Promise<UserContract> {
   try {
     const payload = await request<unknown>("/users/me");
-    const profile = parseApiSingleEnvelope<AuthApiUser>(payload);
-    return toUserContract(profile);
+    const body = parseApiSingleEnvelope<{ user?: AuthApiUser }>(payload);
+    if (!body.user) {
+      throw new Error("Missing user in /users/me response.");
+    }
+    return toUserContract(body.user);
   } catch (error) {
     parseAuthError(error);
   }

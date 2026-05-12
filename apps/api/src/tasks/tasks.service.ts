@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable } from "@nestjs/common";
 import { Prisma, type TaskPriority, type TaskStatus } from "@prisma/client";
 import { AppError, ValidationAppError } from "../common/filters/app-error.filter.js";
 import { PrismaClientProvider } from "../common/prisma/prisma-client.provider.js";
@@ -18,7 +18,7 @@ const TASK_STATUSES: readonly TaskStatus[] = ["backlog", "todo", "in_progress", 
 @Injectable()
 export class TasksService {
   constructor(
-    private readonly prisma: PrismaClientProvider,
+    @Inject(PrismaClientProvider) private readonly prisma: PrismaClientProvider,
     private readonly realtimeEvents: RealtimeEventsService,
   ) {}
 

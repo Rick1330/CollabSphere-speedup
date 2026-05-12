@@ -14,10 +14,9 @@ export {
   type FileKind,
 } from "@/lib/mock-files";
 
-/** Async list endpoint — would call `request("/workspaces/:id/files")`. */
-export async function listWorkspaceFiles(
-  _workspaceId: string,
-): Promise<FileItem[]> {
-  // TODO(api): GET /workspaces/:id/files
-  return MOCK_FILES;
+/** Async list endpoint — returns live data when `GET /workspaces/:id/files` exists. */
+export async function listWorkspaceFiles(_workspaceId: string): Promise<FileItem[]> {
+  void _workspaceId;
+  // TODO(api): GET /workspaces/:id/files — until then, show an empty library (no mock rows).
+  return [];
 }

@@ -42,7 +42,16 @@ export function parseApiSingleEnvelope<TResource>(payload: unknown): TResource {
   if (!payload || typeof payload !== "object" || !("data" in payload)) {
     throw new Error("Invalid API payload envelope.");
   }
-  return (payload as SingleEnvelope<TResource>).data as TResource;
+  const data = (payload as { data: unknown }).data;
+  if (!data || typeof data !== "object") {
+    throw new Error("Invalid API payload envelope.");
+  }
+  // Nest `wrapSuccessResponse` + `createSingleResourcePayload` → data.resource
+  if ("resource" in data && (data as { resource: unknown }).resource !== undefined) {
+    return (data as { resource: TResource }).resource;
+  }
+  // Legacy/unit-test shape: flattened resource under data
+  return data as TResource;
 }
 
 export function parseApiErrorEnvelope(payload: unknown): { code: string; message: string } | null {

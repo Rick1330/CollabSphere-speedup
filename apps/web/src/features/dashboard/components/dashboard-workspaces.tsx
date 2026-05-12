@@ -1,6 +1,6 @@
 import { CheckSquare, FileText, Users, Plus } from "lucide-react";
 import { Link } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SectionError } from "@/components/shared/section-error";
@@ -15,23 +15,25 @@ type State = "loading" | "loaded" | "empty" | "error";
 export const DashboardWorkspaces = () => {
   const [state, setState] = useState<State>("loading");
   const [workspaces, setWorkspaces] = useState<DashboardWorkspaceSummary[]>([]);
+  const [loadError, setLoadError] = useState<unknown>(undefined);
 
-  useEffect(() => {
-    let cancelled = false;
+  const load = useCallback(() => {
     setState("loading");
+    setLoadError(undefined);
     getDashboardWorkspaces()
       .then((data) => {
-        if (cancelled) return;
         setWorkspaces(data);
         setState(data.length === 0 ? "empty" : "loaded");
       })
-      .catch(() => {
-        if (!cancelled) setState("error");
+      .catch((err: unknown) => {
+        setLoadError(err);
+        setState("error");
       });
-    return () => {
-      cancelled = true;
-    };
   }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   return (
     <section aria-labelledby="workspaces-heading">
@@ -53,7 +55,7 @@ export const DashboardWorkspaces = () => {
       {state === "loading" && <LoadingGrid />}
       {state === "empty" && <EmptyWorkspaces />}
       {state === "error" && (
-        <SectionError sectionName="workspaces" requestId="req_4f8a2c9d" onRetry={() => setState("loaded")} />
+        <SectionError sectionName="workspaces" error={loadError} onRetry={() => load()} />
       )}
       {state === "loaded" && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

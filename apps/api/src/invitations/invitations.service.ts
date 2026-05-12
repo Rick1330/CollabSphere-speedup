@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { WorkspaceRole } from "@prisma/client";
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable } from "@nestjs/common";
 import { AppError } from "../common/filters/app-error.filter.js";
 import { PrismaClientProvider } from "../common/prisma/prisma-client.provider.js";
 import { canAssignRole } from "../workspaces/workspaces.policy.js";
@@ -25,7 +25,43 @@ const futureExpiryDate = () => {
 
 @Injectable()
 export class InvitationsService {
-  constructor(private readonly prisma: PrismaClientProvider) {}
+  constructor(@Inject(PrismaClientProvider) private readonly prisma: PrismaClientProvider) {}
+
+  async listWorkspaceInvitations({
+    workspaceId,
+    actorUserId,
+  }: {
+    workspaceId: string;
+    actorUserId: string;
+  }) {
+    await this.findActorMembership({ workspaceId, actorUserId });
+    const invitations = await this.prisma.invitation.findMany({
+      where: {
+        workspaceId,
+        status: "pending",
+        deletedAt: null,
+      },
+      select: {
+        id: true,
+        invitedEmail: true,
+        role: true,
+        invitedByUserId: true,
+        createdAt: true,
+        expiresAt: true,
+        acceptedAt: true,
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    return invitations.map((invitation) => ({
+      id: invitation.id,
+      email: invitation.invitedEmail,
+      role: invitation.role,
+      invitedById: invitation.invitedByUserId,
+      createdAt: invitation.createdAt,
+      expiresAt: invitation.expiresAt,
+      acceptedAt: invitation.acceptedAt,
+    }));
+  }
 
   async createInvitations({
     workspaceId,
