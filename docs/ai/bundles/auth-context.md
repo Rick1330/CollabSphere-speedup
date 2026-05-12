@@ -1,50 +1,35 @@
 # Auth Context Bundle
 
 ## Purpose
-Starting context for work touching registration, verification, login,
-session, and auth-adjacent API behavior.
+Combined context for any agent working on Authentication and Authorization in CollabSphere.
 
-## Read First
-- `AGENTS.md`
-- `apps/api/AGENTS.md`
-- `docs/architecture/current-state.md`
-- `docs/adrs/0002-nestjs-migration.md`
-- `docs/adrs/0003-verify-email-token-http-mapping.md`
+## Relevant Rules (AGENTS.md)
+- No password, secret, token, or PII logging.
+- JWT tokens are short-lived.
+- Refresh tokens are stored in secure, httpOnly cookies.
+- CSRF protection is mandatory for state-changing requests.
 
-## Primary code surfaces
-- `apps/api/src/auth/*`
-- `apps/web/src/features/auth/*`
-- `packages/shared/src/queues/*`
-- `tests/unit/api-auth-*.test.ts`
-
-## Primary spec / execution references
+## Domain Specs
 - `docs/spec/05-features/05.1-authentication.md`
-- `docs/spec/09-api-standards/*`
-- `docs/spec/11-security/*`
-- `docs/agent-ref/api/auth-endpoints.md`
-- `docs/agent-ref/rules/error-codes.md`
-- `docs/agent-ref/rules/security-rules.md`
+- `docs/spec/09-api-standards/09.7-auth-standards.md`
 
-## Current implementation reality
-- Auth is present as a repo surface, but the API runtime is still in the
-  pre-NestJS architecture state.
-- Registration and email verification behavior are implemented and
-  tested more concretely than many other backend surfaces.
-- The verify-email token mapping has a documented local ADR-backed
-  override.
+## Current State
+- NestJS `AuthNestModule` is the source of truth.
+- Supports: Register, Verify-Email, Login, Refresh, Logout, Logout-All, Google OAuth.
+- Identity provider: Google.
 
-## Common risks
-- Token status-code churn caused by stale catalog assumptions
-- Secret/token leakage in logs
-- Session and email flows implemented differently across surfaces
-- Assuming NestJS guards/modules are already landed
+## Schemas (Prisma)
+- `User`: stores profile and password hash.
+- `RefreshToken`: stores active sessions.
+- `EmailDeliveryLog`: tracks verification and reset emails.
 
-## Validation focus
-- `docs/ai/skills/validation/api-contract.md`
-- `docs/ai/skills/validation/permissions.md`
-- `docs/ai/skills/validation/edge-cases.md`
+## Common Error Codes
+- `INVALID_CREDENTIALS` (401)
+- `TOKEN_EXPIRED` (401)
+- `TOKEN_INVALID` (401)
+- `EMAIL_NOT_VERIFIED` (403)
+- `EMAIL_ALREADY_EXISTS` (409)
 
-## Open questions to respect
-- Production email and deploy verification remain operational concerns
-- Broader auth expansion (OAuth, MFA, SSO) is not the same thing as the
-  current registration/verification surface
+## Open Questions
+- JWT rotation policy (AQ-006).
+- 2FA/TOTP timeline (AQ-007).
