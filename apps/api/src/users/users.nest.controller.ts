@@ -7,6 +7,7 @@ import {
   wrapSuccessResponse,
 } from "../common/interceptors/response-envelope.interceptor.js";
 import { UsersService } from "./users.service.js";
+import { ChangePasswordDto, UpdateMeDto } from "./users.dto.js";
 
 @Controller("users")
 export class UsersNestController {
@@ -25,13 +26,7 @@ export class UsersNestController {
   async updateMe(
     @ReqRequestId() requestId: string,
     @CurrentUserId() userId: string,
-    @Body()
-    body: {
-      fullName?: string;
-      bio?: string | null;
-      themePreference?: string;
-      avatarUrl?: string | null;
-    },
+    @Body() body: UpdateMeDto,
   ) {
     const data = await this.usersService.updateMe(userId, body);
     return wrapSuccessResponse({
@@ -44,11 +39,9 @@ export class UsersNestController {
   async changePassword(
     @ReqRequestId() requestId: string,
     @CurrentUserId() userId: string,
-    @Body() body: { currentPassword: string; newPassword: string },
+    @Body() body: ChangePasswordDto,
   ) {
-    const currentPassword = typeof body?.currentPassword === "string" ? body.currentPassword : "";
-    const newPassword = typeof body?.newPassword === "string" ? body.newPassword : "";
-    const result = await this.usersService.changePassword(userId, { currentPassword, newPassword });
+    const result = await this.usersService.changePassword(userId, body);
     return wrapSuccessResponse({
       payload: createActionResponsePayload({ message: result.message }),
       requestId,
