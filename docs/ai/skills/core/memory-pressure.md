@@ -1,42 +1,22 @@
 # Memory Pressure
-
 ## Purpose
-Recognize and handle agent-session degradation before it turns into
-contradictory work or repeated mistakes.
-
+Recognize and handle agent-session degradation (memory burst).
 ## When to Use
-- Any long session
-- Any conversation with repeated corrections
-- Any task with many partial branches or interruptions
-
+- When the conversation exceeds 20-30 turns.
+- When the agent starts forgetting previous instructions or rules.
+- When the agent confidently makes errors corrected earlier.
 ## Signals
-- The same repo fact is being rediscovered repeatedly
-- The model contradicts an earlier instruction or decision
-- The model claims to have finished work that is still open
-- The model loses track of which file or branch is under discussion
-- The conversation has become long enough that state is obviously
-  degrading
-
+- Model contradicts an earlier instruction or inviolable rule.
+- Model claims to have finished a task but the code remains unchanged.
+- Model loses track of which file or module is currently being discussed.
+- User finds themselves correcting the same mistake multiple times in one session.
+- Token usage warning from the agent host platform.
 ## Action
-1. Stop implementation churn.
-2. Consolidate what is known into:
-   - `docs/architecture/current-state.md` if the repo state changed
-   - a new session log entry
-   - a tool handoff note if another tool will continue
-3. Identify the smallest reliable next step.
-4. Resume only after the file-based context is strong enough that a new
-   session would start cleanly.
-
+1. STOP immediately.
+2. Emit an end-of-session handoff document (see `SESSION_LOG_TEMPLATE.md`).
+3. Commit all working progress to a stable branch.
+4. Request a fresh session from the user.
+5. Point the next session at `current-state.md` and the last session log.
 ## Dangerous Mistakes
-- Pushing through obvious context degradation
-- Letting unresolved assumptions remain only in chat history
-- Continuing after the user has already corrected the same mistake twice
-
-## Escalation Conditions
-- Fresh session recommended
-- Handoff required between tools
-- Repo state has shifted enough that `current-state.md` is now stale
-
-## Related Skills / References
-- `core/session-continuity.md`
-- `core/drift-detection.md`
+- Attempting to "push through" a degraded session, which leads to tech debt and regressions.
+- Trusting the model's self-assessment of its own memory.

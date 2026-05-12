@@ -1,62 +1,40 @@
 # Session: <Topic>
-
-## Date
-YYYY-MM-DD
-
-## Duration
-~Nh
-
-## Agent(s)
-<Lovable | Claude | Devin | Copilot | Antigravity | Codex>
-
-## PR(s)
-#NNN or `none`
-
-## Issue(s)
-#NNN or `none`
-
-## Status
-<in_progress | handed_off | done>
+## Date: YYYY-MM-DD
+## Duration: ~Nh
+## Agent(s): <Lovable | Claude | Devin | Copilot | Antigravity>
+## PR(s): #NNN
+## Issue(s): #NNN
+## Status: <in_progress | handed_off | done>
 
 ## Goal
-<Single sentence describing the intended outcome of the session.>
+<single sentence: what we set out to do>
 
 ## What we did
-- <Sequenced action 1>
-- <Sequenced action 2>
-- <Sequenced action 3>
+- <timestamped or sequenced action>
 
 ## What we learned
-- <Insight that should influence later work>
-- <Repo reality that differs from prior assumption>
+- <insight that should change future work>
 
 ## Decisions made
-- <Architectural or behavioral decisions; link ADRs if created>
+- <any architectural or contract decision — needs ADR entry>
 
 ## Blockers hit / risks surfaced
-- <Anything unresolved that should be logged in docs/audit/agents-open-questions.md>
+- <things we couldn't resolve — log in docs/audit/agents-open-questions.md>
 
 ## Validation evidence
-- Commands run:
-  - `...`
-- Manual checks:
-  - `...`
-- Not run:
-  - `...` because `...`
+- <tests run, smoke done, screenshots, CI links>
 
 ## Where to start next
-- <Specific file, command, or test the next session should begin with>
+- <specific file/line/test for the next session>
 
 ## Files that hold context for next agent
-- `docs/architecture/current-state.md`
-- `docs/ai/sessions/<this-file>.md`
-- `<other relevant files>`
+- <paths the next agent should read first>
 
 ## Confidence level
-- [ ] low — shipped but lightly validated
-- [ ] medium — main checks passed, broader validation pending
-- [ ] high — validated thoroughly for this scope
+- [ ] low — shipped but unvalidated
+- [ ] medium — CI green, manual smoke skipped
+- [ ] high — fully validated end-to-end
 
-## Token / context budget estimate for next session
-- Files to read: ~N
-- Expected turns: ~N
+## Token/context budget estimate for next session
+- ~N files to read
+- ~N turns expected

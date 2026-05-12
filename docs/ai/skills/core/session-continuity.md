@@ -1,60 +1,49 @@
 # Session Continuity
-
 ## Purpose
-Preserve working context across long-running, interrupted, or
-tool-switched sessions so later contributors do not have to reconstruct
-state from scratch.
-
+Maintain coherent agent state across session interruptions, tool changes, and context resets.
 ## When to Use
-- Any non-trivial implementation session
-- Any task expected to span multiple tool runs or days
-- Any time a handoff between tools or contributors is required
-
-## Required Inputs / Context
+- Starting a new session
+- Switching agent tools (Lovable → Claude, Claude → Devin)
+- Resuming after >24h gap
+- Detecting that current session has degraded (memory burst, contradictions)
+## Required Inputs
+- Session log directory: `docs/ai/sessions/`
+- Current PR/issue handoff comments
+- Last 3 commit messages on working branch
+- Relevant `AGENTS.md` files
 - `docs/architecture/current-state.md`
-- Most recent session log in `docs/ai/sessions/`
-- Relevant ADRs and local `AGENTS.md`
-
-## Read First
-- `AGENTS.md`
-- `docs/architecture/current-state.md`
-- Most recent session log
-- Relevant domain bundle in `docs/ai/bundles/`
-
 ## Workflow
-1. At session start, read current-state, the latest session log, and
-   the relevant domain bundle.
-2. Confirm whether the repo reality still matches the handoff
-   assumptions.
-3. During long sessions, checkpoint important findings rather than
-   leaving them only in chat or terminal scrollback.
-4. Before ending, write a session log entry with:
-   - goal
-   - what changed
-   - what was learned
-   - exact next starting point
-5. If the next step depends on a different tool or specialist, create a
-   tool handoff note in `docs/ai/tool-handoffs/`.
-
+### Starting fresh session
+1. Read `docs/architecture/current-state.md` first
+2. Read latest session log in `docs/ai/sessions/`
+3. Read PR description + last 3 handoff comments on working issue
+4. Read `AGENTS.md` for affected modules
+5. Confirm understanding of:
+   - Current branch state
+   - Last completed milestone
+   - Next intended action
+   - Any known blockers
+6. State the above explicitly before any code changes
+### Mid-session checkpoint (every 10-15 turns)
+1. Append to session log: what we just did, why
+2. Update PR handoff if applicable
+3. Commit work-in-progress if scope is bounded
+### End-of-session handoff
+1. Append final session log entry: what's done, what's pending, where to start next
+2. Update PR description with current state
+3. Update `docs/architecture/current-state.md` if architectural shift
+4. Optional: write a "next session prompt" — what should the next agent be told first?
 ## Dangerous Mistakes
-- Assuming the next session will remember ephemeral context
-- Ending a session with "we were almost there" and no file-based record
-- Handing off without stating what to read first
-- Omitting blockers or known broken edges
-
+- Starting code work without reading session log
+- Trusting in-session memory over written state
+- Continuing past memory burst (model contradicts earlier instructions)
 ## Detection: When to Hand Off Mid-Session
-- The task has expanded beyond the current context window
-- Multiple unresolved findings now need consolidation
-- The user changes tools or asks for a pause/resume
-- The same repo fact is being re-discovered repeatedly
-
-## Escalation Conditions
-- If the current-state doc is clearly stale, update it as part of the
-  handoff work.
-- If no stable next step can be identified, log the ambiguity in
-  `docs/audit/agents-open-questions.md`.
-
-## Related Skills / References
-- `core/drift-detection.md`
-- `core/memory-pressure.md`
-- `docs/ai/templates/SESSION_LOG_TEMPLATE.md`
+- Model contradicts an earlier rule it was told
+- Model claims to have done something it didn't (file unchanged)
+- Model loses track of which file is being discussed
+- Conversation length > 30 turns without consolidation
+- User correcting same mistake twice
+- Token usage warning from agent host
+## Escalation
+- If session log is missing or stale, STOP and ask user to confirm
+- If `current-state.md` disagrees with code, log discrepancy in `docs/audit/`

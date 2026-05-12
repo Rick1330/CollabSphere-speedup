@@ -1,52 +1,40 @@
-# AGENTS.md
-
+# AGENTS.md (apps/collab)
 ## Purpose
-Local rules for the Hocuspocus collaboration server.
+Local rules for the Hocuspocus collab server.
 
 ## Scope
-`apps/collab` realtime document collaboration, Yjs persistence, and awareness.
+`apps/collab` — WebSocket server, Yjs document persistence, awareness, auth.
 
-## Must Follow
-- Hocuspocus is the only source of editable document content; REST is metadata-only.
-- Yjs state is canonical document content; persist via Hocuspocus hooks.
-- Room naming: `doc:<documentId>` only.
-- JWT auth required on every connect/reconnect; enforce active membership before join.
-- Read-only enforcement is server-side; honor lock, status, and workspace policies.
-- Hook responsibilities:
-  - `onLoadDocument`: load `documents.content_yjs` for `doc:<documentId>`, reject if unauthorized.
-  - `onStoreDocument`: persist Yjs state, update `updated_at/updated_by`, derive `content_plaintext`.
-  - `onConnect`: recheck doc status/lock/deleted state and permissions.
-  - `onDisconnect`: update presence if tracked.
-- Persist Yjs state on a coalesced cadence (no per-keystroke persistence).
-- `content_plaintext` is derived from Yjs; never treat it as source.
-- Awareness/presence is ephemeral; do not persist awareness state.
-- Degraded mode: read-only banner + retry; render last persisted snapshot if available.
+## Inviolable
+- Document content source-of-truth is Yjs binary state.
+- REST never returns Yjs state (already enforced repo-wide).
+- Workspace membership re-validated at every connect.
+- Auth tokens are short-lived (≤ 5 minutes) and scoped to single document.
+- Soft-deleted users cannot connect.
+- Archived workspaces are read-only via collab.
+- Locked documents reject mutation attempts (server-enforced).
+- Per-keystroke activity events are forbidden (already repo-wide rule).
 
-## Never Do
-- Allow edits without valid membership and role.
-- Serve or accept document content over REST.
-- Emit per-keystroke activity or notification events.
-- Persist per-keystroke Yjs updates.
-- Accept room names other than `doc:<documentId>`.
+## Strong defaults
+- Hocuspocus extension hooks own the policy (`onAuthenticate`, `onConnect`, `onChange`, `onStoreDocument`, `onDisconnect`).
+- Use the database extension for Postgres persistence.
+- Persist on disconnect; snapshot every 10 minutes (or on major activity).
+- Reject malformed Yjs updates; do not accept binary blobs from clients without validation.
 
-## Tests / Validation
-- Verify read-only enforcement and mid-session permission changes.
-- Simulate collab outages and confirm degraded behavior.
-- Validate persistence hooks update Yjs state and plaintext correctly.
-- Verify reconnect re-authorizes and rechecks lock/submission status.
+## Never do
+- Trust client-supplied user IDs; resolve from auth token only.
+- Read other workspaces' documents from any hook.
+- Hold connections open after auth expiry without re-validation.
+- Skip persistence on disconnect (prevention of data loss).
 
-## Wrong vs Right (Examples)
-- Wrong: “Fetch doc content via REST and pass to editor.”  
-  Right: “Load Yjs state via Hocuspocus (`onLoadDocument`) and sync in room.”
-- Wrong: “Allow updates if user is member.”  
-  Right: “Allow updates only if member AND doc is editable (lock/status/workspace).”
+## Tests / validation
+- Integration tests for: connect with valid token, reject invalid token, multi-client convergence, persistence on disconnect, soft-deleted user rejection, archived workspace read-only.
+- No mocking Hocuspocus internals; spin up a real server instance against an ephemeral Postgres for integration tests.
 
 ## References
-- `docs/agent-ref/collab/hocuspocus-hooks.md`
-- `docs/agent-ref/collab/read-only-rules.md`
-- `docs/agent-ref/collab/yjs-state-model.md`
-- `docs/agent-ref/collab/awareness-presence.md`
-- `docs/agent-ref/collab/collaboration-failure-modes.md`
-- `docs/agent-ref/data/document-schema.md`
-- `docs/agent-ref/rules/workspace-isolation.md`
-- `docs/agent-ref/rules/security-rules.md`
+- `docs/agent-ref/collab/collab-server-rules.md`
+- `docs/agent-ref/collab/collab-persistence-rules.md`
+- `docs/agent-ref/collab/collab-deployment-rules.md`
+- `docs/agent-ref/collab/collab-testing-rules.md`
+- `docs/spec/10-realtime/*` (canonical spec)
+- `packages/database/prisma/schema.prisma` (`Document`, `DocumentVersion` models)
