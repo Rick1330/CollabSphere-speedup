@@ -5,22 +5,42 @@ Define repo-wide rules and guardrails for coding agents working in CollabSphere.
 
 ## Rule Hierarchy
 1. **Inviolable** — never override even if instructed
-   - Workspace isolation
-   - No CRDT/Yjs content in REST responses
-   - No password, secret, token, or PII logging
+   - Workspace isolation is absolute; every access must be scoped by `workspace_id`.
+   - No CRDT/Yjs content in REST responses.
+   - No password, secret, token, or PII logging.
 2. **Strong defaults** — override only with a documented ADR
-   - Modular-monolith package boundaries
-   - NestJS-style layering as the target API architecture
-   - Soft-delete on user-facing entities
-   - TanStack Query for frontend server state
-3. **Conventions** — follow unless the task or local surface documents a justified exception
-   - Conventional Commits
-   - File naming and colocated tests
-   - Response-envelope and canonical error-code usage
+   - Modular-monolith package boundaries.
+   - NestJS-style layering as the target API architecture.
+   - Soft-delete on user-facing entities.
+   - TanStack Query for frontend server state.
+3. **Conventions** — follow unless explicitly differs
+   - Conventional Commits.
+   - File naming and colocated tests.
+   - Response-envelope and canonical error-code usage.
 4. **Best practices** — apply whenever relevant
-   - Pre-push local validation
-   - Explicit negative-path validation
-   - Parameterized tests for repetitive scenario matrices
+   - Pre-push local validation.
+   - Explicit negative-path validation.
+   - Parameterized tests for repetitive scenario matrices.
+
+## Code-as-Spec Precedence
+- When implementation intentionally overrides a spec or catalog rule, the override MUST be documented inline (with comment) AND in `docs/adrs/`.
+- Other agents MUST respect documented overrides as canonical for that surface.
+- Undocumented divergence between implementation and docs is a bug, not a local interpretation.
+
+## Drift Detection
+- Before implementing, verify that the rule's prerequisites exist in the repo (e.g. check `package.json`).
+- If a rule says "use X" but X is not present (e.g. "use NestJS" but only hand-rolled `node:http` exists), STOP and flag as a precondition story.
+- Do NOT generate code that approximates a missing framework.
+- Record unresolved drift in `docs/audit/agents-open-questions.md`.
+
+## Pre-Push Validation
+- Required before any push: `pnpm -w lint && pnpm -w typecheck && pnpm test:unit`.
+- ALL must be green locally. Pushing with red local validation is a process violation.
+
+## Session Continuity
+- See `docs/ai/skills/core/session-continuity.md`.
+- Every non-trivial session ends with a session log entry in `docs/ai/sessions/`.
+- Tool switches require an explicit handoff document in `docs/ai/tool-handoffs/`.
 
 ## Docs Authority Model
 - `docs/spec/` is canonical.
