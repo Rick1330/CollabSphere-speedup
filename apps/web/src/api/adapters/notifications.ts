@@ -1,20 +1,89 @@
 import { request } from "@/api/client";
-import {
-  NOTIFICATION_CATEGORY,
-  NOTIFICATION_CATEGORY_META,
-  type Notification,
-  type NotificationCategory,
-  type NotificationPage,
-  type NotificationType,
-} from "@/lib/mock-notifications";
-import { NOTIFICATION_TYPES, type NotificationPreferences } from "@/lib/mock-notification-prefs";
+
+export type NotificationType =
+  | "task.assigned"
+  | "task.completed"
+  | "task.status_changed"
+  | "document.mention"
+  | "document.submitted"
+  | "document.approved"
+  | "comment.reply"
+  | "workspace.member_joined"
+  | "workspace.invitation"
+  | "deadline.reminder";
+
+export type NotificationCategory = "tasks" | "documents" | "comments" | "workspace" | "deadlines";
+
+export const NOTIFICATION_CATEGORY: Record<NotificationType, NotificationCategory> = {
+  "task.assigned": "tasks",
+  "task.completed": "tasks",
+  "task.status_changed": "tasks",
+  "document.mention": "documents",
+  "document.submitted": "documents",
+  "document.approved": "documents",
+  "comment.reply": "comments",
+  "workspace.member_joined": "workspace",
+  "workspace.invitation": "workspace",
+  "deadline.reminder": "deadlines",
+};
+
+export const NOTIFICATION_CATEGORY_META: Record<
+  NotificationCategory,
+  { label: string; tone: "teal" | "sky" | "stone" | "emerald" | "amber" }
+> = {
+  tasks: { label: "Tasks", tone: "teal" },
+  documents: { label: "Documents", tone: "sky" },
+  comments: { label: "Comments", tone: "stone" },
+  workspace: { label: "Workspace", tone: "emerald" },
+  deadlines: { label: "Deadlines", tone: "amber" },
+};
+
+export interface Notification {
+  id: string;
+  type: NotificationType;
+  title: string;
+  body: string | null;
+  workspaceId: string;
+  workspaceName: string;
+  url: string;
+  isRead: boolean;
+  readAt: string | null;
+  createdAt: string;
+}
+
+export interface NotificationPage {
+  data: { items: Notification[] };
+  meta: {
+    pagination: {
+      page: number;
+      pageSize: number;
+      totalItems: number;
+      totalPages: number;
+    };
+  };
+}
+
+export interface NotificationPreferences {
+  inApp: Record<string, boolean>;
+  email: Record<string, boolean>;
+  dailyDigestEnabled: boolean;
+  weeklyDigestEnabled: boolean;
+}
+
+export const NOTIFICATION_TYPES: { key: string; label: string }[] = [
+  { key: "task.assigned", label: "Task assigned to you" },
+  { key: "task.completed", label: "Task completed" },
+  { key: "task.status_changed", label: "Task status changed" },
+  { key: "document.mention", label: "Mentioned in a document" },
+  { key: "comment.reply", label: "Reply to your comment" },
+  { key: "workspace.member_joined", label: "New member joined" },
+  { key: "workspace.invitation", label: "Workspace invitation" },
+  { key: "deadline.reminder", label: "Deadline reminders" },
+];
 
 type ListEnvelope<T> = { data?: { items?: T[]; total?: number }; meta?: { pagination?: NotificationPage["meta"]["pagination"] } };
 type SingleEnvelope<T> = { data?: { resource?: T } };
 type ActionEnvelope = { data?: { extraData?: Record<string, unknown> } };
-
-export { NOTIFICATION_CATEGORY, NOTIFICATION_CATEGORY_META, NOTIFICATION_TYPES };
-export type { Notification, NotificationCategory, NotificationPage, NotificationPreferences, NotificationType };
 
 export async function fetchNotifications(params: {
   page: number;

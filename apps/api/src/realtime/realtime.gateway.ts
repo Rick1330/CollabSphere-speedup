@@ -29,6 +29,7 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   server!: Server;
 
   private readonly logger = new Logger(RealtimeGateway.name);
+  private activeConnections = 0;
 
   constructor(
     private readonly sessionService: RealtimeSessionService,
@@ -39,11 +40,21 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   }
 
   async handleConnection(client: Socket): Promise<void> {
+    const startedAt = process.hrtime.bigint();
     try {
       const user = await this.sessionService.authenticateSocket(client);
 
       client.data.user = user;
       await client.join(this.sessionService.toUserRoom(user.userId));
+      this.activeConnections += 1;
+      this.logger.log(
+        JSON.stringify({
+          event: "realtime.connection.accepted",
+          userId: user.userId,
+          activeConnections: this.activeConnections,
+          authLatencyMs: Number((Number(process.hrtime.bigint() - startedAt) / 1_000_000).toFixed(2)),
+        }),
+      );
     } catch (error) {
       this.logger.warn(`Rejected socket connection: ${this.toErrorMessage(error)}`);
       client.disconnect(true);
@@ -52,7 +63,15 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
 
   handleDisconnect(client: Socket): void {
     const userId = (client.data.user as { userId?: string } | undefined)?.userId ?? "anonymous";
+    this.activeConnections = Math.max(0, this.activeConnections - 1);
     this.logger.debug(`Realtime socket disconnected for user ${userId}`);
+    this.logger.log(
+      JSON.stringify({
+        event: "realtime.connection.closed",
+        userId,
+        activeConnections: this.activeConnections,
+      }),
+    );
   }
 
   @SubscribeMessage("room:join:workspace")
@@ -104,6 +123,7 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   }
 
   emitToWorkspace(workspaceId: string, event: RealtimeEventName, payload: unknown): void {
+    this.logger.debug(JSON.stringify({ event: "realtime.emit", channel: "workspace", workspaceId, name: event }));
     this.server.to(this.sessionService.toWorkspaceRoom(workspaceId)).emit(event, payload);
   }
 

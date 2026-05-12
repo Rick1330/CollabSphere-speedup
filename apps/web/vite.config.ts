@@ -4,10 +4,19 @@ import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 
 // https://vitejs.dev/config/
+const apiOrigin = process.env.VITE_API_PROXY_TARGET ?? "http://127.0.0.1:3001";
+
 export default defineConfig(() => ({
   server: {
     host: "::",
     port: 8080,
+    /** Forward same-origin `/api/v1/*` to the Nest API (global prefix matches `apps/api`). */
+    proxy: {
+      "/api/v1": {
+        target: apiOrigin,
+        changeOrigin: true,
+      },
+    },
     hmr: {
       overlay: false,
     },

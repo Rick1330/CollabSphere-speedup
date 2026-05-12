@@ -11,6 +11,7 @@ const webVercelConfigPath = path.join(repoRoot, "apps", "web", "vercel.json");
 const requiredJobNames = [
   "lint",
   "typecheck",
+  "security-scan",
   "unit-tests",
   "integration-tests",
   "build-web",
@@ -56,6 +57,30 @@ const assertIntegrationServices = (jobs: Record<string, WorkflowJob>) => {
   assert.equal(jobs["integration-tests"]?.services?.redis?.image, "redis:7-alpine");
 };
 
+const assertPhase0GuardrailsStep = (jobs: Record<string, WorkflowJob>) => {
+  const unitTestSteps = jobs["unit-tests"]?.steps ?? [];
+  const hasGuardrailStep = unitTestSteps.some(
+    (step) =>
+      typeof step.name === "string" &&
+      step.name === "Run Phase 0 guardrails" &&
+      typeof step.run === "string" &&
+      step.run.includes("phase0:guardrails"),
+  );
+  assert.ok(hasGuardrailStep, "unit-tests job must execute Phase 0 guardrails");
+};
+
+const assertSecurityScanStep = (jobs: Record<string, WorkflowJob>) => {
+  const securitySteps = jobs["security-scan"]?.steps ?? [];
+  const hasAuditStep = securitySteps.some(
+    (step) =>
+      typeof step.name === "string" &&
+      step.name.includes("vulnerability audit") &&
+      typeof step.run === "string" &&
+      step.run.includes("pnpm audit --audit-level=high"),
+  );
+  assert.ok(hasAuditStep, "security-scan job must execute a high severity dependency audit");
+};
+
 const setupNodeActionPattern =
   /^actions\/setup-node@(?:v4|49933ea5288caeca8642d1e84afbd3f7d6820020)(?:\s+#.*)?$/;
 
@@ -86,6 +111,8 @@ test("ci workflow defines the required pull request jobs and services", async ()
   assertRequiredJobs(jobs);
   assertWorkflowMetadata(workflow);
   assertIntegrationServices(jobs);
+  assertPhase0GuardrailsStep(jobs);
+  assertSecurityScanStep(jobs);
 
   for (const jobName of requiredJobNames) {
     assertJobCachesPnpmStore(jobName, jobs[jobName]);

@@ -1,10 +1,10 @@
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable } from "@nestjs/common";
 import { AppError } from "../common/filters/app-error.filter.js";
 import { PrismaClientProvider } from "../common/prisma/prisma-client.provider.js";
 
 @Injectable()
 export class ActivityService {
-  constructor(private readonly prisma: PrismaClientProvider) {}
+  constructor(@Inject(PrismaClientProvider) private readonly prisma: PrismaClientProvider) {}
 
   async listWorkspaceActivity(input: {
     actorUserId: string;

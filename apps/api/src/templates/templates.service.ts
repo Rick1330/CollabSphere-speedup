@@ -1,10 +1,10 @@
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable } from "@nestjs/common";
 import { AppError } from "../common/filters/app-error.filter.js";
 import { PrismaClientProvider } from "../common/prisma/prisma-client.provider.js";
 
 @Injectable()
 export class TemplatesService {
-  constructor(private readonly prisma: PrismaClientProvider) {}
+  constructor(@Inject(PrismaClientProvider) private readonly prisma: PrismaClientProvider) {}
 
   async listSystemTemplates() {
     const items = await this.prisma.template.findMany({

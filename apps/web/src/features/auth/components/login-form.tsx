@@ -10,7 +10,7 @@ import { AuthErrorBanner } from "./auth-error-banner";
 import { AuthDivider } from "./auth-divider";
 import { OAuthButton } from "./oauth-button";
 import { login, AuthError } from "@/api/adapters/auth";
-import { findAccountById } from "@/lib/mock-accounts";
+import { listMineWorkspaceRows } from "@/api/adapters/workspaces";
 
 const loginSchema = z.object({
   email: z.string().min(1, "Email is required").email("Invalid email"),
@@ -24,13 +24,14 @@ interface ServerError {
   message: string;
 }
 
-/** Choose a sensible post-login destination based on the account. */
-function defaultDestinationFor(accountId: string): string {
-  const account = findAccountById(accountId);
-  if (!account) return "/dashboard";
-  // Land users in their default workspace context if they have one.
-  if (account.defaultWorkspaceId) {
-    return `/w/${account.defaultWorkspaceId}`;
+/** First workspace from API, else dashboard (IDs are DB UUIDs — not mock slugs). */
+async function postLoginPath(): Promise<string> {
+  try {
+    const rows = await listMineWorkspaceRows();
+    const first = rows[0]?.workspace?.id;
+    if (first) return `/w/${first}`;
+  } catch {
+    /* fall through */
   }
   return "/dashboard";
 }
@@ -66,7 +67,7 @@ export const LoginForm = () => {
       queryClient.invalidateQueries({ queryKey: ["user", "me"] });
 
       const next = params.get("next");
-      const destination = next ? decodeURIComponent(next) : defaultDestinationFor(session.user.id);
+      const destination = next ? decodeURIComponent(next) : await postLoginPath();
       navigate(destination, { replace: true });
     } catch (err) {
       if (err instanceof AuthError) {

@@ -1,5 +1,7 @@
 import { Link } from "react-router-dom";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useQueries } from "@tanstack/react-query";
+import { Loader2 } from "lucide-react";
 import {
   Archive,
   Users,
@@ -32,9 +34,13 @@ import {
 } from "@/components/shared/page-header";
 import { SectionHeader } from "@/components/shared/section-header";
 import { WorkspaceAcademicProgress } from "./workspace-academic-progress";
+import { getDocumentTree, collectDocumentsFromTree } from "@/api/adapters/documents";
+import { listTasksMap } from "@/api/adapters/tasks";
+import { fetchWorkspaceActivityPaginated } from "@/api/adapters/activity";
+import { useCurrentAccount } from "@/lib/auth-session";
 
 interface WorkspaceHomeProps {
-  workspace: WorkspaceForSidebar & { memberCount: number };
+  workspace: WorkspaceForSidebar & { memberCount: number; documentCount?: number };
   /**
    * Name of the workspace template this workspace was created from. When
    * present, a small badge is rendered in the page header so people can see
@@ -69,100 +75,11 @@ interface EventItem {
   createdAt: string;
 }
 
-const MOCK_DOCS: DocItem[] = [
-  {
-    id: "d1",
-    title: "Project Roadmap Q4",
-    folderPath: "Product",
-    updatedAt: new Date(Date.now() - 2 * 60 * 1000).toISOString(),
-    status: "approved",
-  },
-  {
-    id: "d2",
-    title: "API Design",
-    folderPath: "Architecture",
-    updatedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
-    status: "submitted",
-  },
-  {
-    id: "d3",
-    title: "Sprint Retro Week 12",
-    folderPath: "Meetings",
-    updatedAt: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
-    status: "draft",
-  },
-  {
-    id: "d4",
-    title: "PRD v2",
-    folderPath: "Product",
-    updatedAt: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
-    isLocked: true,
-    lockedBy: { fullName: "Eyob Bekele" },
-    status: "changes_requested",
-  },
-  {
-    id: "d5",
-    title: "ADR-003 Prisma",
-    folderPath: "Architecture",
-    updatedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-    status: "approved",
-  },
-];
+const TASK_PRIOS: TaskItem["priority"][] = ["urgent", "high", "medium", "low"];
 
-const MOCK_TASKS: TaskItem[] = [
-  {
-    id: "t1",
-    title: "Implement login page",
-    priority: "high",
-    status: "todo",
-    dueDate: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-  },
-  {
-    id: "t2",
-    title: "Fix login redirect bug",
-    priority: "urgent",
-    status: "in_progress",
-    dueDate: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-  },
-  {
-    id: "t3",
-    title: "Review PR #42 — auth refactor",
-    priority: "medium",
-    status: "in_review",
-    dueDate: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
-  },
-];
-
-const MOCK_EVENTS: EventItem[] = [
-  {
-    id: "e1",
-    actor: { id: "u1", fullName: "Elshaday Tesfaye" },
-    action: "assigned a task",
-    resource: { title: "Implement login page" },
-    createdAt: new Date(Date.now() - 2 * 60 * 1000).toISOString(),
-  },
-  {
-    id: "e2",
-    actor: { id: "u2", fullName: "Eyob Bekele" },
-    action: "moved to In Review",
-    resource: { title: "Fix login redirect bug" },
-    createdAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
-  },
-  {
-    id: "e3",
-    actor: { id: "u3", fullName: "Kidist Alemu" },
-    action: "created a document",
-    resource: { title: "API Design" },
-    createdAt: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
-  },
-  {
-    id: "e4",
-    actor: { id: "u4", fullName: "Mekonnen Desta" },
-    action: "commented on",
-    resource: { title: "Sprint Retro Week 12" },
-    createdAt: new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString(),
-  },
-];
+function toTaskPriority(p: string): TaskItem["priority"] {
+  return TASK_PRIOS.includes(p as TaskItem["priority"]) ? (p as TaskItem["priority"]) : "medium";
+}
 
 const typeBadge = (t: WorkspaceForSidebar["type"]) => {
   if (t === "professional") {
@@ -179,17 +96,105 @@ const isRecentlyEdited = (updatedAt: string) =>
 
 export const WorkspaceHome = ({ workspace: initialWorkspace, templateName }: WorkspaceHomeProps) => {
   const [workspace, setWorkspace] = useState(initialWorkspace);
+  const account = useCurrentAccount();
+  const myId = account?.id;
+
+  useEffect(() => {
+    setWorkspace(initialWorkspace);
+  }, [initialWorkspace]);
+
   const base = `/w/${workspace.id}`;
   const canCreate = workspace.permissions.canCreateContent && workspace.status === "active";
 
-  const sortedTasks = [...MOCK_TASKS].sort((a, b) => {
-    const aOver = a.dueDate ? formatDueDate(a.dueDate).isOverdue : false;
-    const bOver = b.dueDate ? formatDueDate(b.dueDate).isOverdue : false;
-    if (aOver !== bOver) return aOver ? -1 : 1;
-    if (!a.dueDate) return 1;
-    if (!b.dueDate) return -1;
-    return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
+  const homeQueries = useQueries({
+    queries: [
+      {
+        queryKey: ["workspace-home", workspace.id, "tree"],
+        queryFn: () => getDocumentTree(workspace.id),
+        enabled: Boolean(workspace.id),
+        staleTime: 15_000,
+      },
+      {
+        queryKey: ["workspace-home", workspace.id, "tasks"],
+        queryFn: () => listTasksMap(workspace.id),
+        enabled: Boolean(workspace.id),
+        staleTime: 15_000,
+      },
+      {
+        queryKey: ["workspace-home", workspace.id, "activity"],
+        queryFn: () => fetchWorkspaceActivityPaginated(workspace.id, { page: 1, pageSize: 8 }),
+        enabled: Boolean(workspace.id),
+        staleTime: 15_000,
+      },
+    ],
   });
+
+  const [treeQuery, tasksQuery, activityQuery] = homeQueries;
+  const tree = treeQuery.data ?? [];
+
+  const docTotalInTree = useMemo(() => {
+    let c = 0;
+    const walk = (nodes: typeof tree) => {
+      for (const n of nodes) {
+        if (n.type === "document") c++;
+        else walk(n.children);
+      }
+    };
+    walk(tree);
+    return c;
+  }, [tree]);
+
+  const docMetaCount = workspace.documentCount ?? docTotalInTree;
+
+  const recentDocRows = useMemo(() => collectDocumentsFromTree(tree, 12), [tree]);
+
+  const docs: DocItem[] = useMemo(
+    () =>
+      recentDocRows.map((row) => ({
+        id: row.id,
+        title: row.title,
+        folderPath: row.folderPath,
+        updatedAt: row.updatedAt,
+        status: row.status,
+        isLocked: row.isLocked,
+        lockedBy: row.lockedBy,
+      })),
+    [recentDocRows],
+  );
+
+  const taskMap = tasksQuery.data ?? {};
+  const sortedTasks = useMemo(() => {
+    const open: TaskItem["status"][] = ["todo", "in_progress", "in_review"];
+    const items: TaskItem[] = Object.values(taskMap)
+      .filter((t) => myId && t.assignee?.id === myId)
+      .filter((t) => open.includes(t.status as TaskItem["status"]))
+      .map((t) => ({
+        id: t.id,
+        title: t.title,
+        priority: toTaskPriority(t.priority),
+        status: t.status as TaskItem["status"],
+        dueDate: t.dueDate ? String(t.dueDate) : undefined,
+      }));
+    return items.sort((a, b) => {
+      const aOver = a.dueDate ? formatDueDate(a.dueDate).isOverdue : false;
+      const bOver = b.dueDate ? formatDueDate(b.dueDate).isOverdue : false;
+      if (aOver !== bOver) return aOver ? -1 : 1;
+      if (!a.dueDate) return 1;
+      if (!b.dueDate) return -1;
+      return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
+    });
+  }, [taskMap, myId]);
+
+  const events: EventItem[] = useMemo(() => {
+    const items = activityQuery.data?.data.items ?? [];
+    return items.map((e) => ({
+      id: e.id,
+      actor: { id: e.actor.id, fullName: e.actor.fullName },
+      action: e.summary,
+      resource: e.resource ? { title: e.resource.title } : undefined,
+      createdAt: e.createdAt,
+    }));
+  }, [activityQuery.data]);
 
   const handleUnarchive = () => {
     setWorkspace((w) => ({ ...w, status: "active" }));
@@ -299,7 +304,7 @@ export const WorkspaceHome = ({ workspace: initialWorkspace, templateName }: Wor
           <>
             <MetaStat icon={Users} value={workspace.memberCount} label="members" />
             <MetaDivider />
-            <MetaStat icon={FileText} value={MOCK_DOCS.length} label="docs" />
+            <MetaStat icon={FileText} value={docMetaCount} label="docs" />
             <MetaDivider />
             <MetaStat icon={CheckSquare} value={sortedTasks.length} label="my tasks" />
             {workspace.permissions.canEditSettings && (
@@ -337,7 +342,7 @@ export const WorkspaceHome = ({ workspace: initialWorkspace, templateName }: Wor
             id="recent-docs-heading"
             variant="primary"
             title="Recent documents"
-            count={<CountChip value={MOCK_DOCS.length} />}
+            count={<CountChip value={docMetaCount} />}
             action={
               <Link
                 to={`${base}/documents`}
@@ -349,7 +354,15 @@ export const WorkspaceHome = ({ workspace: initialWorkspace, templateName }: Wor
           />
 
           <div className="rounded-xl border border-stone-200 bg-white p-3">
-            {MOCK_DOCS.length === 0 ? (
+            {treeQuery.isPending ? (
+              <div
+                className="flex items-center justify-center gap-2 py-14 text-sm text-stone-500"
+                aria-busy="true"
+              >
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading documents…
+              </div>
+            ) : docs.length === 0 ? (
               <EmptyDocs
                 base={base}
                 canCreate={canCreate}
@@ -357,7 +370,7 @@ export const WorkspaceHome = ({ workspace: initialWorkspace, templateName }: Wor
               />
             ) : (
               <ul className="divide-y divide-stone-100">
-                {MOCK_DOCS.map((doc) => (
+                {docs.map((doc) => (
                   <li key={doc.id}>
                     <Link
                       to={`${base}/documents/${doc.id}`}
@@ -448,7 +461,12 @@ export const WorkspaceHome = ({ workspace: initialWorkspace, templateName }: Wor
               </Link>
             </div>
 
-            {sortedTasks.length === 0 ? (
+            {tasksQuery.isPending ? (
+              <div className="flex items-center gap-2 py-8 text-xs text-stone-500" aria-busy="true">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Loading tasks…
+              </div>
+            ) : sortedTasks.length === 0 ? (
               <EmptySmall icon={CheckSquare} title="No tasks assigned" subtitle="You're all clear." />
             ) : (
               <ul>
@@ -536,7 +554,12 @@ export const WorkspaceHome = ({ workspace: initialWorkspace, templateName }: Wor
               </Link>
             </div>
 
-            {MOCK_EVENTS.length === 0 ? (
+            {activityQuery.isPending ? (
+              <div className="flex items-center gap-2 py-8 text-xs text-stone-500" aria-busy="true">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Loading activity…
+              </div>
+            ) : events.length === 0 ? (
               <EmptySmall
                 icon={ActivityIcon}
                 title="No activity yet"
@@ -544,8 +567,8 @@ export const WorkspaceHome = ({ workspace: initialWorkspace, templateName }: Wor
               />
             ) : (
               <ol>
-                {MOCK_EVENTS.map((event, idx) => {
-                  const showConnector = idx < MOCK_EVENTS.length - 1;
+                {events.map((event, idx) => {
+                  const showConnector = idx < events.length - 1;
                   return (
                     <li key={event.id} className="relative">
                       {showConnector && (

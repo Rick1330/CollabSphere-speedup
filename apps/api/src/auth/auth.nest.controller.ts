@@ -32,8 +32,8 @@ import { AuthAppService } from "./auth.app.service.js";
 import { AuthSessionService } from "./auth-session.service.js";
 import { GoogleOAuthService } from "./google-oauth.service.js";
 import { mapRegisterPersistenceError } from "./auth.service.js";
-import { GOOGLE_OAUTH_STATE_COOKIE, REFRESH_TOKEN_COOKIE } from "./auth-cookies.js";
-import { clearRefreshTokenCookie, setRefreshTokenCookie } from "./auth-cookie.util.js";
+import { CSRF_TOKEN_COOKIE, GOOGLE_OAUTH_STATE_COOKIE, REFRESH_TOKEN_COOKIE } from "./auth-cookies.js";
+import { clearRefreshTokenCookie, setCsrfTokenCookie, setRefreshTokenCookie } from "./auth-cookie.util.js";
 
 const mapToHttpException = (error: unknown, requestId: string) => {
   if (error instanceof AppError) {
@@ -48,6 +48,20 @@ const mapToHttpException = (error: unknown, requestId: string) => {
     requestId,
   });
   throw new HttpException(mapped.payload, mapped.statusCode);
+};
+
+const csrfHeaderName = "x-csrf-token";
+
+const validateCsrfDoubleSubmit = (req: Request) => {
+  const cookieToken = req.cookies?.[CSRF_TOKEN_COOKIE];
+  const headerToken = req.header(csrfHeaderName);
+  if (!cookieToken || !headerToken || cookieToken !== headerToken) {
+    throw new AppError({
+      code: "FORBIDDEN",
+      message: "CSRF validation failed.",
+      statusCode: HttpStatus.FORBIDDEN,
+    });
+  }
 };
 
 @Controller("auth")
@@ -132,12 +146,15 @@ export class AuthNestController {
         userAgent: userAgentHeader ?? "unknown",
       });
       setRefreshTokenCookie(res, session.refreshToken);
+      const csrfToken = randomBytes(24).toString("base64url");
+      setCsrfTokenCookie(res, csrfToken);
       return wrapSuccessResponse({
         payload: createActionResponsePayload({
           message: "Signed in successfully.",
           extraData: {
             accessToken: session.accessToken,
             user: session.user,
+            csrfToken,
           },
         }),
         requestId,
@@ -157,6 +174,7 @@ export class AuthNestController {
     @Res({ passthrough: true }) res: Response,
   ) {
     try {
+      validateCsrfDoubleSubmit(req);
       const raw = req.cookies?.[REFRESH_TOKEN_COOKIE];
       const session = await this.authSession.refreshSession({
         refreshToken: raw,
@@ -164,11 +182,14 @@ export class AuthNestController {
         userAgent: userAgentHeader ?? "unknown",
       });
       setRefreshTokenCookie(res, session.refreshToken);
+      const csrfToken = randomBytes(24).toString("base64url");
+      setCsrfTokenCookie(res, csrfToken);
       return wrapSuccessResponse({
         payload: createActionResponsePayload({
           message: "Session refreshed.",
           extraData: {
             accessToken: session.accessToken,
+            csrfToken,
           },
         }),
         requestId,
@@ -358,12 +379,15 @@ export class AuthNestController {
         userAgent: userAgentHeader ?? "unknown",
       });
       setRefreshTokenCookie(res, session.refreshToken);
+      const csrfToken = randomBytes(24).toString("base64url");
+      setCsrfTokenCookie(res, csrfToken);
       return wrapSuccessResponse({
         payload: createActionResponsePayload({
           message: "Signed in with Google.",
           extraData: {
             accessToken: session.accessToken,
             user: session.user,
+            csrfToken,
           },
         }),
         requestId,

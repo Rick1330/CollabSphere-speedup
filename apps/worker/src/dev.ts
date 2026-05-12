@@ -51,17 +51,41 @@ const workerEnv = validateServiceEnv({
 });
 const prisma = new PrismaClient();
 const redis = new Redis(workerEnv.REDIS_URL, { maxRetriesPerRequest: null });
-const exportsQueue = new Queue(WORKER_QUEUES.EXPORTS, { connection: redis });
-const remindersQueue = new Queue(WORKER_QUEUES.TASK_REMINDERS, { connection: redis });
+const exportsDlq = new Queue(WORKER_QUEUES.EXPORTS_DLQ, { connection: redis });
+const remindersDlq = new Queue(WORKER_QUEUES.TASK_REMINDERS_DLQ, { connection: redis });
+const exportsQueue = new Queue(WORKER_QUEUES.EXPORTS, {
+  connection: redis,
+  defaultJobOptions: {
+    attempts: 5,
+    backoff: {
+      type: "exponential",
+      delay: 5_000,
+    },
+    removeOnComplete: 250,
+    removeOnFail: 250,
+  },
+});
+const remindersQueue = new Queue(WORKER_QUEUES.TASK_REMINDERS, {
+  connection: redis,
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: {
+      type: "exponential",
+      delay: 2_000,
+    },
+    removeOnComplete: 250,
+    removeOnFail: 250,
+  },
+});
 const exportsWorker = new Worker(
   WORKER_QUEUES.EXPORTS,
   (job: Parameters<typeof processExportJob>[0]) => processExportJob(job, { prisma }),
-  { connection: redis },
+  { connection: redis, concurrency: 5, lockDuration: 120_000 },
 );
 const remindersWorker = new Worker(
   WORKER_QUEUES.TASK_REMINDERS,
   (job: Parameters<typeof processTaskReminderJob>[0]) => processTaskReminderJob(job, { prisma }),
-  { connection: redis },
+  { connection: redis, concurrency: 2, lockDuration: 120_000 },
 );
 const stopVerificationEmailProcessor = startVerificationEmailProcessor({
   jwtAccessSecret: workerEnv.JWT_ACCESS_SECRET,
@@ -72,6 +96,45 @@ const heartbeatMs = parseHeartbeatMs(process.env.WORKER_HEARTBEAT_MS);
 
 console.log("[worker] bootstrap started");
 console.log(`[worker] heartbeat interval ${heartbeatMs}ms`);
+
+exportsWorker.on("completed", (job) => {
+  console.info(JSON.stringify({ event: "worker.job.completed", queue: WORKER_QUEUES.EXPORTS, jobId: job.id }));
+});
+remindersWorker.on("completed", (job) => {
+  console.info(
+    JSON.stringify({ event: "worker.job.completed", queue: WORKER_QUEUES.TASK_REMINDERS, jobId: job.id }),
+  );
+});
+exportsWorker.on("failed", (job, error) => {
+  const payload = {
+    event: "worker.job.failed",
+    queue: WORKER_QUEUES.EXPORTS,
+    jobId: job?.id ?? "unknown",
+    attemptsMade: job?.attemptsMade ?? 0,
+    error: error.message,
+  };
+  console.error(JSON.stringify(payload));
+  void exportsDlq.add("failed-export", payload, {
+    jobId: `dlq:export:${job?.id ?? Date.now()}`,
+    removeOnComplete: 500,
+    removeOnFail: 500,
+  });
+});
+remindersWorker.on("failed", (job, error) => {
+  const payload = {
+    event: "worker.job.failed",
+    queue: WORKER_QUEUES.TASK_REMINDERS,
+    jobId: job?.id ?? "unknown",
+    attemptsMade: job?.attemptsMade ?? 0,
+    error: error.message,
+  };
+  console.error(JSON.stringify(payload));
+  void remindersDlq.add("failed-reminder", payload, {
+    jobId: `dlq:reminder:${job?.id ?? Date.now()}`,
+    removeOnComplete: 500,
+    removeOnFail: 500,
+  });
+});
 
 const timer = setInterval(() => {
   console.log(`[worker] heartbeat ${new Date().toISOString()}`);
@@ -90,6 +153,8 @@ const shutdown = (signal: string) => {
     remindersWorker.close(),
     exportsQueue.close(),
     remindersQueue.close(),
+    exportsDlq.close(),
+    remindersDlq.close(),
     redis.quit(),
     prisma.$disconnect(),
   ]).finally(() => process.exit(0));

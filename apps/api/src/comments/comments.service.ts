@@ -1,5 +1,5 @@
 import { type CommentTargetType, type WorkspaceRole } from "@prisma/client";
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable } from "@nestjs/common";
 import { AppError, ValidationAppError } from "../common/filters/app-error.filter.js";
 import { PrismaClientProvider } from "../common/prisma/prisma-client.provider.js";
 import { RealtimeEventsService } from "../realtime/realtime-events.service.js";
@@ -27,7 +27,7 @@ const canModerateRoles = new Set<WorkspaceRole>(["OWNER", "ADMIN", "MANAGER"]);
 @Injectable()
 export class CommentsService {
   constructor(
-    private readonly prisma: PrismaClientProvider,
+    @Inject(PrismaClientProvider) private readonly prisma: PrismaClientProvider,
     private readonly realtimeEvents: RealtimeEventsService,
   ) {}
 

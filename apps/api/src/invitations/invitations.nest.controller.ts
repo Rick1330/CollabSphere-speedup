@@ -47,6 +47,23 @@ export class InvitationsNestController {
     });
   }
 
+  @Get("workspaces/:workspaceId/invitations")
+  @UseGuards(WorkspaceMembershipGuard)
+  async listWorkspaceInvitations(
+    @Param("workspaceId") workspaceId: string,
+    @ReqRequestId() requestId: string,
+    @CurrentUserId() actorUserId: string,
+  ) {
+    const items = await this.invitationsService.listWorkspaceInvitations({
+      workspaceId,
+      actorUserId,
+    });
+    return wrapSuccessResponse({
+      payload: createListResponsePayload({ items, total: items.length }),
+      requestId,
+    });
+  }
+
   @Public()
   @Get("invitations/:token")
   async getInvitationPreview(

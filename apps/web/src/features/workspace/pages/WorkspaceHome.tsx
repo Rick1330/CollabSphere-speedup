@@ -1,114 +1,61 @@
 import { useEffect, useMemo } from "react";
 import { useParams } from "react-router-dom";
+import { Loader2 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { TopNav } from "@/app/shell/top-nav";
 import { CommandPalette } from "@/app/shell/command-palette";
-import { WorkspaceSidebar, type WorkspaceForSidebar } from "@/features/workspace/components/workspace-sidebar";
+import { WorkspaceSidebar } from "@/features/workspace/components/workspace-sidebar";
 import { WorkspaceHome as WorkspaceHomeContent } from "@/features/workspace/components/workspace-home";
 import { useSidebar } from "@/hooks/use-sidebar";
 import { useCommandPalette } from "@/hooks/use-command-palette";
 import { useStoredWorkspaces, workspaceStore } from "@/features/workspace/store/workspace-store";
-import {
-  WORKSPACE_ROLE_META,
-  getRolePermissions,
-  usePersonaState,
-} from "@/lib/persona-scenario";
-
-const MOCK_USER = { fullName: "Elshaday Tesfaye", email: "jane@collabsphere.app" };
-
-const WORKSPACES: Record<string, WorkspaceForSidebar & { memberCount: number }> = {
-  alpha: {
-    id: "alpha",
-    name: "Project Alpha",
-    description: "Building the next-gen collaboration platform.",
-    icon: "📦",
-    type: "professional",
-    roleLabel: "TECH LEAD",
-    status: "active",
-    memberCount: 6,
-    permissions: { canCreateContent: true, canEditSettings: true, canViewAnalytics: true },
-  },
-  thesis: {
-    id: "thesis",
-    name: "Thesis — Distributed Systems",
-    description: "Final year research workspace.",
-    icon: "🎓",
-    type: "academic",
-    roleLabel: "STUDENT",
-    status: "active",
-    memberCount: 4,
-    permissions: { canCreateContent: true, canEditSettings: false, canViewAnalytics: false },
-  },
-  personal: {
-    id: "personal",
-    name: "Personal Notes",
-    description: "Private notebook for ideas and drafts.",
-    icon: "📝",
-    type: "general",
-    roleLabel: "OWNER",
-    status: "active",
-    memberCount: 1,
-    permissions: { canCreateContent: true, canEditSettings: true, canViewAnalytics: false },
-  },
-  research: {
-    id: "research",
-    name: "Research Group",
-    description: "ML paper collaboration workspace.",
-    icon: "🔬",
-    type: "academic",
-    roleLabel: "REVIEWER",
-    status: "archived",
-    memberCount: 5,
-    permissions: { canCreateContent: false, canEditSettings: true, canViewAnalytics: false },
-  },
-};
-
-const FALLBACK = WORKSPACES.alpha;
+import { useWorkspaceRouteContext } from "@/hooks/use-workspace-route-context";
+import { useCurrentAccount } from "@/lib/auth-session";
+import { listMineWorkspaceRows } from "@/api/adapters/workspaces";
 
 const WorkspaceHomePage = () => {
-  const { workspaceId } = useParams<{ workspaceId: string }>();
+  const { workspaceId: paramId } = useParams<{ workspaceId: string }>();
+  const workspaceId = paramId?.trim() ?? "";
   const { collapsed, toggle } = useSidebar();
   const palette = useCommandPalette();
   const stored = useStoredWorkspaces();
+  const account = useCurrentAccount();
+  const { sidebar, myRole, isLoading, isError, refetch } = useWorkspaceRouteContext();
 
-  const persona = usePersonaState();
+  const mineQ = useQuery({
+    queryKey: ["workspaces", "mine"],
+    queryFn: listMineWorkspaceRows,
+    staleTime: 30_000,
+  });
 
-  const fromStore = useMemo(
-    () => (workspaceId ? stored.find((w) => w.id === workspaceId) : undefined),
-    [workspaceId, stored],
+  const mineRow = useMemo(
+    () => mineQ.data?.find((r) => r.workspace.id === workspaceId),
+    [mineQ.data, workspaceId],
   );
 
   const workspace = useMemo(() => {
-    const base = (() => {
-      if (!workspaceId) return { ...FALLBACK, id: "alpha" };
-      if (WORKSPACES[workspaceId]) return WORKSPACES[workspaceId];
-      if (fromStore) {
-        return {
-          id: fromStore.id,
-          name: fromStore.name,
-          description: fromStore.description || "Your new workspace.",
-          icon: fromStore.icon || "✨",
-          type: fromStore.type,
-          roleLabel: fromStore.roleLabel,
-          status: fromStore.status,
-          memberCount: 1,
-          permissions: { canCreateContent: true, canEditSettings: true, canViewAnalytics: true },
-        } satisfies WorkspaceForSidebar & { memberCount: number };
-      }
-      return { ...FALLBACK, id: workspaceId };
-    })();
-    // Persona overlay: let the demo switcher drive role label, type, status, perms.
+    if (!sidebar) return null;
     return {
-      ...base,
-      type: persona.workspaceType,
-      roleLabel: WORKSPACE_ROLE_META[persona.workspaceRole].label.toUpperCase(),
-      status: persona.scenario === "archived" ? ("archived" as const) : base.status,
-      permissions: getRolePermissions(persona.workspaceRole),
+      ...sidebar,
+      memberCount: mineRow?.memberCount ?? 0,
+      documentCount: mineRow?.documentCount,
     };
-  }, [workspaceId, fromStore, persona]);
+  }, [sidebar, mineRow]);
+
+  const fromStore = useMemo(
+    () => (workspaceId ? stored.find((w) => w.id === workspaceId) : undefined),
+    [stored, workspaceId],
+  );
+
+  const currentUser = account
+    ? { fullName: account.fullName, email: account.email }
+    : { fullName: "Guest", email: "" };
 
   useEffect(() => {
-    document.title = `${workspace.name} — CollabSphere`;
-  }, [workspace.name]);
+    if (sidebar?.name) {
+      document.title = `${sidebar.name} — CollabSphere`;
+    }
+  }, [sidebar?.name]);
 
   useEffect(() => {
     if (workspaceId && workspaceStore.getById({ workspaceId })) {
@@ -116,12 +63,47 @@ const WorkspaceHomePage = () => {
     }
   }, [workspaceId]);
 
+  if (!workspaceId) {
+    return (
+      <div className="app-light min-h-screen flex items-center justify-center text-stone-500 text-sm">
+        Missing workspace in URL.
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="app-light min-h-screen flex items-center justify-center gap-2 text-stone-500 text-sm">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        Loading workspace…
+      </div>
+    );
+  }
+
+  if (isError || !sidebar || !myRole || !workspace) {
+    return (
+      <div className="app-light min-h-screen flex flex-col items-center justify-center gap-4 px-6 text-center">
+        <p className="text-stone-700 font-medium">Couldn’t load this workspace.</p>
+        <button
+          type="button"
+          onClick={() => {
+            void mineQ.refetch();
+            refetch();
+          }}
+          className="h-10 px-4 rounded-lg bg-teal-600 text-white text-sm font-medium hover:bg-teal-500"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="app-light min-h-screen flex">
-      <WorkspaceSidebar workspace={workspace} collapsed={collapsed} onToggle={toggle} />
+      <WorkspaceSidebar workspace={sidebar} collapsed={collapsed} onToggle={toggle} />
 
       <div className="flex-1 min-w-0 flex flex-col">
-        <TopNav user={MOCK_USER} unreadCount={3} onOpenPalette={palette.toggle} />
+        <TopNav user={currentUser} unreadCount={3} onOpenPalette={palette.toggle} />
         <WorkspaceHomeContent
           workspace={workspace}
           templateName={fromStore?.templateName ?? null}

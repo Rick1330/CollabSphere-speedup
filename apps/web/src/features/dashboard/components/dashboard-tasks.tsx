@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { AlertCircle, ArrowRight, CheckSquare } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SectionError } from "@/components/shared/section-error";
@@ -34,21 +34,25 @@ const statusStyles: Record<Status, string> = {
 export const DashboardTasks = () => {
   const [state, setState] = useState<State>("loading");
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [loadError, setLoadError] = useState<unknown>(undefined);
 
-  useEffect(() => {
-    let cancelled = false;
+  const load = useCallback(() => {
     setState("loading");
+    setLoadError(undefined);
     getDashboardTasks()
       .then((data) => {
-        if (cancelled) return;
         setTasks(data);
         setState(data.length === 0 ? "empty" : "loaded");
       })
-      .catch(() => {
-        if (!cancelled) setState("error");
+      .catch((err: unknown) => {
+        setLoadError(err);
+        setState("error");
       });
-    return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   return (
     <section aria-labelledby="tasks-heading">
@@ -66,7 +70,7 @@ export const DashboardTasks = () => {
       {state === "loading" && <Loading />}
       {state === "empty" && <Empty />}
       {state === "error" && (
-        <SectionError sectionName="tasks" requestId="req_7c1e9d12" onRetry={() => setState("loaded")} />
+        <SectionError sectionName="tasks" error={loadError} onRetry={() => load()} />
       )}
       {state === "loaded" && (
         <div className="space-y-0.5">

@@ -1,11 +1,12 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import * as apiClient from "@/api/client";
 import {
   fetchMembers,
   fetchPendingInvitations,
-  getAssignableRoles,
-  getRoleLabel,
   inviteMember,
   revokeInvitation,
+  getAssignableRoles,
+  getRoleLabel,
   sortMembers,
   type WorkspaceMember,
   type WorkspaceRole,
@@ -53,30 +54,66 @@ describe("api/adapters/members", () => {
     ]);
   });
 
-  it("fetchMembers returns an Owner for any workspace id (auto-seeds)", async () => {
-    const res = await fetchMembers("brand-new-ws");
-    expect(res.data.items.length).toBeGreaterThan(0);
-    expect(res.data.items.some((m) => m.role === "OWNER")).toBe(true);
+  it("fetchMembers maps live API payload", async () => {
+    const requestSpy = vi.spyOn(apiClient, "request").mockResolvedValueOnce({
+      data: {
+        items: [
+          {
+            id: "mem-1",
+            role: "OWNER",
+            joinedAt: "2026-01-01T00:00:00.000Z",
+            lastAccessedAt: "2026-01-02T00:00:00.000Z",
+            user: {
+              id: "user-1",
+              fullName: "Owner User",
+              email: "owner@example.com",
+              avatarUrl: null,
+            },
+          },
+        ],
+      },
+    } as never);
+    const res = await fetchMembers("ws-1");
+    expect(res.data.items[0]?.membershipId).toBe("mem-1");
+    expect(res.data.items[0]?.role).toBe("OWNER");
+    requestSpy.mockRestore();
   });
 
-  it("inviteMember + fetchPendingInvitations + revokeInvitation round-trip", async () => {
-    const ws = `test-ws-${Date.now()}`;
-    await inviteMember(ws, { email: "new.user@example.com", role: "MEMBER" }, "OWNER");
-    const pending = await fetchPendingInvitations(ws);
-    const inv = pending.data.items.find((i) => i.email === "new.user@example.com");
-    expect(inv).toBeDefined();
-    expect(inv!.role).toBe("MEMBER");
-
-    await revokeInvitation(ws, inv!.id, "OWNER");
-    const after = await fetchPendingInvitations(ws);
-    expect(after.data.items.find((i) => i.id === inv!.id)).toBeUndefined();
+  it("fetchPendingInvitations maps workspace invitations endpoint", async () => {
+    const requestSpy = vi.spyOn(apiClient, "request").mockResolvedValueOnce({
+      data: {
+        items: [
+          {
+            id: "inv-1",
+            email: "new.user@example.com",
+            role: "MEMBER",
+            invitedById: "user-1",
+            createdAt: "2026-01-01T00:00:00.000Z",
+            expiresAt: "2999-01-01T00:00:00.000Z",
+          },
+        ],
+      },
+    } as never);
+    const pending = await fetchPendingInvitations("ws-1");
+    expect(pending.data.items[0]?.id).toBe("inv-1");
+    expect(pending.data.items[0]?.status).toBe("pending");
+    requestSpy.mockRestore();
   });
 
-  it("inviteMember rejects an email that is already a workspace member", async () => {
-    const ws = `test-ws-dup-${Date.now()}`;
-    // Auto-seeded workspace puts Elshaday Tesfaye as Owner with this email.
-    await expect(
-      inviteMember(ws, { email: "jane@collabsphere.app", role: "MEMBER" }, "OWNER"),
-    ).rejects.toThrow(/already a member/i);
+  it("inviteMember and revokeInvitation call live invitation endpoints", async () => {
+    const requestSpy = vi.spyOn(apiClient, "request").mockResolvedValue({} as never);
+    await inviteMember("ws-1", { email: "new.user@example.com", role: "MEMBER" }, "OWNER");
+    await revokeInvitation("ws-1", "inv-1", "OWNER");
+    expect(requestSpy).toHaveBeenNthCalledWith(
+      1,
+      "/workspaces/ws-1/invitations",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(requestSpy).toHaveBeenNthCalledWith(
+      2,
+      "/workspaces/ws-1/invitations/inv-1/revoke",
+      expect.objectContaining({ method: "POST" }),
+    );
+    requestSpy.mockRestore();
   });
 });

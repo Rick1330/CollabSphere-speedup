@@ -1,117 +1,71 @@
-import { useEffect, useMemo } from "react";
-import { useParams } from "react-router-dom";
+import { useEffect } from "react";
+import { Loader2 } from "lucide-react";
 import { TopNav } from "@/app/shell/top-nav";
 import { CommandPalette } from "@/app/shell/command-palette";
-import {
-  WorkspaceSidebar,
-  type WorkspaceForSidebar,
-} from "@/features/workspace/components/workspace-sidebar";
+import { WorkspaceSidebar } from "@/features/workspace/components/workspace-sidebar";
 import { TaskList } from "@/features/tasks/components/task-list";
 import { useSidebar } from "@/hooks/use-sidebar";
 import { useCommandPalette } from "@/hooks/use-command-palette";
-
-const MOCK_USER = { fullName: "Elshaday Tesfaye", email: "jane@collabsphere.app" };
-
-type WorkspaceWithRole = WorkspaceForSidebar & {
-  myRole: "OWNER" | "ADMIN" | "MANAGER" | "MEMBER" | "VIEWER";
-};
-
-const WORKSPACES: Record<string, WorkspaceWithRole> = {
-  alpha: {
-    id: "alpha",
-    name: "Project Alpha",
-    description: "Building the next-gen collaboration platform.",
-    icon: "📦",
-    type: "professional",
-    roleLabel: "TECH LEAD",
-    status: "active",
-    myRole: "ADMIN",
-    permissions: {
-      canCreateContent: true,
-      canEditSettings: true,
-      canViewAnalytics: true,
-    },
-  },
-  thesis: {
-    id: "thesis",
-    name: "Thesis — Distributed Systems",
-    description: "Final year research workspace.",
-    icon: "🎓",
-    type: "academic",
-    roleLabel: "STUDENT",
-    status: "active",
-    myRole: "MEMBER",
-    permissions: {
-      canCreateContent: true,
-      canEditSettings: false,
-      canViewAnalytics: false,
-    },
-  },
-  personal: {
-    id: "personal",
-    name: "Personal Notes",
-    description: "Private notebook for ideas and drafts.",
-    icon: "📝",
-    type: "general",
-    roleLabel: "OWNER",
-    status: "active",
-    myRole: "OWNER",
-    permissions: {
-      canCreateContent: true,
-      canEditSettings: true,
-      canViewAnalytics: false,
-    },
-  },
-  research: {
-    id: "research",
-    name: "Research Group",
-    description: "ML paper collaboration workspace.",
-    icon: "🔬",
-    type: "academic",
-    roleLabel: "REVIEWER",
-    status: "archived",
-    myRole: "MEMBER",
-    permissions: {
-      canCreateContent: false,
-      canEditSettings: true,
-      canViewAnalytics: false,
-    },
-  },
-};
-
-const FALLBACK = WORKSPACES.alpha;
+import { useWorkspaceRouteContext } from "@/hooks/use-workspace-route-context";
+import { useCurrentAccount } from "@/lib/auth-session";
 
 const TasksList = () => {
-  const { workspaceId } = useParams<{ workspaceId: string }>();
   const { collapsed, toggle } = useSidebar();
   const palette = useCommandPalette();
-
-  const workspace = useMemo(
-    () =>
-      (workspaceId && WORKSPACES[workspaceId]) || {
-        ...FALLBACK,
-        id: workspaceId || "alpha",
-      },
-    [workspaceId],
-  );
+  const account = useCurrentAccount();
+  const { workspaceId, sidebar, myRole, isLoading, isError, refetch } = useWorkspaceRouteContext();
 
   useEffect(() => {
-    document.title = `Tasks (List) — ${workspace.name} — CollabSphere`;
-  }, [workspace.name]);
+    if (sidebar?.name) {
+      document.title = `Tasks (List) — ${sidebar.name} — CollabSphere`;
+    }
+  }, [sidebar?.name]);
+
+  const currentUser = account
+    ? { fullName: account.fullName, email: account.email }
+    : { fullName: "Guest", email: "" };
+
+  if (!workspaceId) {
+    return (
+      <div className="app-light min-h-screen flex items-center justify-center text-stone-500 text-sm">
+        Missing workspace in URL.
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="app-light min-h-screen flex items-center justify-center gap-2 text-stone-500 text-sm">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        Loading workspace…
+      </div>
+    );
+  }
+
+  if (isError || !sidebar || !myRole) {
+    return (
+      <div className="app-light min-h-screen flex flex-col items-center justify-center gap-4 px-6 text-center">
+        <p className="text-stone-700 font-medium">Couldn’t load tasks for this workspace.</p>
+        <button
+          type="button"
+          onClick={() => refetch()}
+          className="h-10 px-4 rounded-lg bg-teal-600 text-white text-sm font-medium hover:bg-teal-500"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="app-light min-h-screen flex bg-stone-50">
-      <WorkspaceSidebar workspace={workspace} collapsed={collapsed} onToggle={toggle} />
+      <WorkspaceSidebar workspace={sidebar} collapsed={collapsed} onToggle={toggle} />
 
       <div className="flex-1 min-w-0 flex flex-col h-screen">
-        <TopNav user={MOCK_USER} unreadCount={3} onOpenPalette={palette.toggle} />
+        <TopNav user={currentUser} unreadCount={3} onOpenPalette={palette.toggle} />
 
         <main className="flex-1 min-h-0 flex flex-col overflow-hidden">
-          <TaskList
-            workspaceId={workspace.id}
-            workspaceStatus={workspace.status}
-            myRole={workspace.myRole}
-          />
+          <TaskList workspaceId={workspaceId} workspaceStatus={sidebar.status} myRole={myRole} />
         </main>
       </div>
 

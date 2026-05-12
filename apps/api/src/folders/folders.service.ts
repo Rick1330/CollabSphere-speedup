@@ -1,11 +1,11 @@
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { AppError, ValidationAppError } from "../common/filters/app-error.filter.js";
 import { PrismaClientProvider } from "../common/prisma/prisma-client.provider.js";
 
 @Injectable()
 export class FoldersService {
-  constructor(private readonly prisma: PrismaClientProvider) {}
+  constructor(@Inject(PrismaClientProvider) private readonly prisma: PrismaClientProvider) {}
 
   private async requireWorkspaceMembership(actorUserId: string, workspaceId: string) {
     const membership = await this.prisma.workspaceMember.findFirst({

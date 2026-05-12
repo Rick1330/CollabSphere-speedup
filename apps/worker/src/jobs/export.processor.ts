@@ -23,6 +23,9 @@ export const processExportJob = async (
   if (!exportJob) {
     return { skipped: true };
   }
+  if (exportJob.status === "completed" && exportJob.outputStorageKey) {
+    return { skipped: true, reason: "already_completed", storageKey: exportJob.outputStorageKey };
+  }
   await deps.prisma.exportJob.update({
     where: { id: exportJob.id },
     data: { status: "processing" },

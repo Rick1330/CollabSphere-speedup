@@ -9,10 +9,10 @@ export class AdminOnlyGuard implements CanActivate {
   constructor(private readonly reflector: Reflector) {}
 
   canActivate(context: ExecutionContext): boolean {
-    const adminOnly = this.reflector.getAllAndOverride<boolean>(ADMIN_ONLY_KEY, [
-      context.getHandler(),
-      context.getClass(),
-    ]);
+    const adminOnly =
+      this.reflector?.getAllAndOverride<boolean>(ADMIN_ONLY_KEY, [context.getHandler(), context.getClass()]) ??
+      Reflect.getMetadata(ADMIN_ONLY_KEY, context.getHandler()) ??
+      Reflect.getMetadata(ADMIN_ONLY_KEY, context.getClass());
     if (!adminOnly) return true;
     const request = context.switchToHttp().getRequest<Request>();
     const role = request.user?.globalRole;

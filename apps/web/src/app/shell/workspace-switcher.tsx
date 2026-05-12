@@ -8,6 +8,7 @@
 
 import { useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import {
   Briefcase,
   Check,
@@ -26,6 +27,8 @@ import {
 } from "@/components/ui/popover";
 import { useStoredWorkspaces, workspaceStore } from "@/features/workspace/store/workspace-store";
 import { cn } from "@/lib/utils";
+import { listMineWorkspaceRows } from "@/api/adapters/workspaces";
+import { getWorkspaceRoleLabel } from "@/lib/role-labels";
 
 type WSType = "professional" | "academic" | "general";
 
@@ -35,35 +38,7 @@ interface WSItem {
   type: WSType;
   description?: string;
   roleLabel?: string;
-  seeded?: boolean;
 }
-
-const SEEDED: WSItem[] = [
-  {
-    id: "alpha",
-    name: "Project Alpha",
-    type: "professional",
-    description: "Product launch · Q3",
-    roleLabel: "OWNER",
-    seeded: true,
-  },
-  {
-    id: "thesis",
-    name: "Thesis — Distributed Systems",
-    type: "academic",
-    description: "Research notebook",
-    roleLabel: "EDITOR",
-    seeded: true,
-  },
-  {
-    id: "personal",
-    name: "Personal Notes",
-    type: "general",
-    description: "Drafts & journal",
-    roleLabel: "OWNER",
-    seeded: true,
-  },
-];
 
 const TYPE_META: Record<
   WSType,
@@ -104,7 +79,12 @@ export const WorkspaceSwitcher = () => {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
 
-  // Merge stored + seeded (stored take precedence on id collision)
+  const mineQ = useQuery({
+    queryKey: ["workspaces", "mine"],
+    queryFn: listMineWorkspaceRows,
+    staleTime: 30_000,
+  });
+
   const items: WSItem[] = useMemo(() => {
     const storedItems: WSItem[] = stored
       .filter((w) => w.status === "active")
@@ -116,9 +96,18 @@ export const WorkspaceSwitcher = () => {
         roleLabel: w.roleLabel,
       }));
     const storedIds = new Set(storedItems.map((w) => w.id));
-    const merged = [...storedItems, ...SEEDED.filter((s) => !storedIds.has(s.id))];
-    return merged;
-  }, [stored]);
+    const fromApi: WSItem[] = (mineQ.data ?? [])
+      .filter((row) => row.workspace.status === "active")
+      .filter((row) => !storedIds.has(row.workspace.id))
+      .map((row) => ({
+        id: row.workspace.id,
+        name: row.workspace.name,
+        type: row.workspace.type,
+        description: row.workspace.description || "Workspace",
+        roleLabel: getWorkspaceRoleLabel(row.workspace.type, row.role),
+      }));
+    return [...storedItems, ...fromApi];
+  }, [stored, mineQ.data]);
 
   // Active workspace from URL (e.g. /w/thesis/...)
   const activeId = useMemo(() => {

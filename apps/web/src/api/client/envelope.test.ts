@@ -15,7 +15,15 @@ describe("api envelope parser", () => {
     expect(parsed.extraData.token).toBe("abc");
   });
 
-  it("parses single envelope payload", () => {
+  it("parses single envelope with nested resource (Nest)", () => {
+    const user = parseApiSingleEnvelope<{ id: string }>({
+      data: { resource: { id: "u1" } },
+      meta: { requestId: "r1" },
+    });
+    expect(user.id).toBe("u1");
+  });
+
+  it("parses legacy flat single envelope data", () => {
     const user = parseApiSingleEnvelope<{ id: string }>({
       data: { id: "u1" },
     });

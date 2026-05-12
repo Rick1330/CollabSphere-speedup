@@ -1,4 +1,4 @@
-import { type CanActivate, type ExecutionContext, Injectable } from "@nestjs/common";
+import { Inject, type CanActivate, type ExecutionContext, Injectable } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import type { WorkspaceRole } from "@prisma/client";
 import type { Request } from "express";
@@ -18,7 +18,7 @@ const roleRank: Record<WorkspaceRole, number> = {
 export class WorkspaceMembershipGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
-    private readonly prisma: PrismaClientProvider,
+    @Inject(PrismaClientProvider) private readonly prisma: PrismaClientProvider,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {

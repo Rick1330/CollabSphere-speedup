@@ -39,6 +39,38 @@ export class AuthSessionService {
     return apiRuntimeEnv.REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000;
   }
 
+  private async appendSessionAuditLog(input: {
+    actionKey: string;
+    severity?: "info" | "warn" | "error";
+    actorId?: string | null;
+    actorEmail?: string | null;
+    actorGlobalRole?: string | null;
+    ipAddress?: string | null;
+    userAgent?: string | null;
+    metadata?: Record<string, unknown>;
+  }) {
+    try {
+      await this.prisma.auditLog.create({
+        data: {
+          severity: input.severity ?? "info",
+          actionKey: input.actionKey,
+          actorId: input.actorId ?? null,
+          actorEmail: input.actorEmail ?? null,
+          actorGlobalRole: input.actorGlobalRole ?? null,
+          workspaceId: null,
+          targetType: "session",
+          targetId: input.actorId ?? null,
+          ipAddress: input.ipAddress?.slice(0, 64) ?? null,
+          userAgent: input.userAgent ?? null,
+          metadata: (input.metadata ?? {}) as never,
+        },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[api] failed to append auth session audit log: ${message}`);
+    }
+  }
+
   async issueCollabToken(input: {
     userId: string;
     workspaceId: string;
@@ -187,6 +219,14 @@ export class AuthSessionService {
       ipAddress: input.ipAddress,
       userAgent: input.userAgent,
     });
+    await this.appendSessionAuditLog({
+      actionKey: "auth.login",
+      actorId: user.id,
+      actorEmail: user.email,
+      actorGlobalRole: user.globalRole,
+      ipAddress: input.ipAddress,
+      userAgent: input.userAgent,
+    });
 
     return {
       ...tokens,
@@ -217,17 +257,40 @@ export class AuthSessionService {
     const existing = await this.prisma.refreshToken.findFirst({
       where: {
         tokenHash: hash,
-        revokedAt: null,
-        expiresAt: { gt: new Date() },
       },
       include: {
         user: true,
       },
     });
-    if (!existing || !existing.user) {
+    if (!existing || !existing.user || existing.expiresAt.getTime() <= Date.now()) {
       throw new AppError({
         code: "REFRESH_TOKEN_INVALID",
         message: "Refresh token is invalid or expired",
+      });
+    }
+    if (existing.revokedAt) {
+      await this.prisma.refreshToken.updateMany({
+        where: {
+          userId: existing.userId,
+          revokedAt: null,
+        },
+        data: { revokedAt: new Date() },
+      });
+      await this.appendSessionAuditLog({
+        actionKey: "auth.refresh.replay_detected",
+        severity: "warn",
+        actorId: existing.user.id,
+        actorEmail: existing.user.email,
+        actorGlobalRole: existing.user.globalRole,
+        ipAddress: input.ipAddress,
+        userAgent: input.userAgent,
+        metadata: {
+          compromisedTokenId: existing.id,
+        },
+      });
+      throw new AppError({
+        code: "REFRESH_TOKEN_INVALID",
+        message: "Refresh token replay detected",
       });
     }
     if (!existing.user.isActive || existing.user.deletedAt) {
@@ -265,6 +328,17 @@ export class AuthSessionService {
       email: existing.user.email,
       globalRole: existing.user.globalRole,
     });
+    await this.appendSessionAuditLog({
+      actionKey: "auth.refresh",
+      actorId: existing.user.id,
+      actorEmail: existing.user.email,
+      actorGlobalRole: existing.user.globalRole,
+      ipAddress: input.ipAddress,
+      userAgent: input.userAgent,
+      metadata: {
+        rotatedFromTokenId: existing.id,
+      },
+    });
 
     return { accessToken, refreshToken: newRaw };
   }
@@ -275,6 +349,16 @@ export class AuthSessionService {
       return;
     }
     const hash = hashSha256(raw);
+    const existing = await this.prisma.refreshToken.findFirst({
+      where: {
+        tokenHash: hash,
+      },
+      include: {
+        user: {
+          select: { id: true, email: true, globalRole: true },
+        },
+      },
+    });
     await this.prisma.refreshToken.updateMany({
       where: {
         tokenHash: hash,
@@ -282,6 +366,14 @@ export class AuthSessionService {
       },
       data: { revokedAt: new Date() },
     });
+    if (existing?.user) {
+      await this.appendSessionAuditLog({
+        actionKey: "auth.logout",
+        actorId: existing.user.id,
+        actorEmail: existing.user.email,
+        actorGlobalRole: existing.user.globalRole,
+      });
+    }
   }
 
   async logoutAll(userId: string): Promise<void> {
@@ -291,6 +383,16 @@ export class AuthSessionService {
         revokedAt: null,
       },
       data: { revokedAt: new Date() },
+    });
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true, globalRole: true },
+    });
+    await this.appendSessionAuditLog({
+      actionKey: "auth.logout_all",
+      actorId: userId,
+      actorEmail: user?.email ?? null,
+      actorGlobalRole: user?.globalRole ?? null,
     });
   }
 
@@ -414,6 +516,12 @@ export class AuthSessionService {
         where: { userId: record.userId, revokedAt: null },
         data: { revokedAt: now },
       });
+    });
+    await this.appendSessionAuditLog({
+      actionKey: "auth.password_reset",
+      actorId: record.userId,
+      actorEmail: record.user.email,
+      actorGlobalRole: record.user.globalRole,
     });
     return { message: "Password updated successfully." };
   }

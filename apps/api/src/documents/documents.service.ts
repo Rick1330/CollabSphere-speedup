@@ -1,5 +1,5 @@
 import type { DocumentStatus, Prisma, WorkspaceRole } from "@prisma/client";
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable } from "@nestjs/common";
 import { AppError, ValidationAppError } from "../common/filters/app-error.filter.js";
 import { PrismaClientProvider } from "../common/prisma/prisma-client.provider.js";
 import { parseDocumentTemplateContent } from "../common/templates/template-schema.js";
@@ -76,7 +76,7 @@ const parseRequiredBlockTypesFromProperties = (value: unknown): Set<string> => {
 @Injectable()
 export class DocumentsService {
   constructor(
-    private readonly prisma: PrismaClientProvider,
+    @Inject(PrismaClientProvider) private readonly prisma: PrismaClientProvider,
     private readonly realtimeEvents?: RealtimeEventsService,
   ) {}
 

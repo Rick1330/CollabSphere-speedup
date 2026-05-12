@@ -15,7 +15,7 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { createOpaqueId } from "@/lib/secure-random";
-import { workspaceStore } from "@/features/workspace/store/workspace-store";
+import { createWorkspace } from "@/api/adapters/workspaces";
 import {
   WORKSPACE_TEMPLATES,
   getWorkspaceTemplate,
@@ -111,26 +111,30 @@ export const CreateWorkspaceWizard = () => {
       return;
     }
     setIsCreating(true);
-    await new Promise((r) => setTimeout(r, 700));
-    const ws = workspaceStore.create({
-      name: data.name.trim(),
-      description: data.description.trim(),
-      icon: data.icon.trim() || undefined,
-      type: data.type ?? "general",
-      templateId: data.templateId,
-      templateName: data.templateName,
-    });
-    setIsCreating(false);
-    const tpl = data.templateId ? getWorkspaceTemplate(data.templateId) : null;
-    const seededFolders = tpl?.preview.folders.length ?? 0;
-    const seededDocs = tpl?.preview.documents.length ?? 0;
-    toast.success(`"${ws.name}" is ready`, {
-      description:
-        seededFolders + seededDocs > 0
-          ? `Seeded ${seededFolders} folders and ${seededDocs} starter docs.`
-          : "An empty workspace, ready for you to shape.",
-    });
-    navigate(`/w/${ws.id}`);
+    try {
+      const ws = await createWorkspace({
+        name: data.name.trim(),
+        description: data.description.trim(),
+        icon: data.icon.trim() || undefined,
+        type: data.type ?? "general",
+        // Frontend templates are currently local-only and don't map 1:1 to DB template IDs.
+        templateId: null,
+      });
+      const tpl = data.templateId ? getWorkspaceTemplate(data.templateId) : null;
+      const seededFolders = tpl?.preview.folders.length ?? 0;
+      const seededDocs = tpl?.preview.documents.length ?? 0;
+      toast.success(`"${ws.name}" is ready`, {
+        description:
+          seededFolders + seededDocs > 0
+            ? "Workspace created. Template seeding will appear as API-backed templates are enabled."
+            : "An empty workspace, ready for you to shape.",
+      });
+      navigate(`/w/${ws.id}`);
+    } catch {
+      setServerError("Workspace creation failed. Please try again.");
+    } finally {
+      setIsCreating(false);
+    }
   };
 
   const stepTitle = {

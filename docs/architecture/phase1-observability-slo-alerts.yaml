@@ -1,0 +1,46 @@
+version: 1
+owner: platform
+phase: phase1
+slo_alerts:
+  - service: auth
+    objective: "99.5% successful auth endpoint requests over 30m"
+    sli:
+      metric: api.request.completed
+      filters:
+        route_prefix: "/api/v1/auth"
+        status_class: "2xx|3xx"
+    burn_rate_alerts:
+      - window: 5m
+        threshold: 14.4
+      - window: 1h
+        threshold: 6
+  - service: docs
+    objective: "p95 API latency under 500ms over 30m"
+    sli:
+      metric: api.request.completed
+      filters:
+        route_prefix: "/api/v1/documents"
+      aggregation: p95(latencyMs)
+    alerts:
+      - window: 15m
+        threshold_ms: 500
+  - service: realtime
+    objective: "99.0% successful realtime socket authentication over 30m"
+    sli:
+      metric: realtime.connection.accepted
+      error_metric: realtime.connection.rejected
+    burn_rate_alerts:
+      - window: 5m
+        threshold: 10
+      - window: 1h
+        threshold: 4
+  - service: queue-processing
+    objective: "99.0% queue jobs complete without DLQ over 1h"
+    sli:
+      metric: worker.job.completed
+      error_metric: worker.job.failed
+    burn_rate_alerts:
+      - window: 15m
+        threshold: 6
+      - window: 6h
+        threshold: 3

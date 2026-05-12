@@ -1,0 +1,17 @@
+{
+  "phase": "phase-0",
+  "minimumCiGates": [
+    "lint",
+    "typecheck",
+    "unit-tests",
+    "integration-tests",
+    "build-web",
+    "build-api"
+  ],
+  "minimumTestSuites": [
+    "tests/unit/phase0-guardrails.test.ts",
+    "tests/unit/phase0-ui-guardrails.test.ts",
+    "tests/unit/phase0-test-strategy-gates.test.ts",
+    "tests/integration/nest-api-http.test.ts"
+  ]
+}
