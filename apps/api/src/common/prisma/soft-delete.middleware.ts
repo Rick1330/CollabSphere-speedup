@@ -16,6 +16,7 @@ export const SOFT_DELETE_MODELS = [
   "Invitation",
   "Folder",
   "Document",
+  "DocumentUpdate",
   "TaskColumn",
   "Task",
   "TaskDocumentLink",

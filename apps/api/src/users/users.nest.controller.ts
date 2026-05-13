@@ -47,4 +47,17 @@ export class UsersNestController {
       requestId,
     });
   }
+
+  @Put("me/avatar")
+  async updateAvatar(
+    @ReqRequestId() requestId: string,
+    @CurrentUserId() userId: string,
+    @Body() body: { avatarUrl: string | null },
+  ) {
+    const data = await this.usersService.updateMe(userId, { avatarUrl: body.avatarUrl });
+    return wrapSuccessResponse({
+      payload: createSingleResourcePayload(data),
+      requestId,
+    });
+  }
 }
