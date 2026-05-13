@@ -35,6 +35,11 @@ export interface CollabPersistenceAdapter {
     contentPlaintext: string;
     updatedAt: Date;
   }): Promise<void>;
+  persistUpdate(input: {
+    documentId: string;
+    workspaceId: string;
+    update: Uint8Array;
+  }): Promise<void>;
 }
 
 const parseRoomDocumentId = (roomName: string) => {
@@ -172,6 +177,23 @@ export const createCollabHooks = (input: {
     );
   };
 
+  const onUpdate = async ({
+    documentName,
+    update,
+    context,
+  }: {
+    documentName: string;
+    update: Uint8Array;
+    context: CollabContext;
+  }) => {
+    const documentId = parseRoomDocumentId(documentName);
+    await input.adapter.persistUpdate({
+      documentId,
+      workspaceId: context.workspaceId,
+      update,
+    });
+  };
+
   const onLoadDocument = async ({ documentName }: onLoadDocumentPayload<CollabContext>) => {
     const startedAt = process.hrtime.bigint();
     const documentId = parseRoomDocumentId(documentName);
@@ -217,6 +239,7 @@ export const createCollabHooks = (input: {
     onAuthenticate,
     onLoadDocument,
     onStoreDocument,
+    onUpdate,
   };
 };
 

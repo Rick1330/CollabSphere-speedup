@@ -127,6 +127,15 @@ const collabServer = createCollabServer({
         });
       });
     },
+    async persistUpdate({ documentId, workspaceId, update }) {
+      await prisma.documentUpdate.create({
+        data: {
+          documentId,
+          workspaceId,
+          update: toPrismaBytes(update),
+        },
+      });
+    },
   },
 });
 

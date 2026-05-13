@@ -1,18 +1,3 @@
-/**
- * Tests for the `G C` global shortcut (create new document).
- *
- * Behavior we lock down:
- *  - When the user is on `/w/:workspaceId/...`, pressing `g c` navigates
- *    to `/w/:workspaceId/documents/new`.
- *  - When no workspace is in the URL, the shortcut redirects to
- *    `/workspaces` and surfaces a helpful toast.
- *  - Read-only personas (viewer / stakeholder) cannot create documents —
- *    the shortcut shows a permission toast and never navigates.
- *  - Guests (no session) get a silent no-op.
- *
- * The shortcut layer is exercised through the real `GlobalShortcuts`
- * component to avoid drifting from the production wiring.
- */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, fireEvent, render } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
@@ -62,8 +47,16 @@ describe("GlobalShortcuts — `g c` create document", () => {
   });
 
   it("derives workspaceId from the URL and navigates to the new-document route", async () => {
-    // u_jane = ADMIN, can create documents.
-    authSession.signIn("u_jane");
+    authSession.signIn("u_jane", {
+      user: {
+        id: "u_jane",
+        email: "jane@test.com",
+        fullName: "Jane Doe",
+        globalRole: "ADMIN",
+        defaultWorkspaceRole: "OWNER",
+        defaultWorkspaceType: "professional",
+      },
+    });
     const { getByTestId } = renderAt("/w/alpha/dashboard");
 
     await act(async () => {
@@ -75,7 +68,16 @@ describe("GlobalShortcuts — `g c` create document", () => {
   });
 
   it("redirects to /workspaces with a toast when no workspace is in the URL", async () => {
-    authSession.signIn("u_jane");
+    authSession.signIn("u_jane", {
+      user: {
+        id: "u_jane",
+        email: "jane@test.com",
+        fullName: "Jane Doe",
+        globalRole: "ADMIN",
+        defaultWorkspaceRole: "OWNER",
+        defaultWorkspaceType: "professional",
+      },
+    });
     const { getByTestId } = renderAt("/dashboard");
 
     await act(async () => {
@@ -93,18 +95,16 @@ describe("GlobalShortcuts — `g c` create document", () => {
   });
 
   it("blocks creation for read-only roles (viewer/stakeholder)", async () => {
-    // Find a viewer-style persona; fall back to mocking the role guard if
-    // the seed list doesn't contain one. We grep the mock account list.
-    const accounts = await import("@/lib/mock-accounts");
-    const viewer = accounts.MOCK_ACCOUNTS.find(
-      (a) => a.defaultWorkspaceRole === "VIEWER",
-    );
-    if (!viewer) {
-      // Defensive: if no viewer account exists, this assertion would be
-      // meaningless. Surface an explicit failure so the seed gap is visible.
-      throw new Error("Expected a VIEWER mock account for permission test");
-    }
-    authSession.signIn(viewer.id);
+    authSession.signIn("u_viewer", {
+      user: {
+        id: "u_viewer",
+        email: "viewer@test.com",
+        fullName: "Viewer User",
+        globalRole: "USER",
+        defaultWorkspaceRole: "VIEWER",
+        defaultWorkspaceType: "professional",
+      },
+    });
 
     const { getByTestId } = renderAt("/w/alpha/dashboard");
 
@@ -112,7 +112,6 @@ describe("GlobalShortcuts — `g c` create document", () => {
       fireSequence(["g", "c"]);
     });
 
-    // Read-only ⇒ stays on current page, info toast surfaced.
     expect(getByTestId("location").textContent).toBe("/w/alpha/dashboard");
     expect(toastInfo).toHaveBeenCalledTimes(1);
     expect(toastInfo).toHaveBeenCalledWith(

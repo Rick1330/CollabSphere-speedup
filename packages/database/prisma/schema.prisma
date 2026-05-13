@@ -248,6 +248,7 @@ model Workspace {
   documentVersions    DocumentVersion[]
   documentSubmissions DocumentSubmission[]
   taskColumns         TaskColumn[]
+  documentUpdates     DocumentUpdate[]
   tasks               Task[]
   taskDocumentLinks   TaskDocumentLink[]
   commentThreads      CommentThread[]
@@ -365,9 +366,24 @@ model Document {
   updatedBy    User?                @relation("DocumentUpdatedByUser", fields: [updatedById], references: [id], onDelete: SetNull)
   versions     DocumentVersion[]
   submissions  DocumentSubmission[]
+  updates      DocumentUpdate[]
   taskLinks    TaskDocumentLink[]
 
   @@map("documents")
+}
+model DocumentUpdate {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  documentId  String   @map("document_id") @db.Uuid
+  update      Bytes    @map("update")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  document  Document  @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId, createdAt], map: "idx_doc_updates_doc_created")
+  @@index([workspaceId, createdAt], map: "idx_doc_updates_workspace_created")
+  @@map("document_updates")
 }
 
 model DocumentVersion {

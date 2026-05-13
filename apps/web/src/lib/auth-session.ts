@@ -7,7 +7,6 @@
 import { useSyncExternalStore } from "react";
 
 import type { WorkspaceRoleKey, WorkspaceType } from "@/lib/persona-scenario";
-import { MOCK_ACCOUNTS } from "@/lib/mock-accounts";
 
 const STORAGE_KEY = "cs-auth-session";
 
@@ -28,25 +27,6 @@ export interface SessionAccount {
   blurb: string;
 }
 
-function demoAccountToSession(demo: (typeof MOCK_ACCOUNTS)[number]): SessionAccount {
-  return {
-    id: demo.id,
-    email: demo.email,
-    password: "",
-    fullName: demo.fullName,
-    initials: demo.initials,
-    bio: demo.bio,
-    avatarUrl: demo.avatarUrl,
-    globalRole: demo.globalRole,
-    authProvider: demo.authProvider,
-    status: "active",
-    defaultWorkspaceId: demo.defaultWorkspaceId,
-    defaultWorkspaceType: demo.defaultWorkspaceType,
-    defaultWorkspaceRole: demo.defaultWorkspaceRole,
-    blurb: demo.blurb,
-  };
-}
-
 export interface AuthSession {
   accountId: string;
   accessToken: string;
@@ -57,6 +37,8 @@ export interface AuthSession {
     fullName: string;
     avatarUrl?: string | null;
     globalRole?: "USER" | "ADMIN";
+    defaultWorkspaceRole?: WorkspaceRoleKey;
+    defaultWorkspaceType?: WorkspaceType;
   };
 }
 
@@ -83,38 +65,31 @@ let current: AuthSession | null = readSession();
 const listeners = new Set<() => void>();
 
 function buildResolvedAccountSnapshot(): SessionAccount | null {
-  if (!current) return null;
-  const demo = current.user
-    ? MOCK_ACCOUNTS.find((a) => a.id === current.user!.id)
-    : MOCK_ACCOUNTS.find((a) => a.id === current.accountId);
+  if (!current || !current.user) return null;
 
-  if (current.user) {
-    const initials = current.user.fullName
-      .split(/\s+/)
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((chunk) => chunk[0]?.toUpperCase() ?? "")
-      .join("");
-    return {
-      id: current.user.id,
-      email: current.user.email,
-      password: "",
-      fullName: current.user.fullName,
-      initials,
-      bio: demo?.bio ?? null,
-      avatarUrl: current.user.avatarUrl ?? null,
-      globalRole: current.user.globalRole ?? "USER",
-      authProvider: "local",
-      status: "active",
-      defaultWorkspaceId: demo?.defaultWorkspaceId ?? "alpha",
-      defaultWorkspaceType: demo?.defaultWorkspaceType ?? "general",
-      defaultWorkspaceRole: demo?.defaultWorkspaceRole ?? "MEMBER",
-      blurb: demo?.blurb ?? "API-authenticated user",
-    };
-  }
+  const initials = current.user.fullName
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((chunk) => chunk[0]?.toUpperCase() ?? "")
+    .join("");
 
-  if (demo) return demoAccountToSession(demo);
-  return null;
+  return {
+    id: current.user.id,
+    email: current.user.email,
+    password: "",
+    fullName: current.user.fullName,
+    initials,
+    bio: null,
+    avatarUrl: current.user.avatarUrl ?? null,
+    globalRole: current.user.globalRole ?? "USER",
+    authProvider: "local",
+    status: "active",
+    defaultWorkspaceId: "alpha",
+    defaultWorkspaceType: current.user.defaultWorkspaceType ?? "general",
+    defaultWorkspaceRole: current.user.defaultWorkspaceRole ?? "MEMBER",
+    blurb: "API-authenticated user",
+  };
 }
 
 /** Cached between session updates so useSyncExternalStore snapshots stay referentially stable. */

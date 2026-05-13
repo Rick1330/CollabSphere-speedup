@@ -1,5 +1,8 @@
 import { Module, RequestMethod, type MiddlewareConsumer, type NestModule } from "@nestjs/common";
+import { ConfigModule } from "@nestjs/config";
+import { ThrottlerModule } from "@nestjs/throttler";
 import { APP_GUARD } from "@nestjs/core";
+import { configValidationSchema } from "./config/config.schema.js";
 import { NestRequestIdMiddleware } from "./common/nest/nest-request-id.middleware.js";
 import { PrismaModule } from "./common/prisma/prisma.module.js";
 import { JwtAuthGuard } from "./common/guards/jwt-auth.guard.js";
@@ -20,11 +23,23 @@ import { ActivityNestModule } from "./activity/activity.nest.module.js";
 import { SearchNestModule } from "./search/search.nest.module.js";
 import { AdminNestModule } from "./admin/admin.nest.module.js";
 import { AdminOnlyGuard } from "./common/guards/admin-only.guard.js";
+import { CsrfGuard } from "./common/guards/csrf.guard.js";
 import { ExportsNestModule } from "./exports/exports.nest.module.js";
+import { TestingNestModule } from "./testing/testing.nest.module.js";
 import { HttpObservabilityMiddleware } from "./common/observability/http-observability.middleware.js";
 
 @Module({
   imports: [
+    ConfigModule.forRoot({
+      isGlobal: true,
+      validationSchema: configValidationSchema,
+    }),
+    ThrottlerModule.forRoot([
+      {
+        ttl: 60000,
+        limit: 100,
+      },
+    ]),
     PrismaModule,
     GuardsNestModule,
     HealthNestModule,
@@ -43,6 +58,7 @@ import { HttpObservabilityMiddleware } from "./common/observability/http-observa
     SearchNestModule,
     AdminNestModule,
     ExportsNestModule,
+    TestingNestModule,
   ],
   providers: [
     NestRequestIdMiddleware,
@@ -54,6 +70,10 @@ import { HttpObservabilityMiddleware } from "./common/observability/http-observa
     {
       provide: APP_GUARD,
       useClass: AdminOnlyGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: CsrfGuard,
     },
   ],
 })

@@ -24,26 +24,30 @@ export class SearchService {
       return { documents: [], tasks: [] };
     }
     const [documents, tasks] = await Promise.all([
-      this.prisma.document.findMany({
-        where: {
-          workspaceId: input.workspaceId,
-          deletedAt: null,
-          OR: [{ title: { contains: q, mode: "insensitive" } }, { contentPlaintext: { contains: q, mode: "insensitive" } }],
-        },
-        select: { id: true, title: true, status: true, updatedAt: true },
-        take: input.limit,
-        orderBy: { updatedAt: "desc" },
-      }),
-      this.prisma.task.findMany({
-        where: {
-          workspaceId: input.workspaceId,
-          deletedAt: null,
-          OR: [{ title: { contains: q, mode: "insensitive" } }, { description: { contains: q, mode: "insensitive" } }],
-        },
-        select: { id: true, title: true, status: true, priority: true, updatedAt: true },
-        take: input.limit,
-        orderBy: { updatedAt: "desc" },
-      }),
+      this.prisma.$queryRaw<any[]>`
+        SELECT id, title, status, updated_at as "updatedAt"
+        FROM documents
+        WHERE workspace_id = ${input.workspaceId}::uuid
+          AND deleted_at IS NULL
+          AND (
+            search_vector @@ websearch_to_tsquery('english', ${q})
+            OR title ILIKE ${`%${q}%`}
+          )
+        ORDER BY ts_rank(search_vector, websearch_to_tsquery('english', ${q})) DESC, updated_at DESC
+        LIMIT ${input.limit}
+      `,
+      this.prisma.$queryRaw<any[]>`
+        SELECT id, title, status, priority, updated_at as "updatedAt"
+        FROM tasks
+        WHERE workspace_id = ${input.workspaceId}::uuid
+          AND deleted_at IS NULL
+          AND (
+            search_vector @@ websearch_to_tsquery('english', ${q})
+            OR title ILIKE ${`%${q}%`}
+          )
+        ORDER BY ts_rank(search_vector, websearch_to_tsquery('english', ${q})) DESC, updated_at DESC
+        LIMIT ${input.limit}
+      `,
     ]);
     return { documents, tasks };
   }
