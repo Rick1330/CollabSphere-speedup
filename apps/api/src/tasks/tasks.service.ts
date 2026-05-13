@@ -233,6 +233,110 @@ export class TasksService {
     return { message: "Task deleted." };
   }
 
+  async listTaskLinks(input: { actorUserId: string; workspaceId: string; taskId: string }) {
+    await this.requireWorkspaceMembership(input.actorUserId, input.workspaceId);
+    return this.prisma.taskDocumentLink.findMany({
+      where: { taskId: input.taskId, workspaceId: input.workspaceId, deletedAt: null },
+      include: {
+        document: {
+          select: { id: true, title: true, status: true },
+        },
+      },
+    });
+  }
+
+  async linkTaskToDocument(input: {
+    actorUserId: string;
+    workspaceId: string;
+    taskId: string;
+    documentId: string;
+    anchor?: any;
+  }) {
+    await this.requireWorkspaceMembership(input.actorUserId, input.workspaceId);
+    const [task, document] = await Promise.all([
+      this.getTaskById({
+        actorUserId: input.actorUserId,
+        workspaceId: input.workspaceId,
+        taskId: input.taskId,
+      }),
+      this.prisma.document.findFirst({
+        where: { id: input.documentId, workspaceId: input.workspaceId, deletedAt: null },
+        select: { id: true },
+      }),
+    ]);
+
+    if (!document) {
+      throw new AppError({ code: "DOCUMENT_NOT_FOUND" });
+    }
+
+    const link = await this.prisma.taskDocumentLink.create({
+      data: {
+        workspaceId: input.workspaceId,
+        taskId: input.taskId,
+        documentId: input.documentId,
+        anchor: input.anchor ?? {},
+        createdById: input.actorUserId,
+      },
+    });
+
+    return link;
+  }
+
+  async bulkOperations(input: {
+    actorUserId: string;
+    workspaceId: string;
+    create?: any[];
+    deleteIds?: string[];
+    updateStatus?: Array<{ id: string; status: TaskStatus }>;
+  }) {
+    await this.requireWorkspaceMembership(input.actorUserId, input.workspaceId);
+
+    const results = await this.prisma.$transaction(async (tx) => {
+      const created = [];
+      if (input.create) {
+        for (const item of input.create) {
+          const task = await this.createTask({
+            ...item,
+            actorUserId: input.actorUserId,
+            workspaceId: input.workspaceId,
+          });
+          created.push(task);
+        }
+      }
+
+      if (input.deleteIds) {
+        await tx.task.updateMany({
+          where: {
+            id: { in: input.deleteIds },
+            workspaceId: input.workspaceId,
+          },
+          data: { deletedAt: new Date() },
+        });
+      }
+
+      const updatedStatus = [];
+      if (input.updateStatus) {
+        for (const item of input.updateStatus) {
+          const task = await this.updateTaskStatus({
+            actorUserId: input.actorUserId,
+            workspaceId: input.workspaceId,
+            taskId: item.id,
+            status: item.status,
+          });
+          updatedStatus.push(task);
+        }
+      }
+
+      return {
+        created,
+        deletedCount: input.deleteIds?.length ?? 0,
+        updatedStatus,
+      };
+    });
+
+    return results;
+  }
+
   private async emitTaskMutation(input: {
     task: { id: string; workspaceId: string; title: string; assigneeId: string | null };
     actorUserId: string;

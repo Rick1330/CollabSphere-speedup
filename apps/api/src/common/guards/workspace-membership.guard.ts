@@ -43,7 +43,12 @@ export class WorkspaceMembershipGuard implements CanActivate {
         userId,
         leftAt: null,
       },
-      select: { role: true },
+      select: {
+        role: true,
+        workspace: {
+          select: { id: true, status: true },
+        },
+      },
     });
 
     if (!member) {
@@ -52,6 +57,18 @@ export class WorkspaceMembershipGuard implements CanActivate {
         message: "You are not a member of this workspace.",
       });
     }
+
+    const isWriteMethod = ["POST", "PUT", "PATCH", "DELETE"].includes(request.method);
+    if (isWriteMethod && member.workspace.status === "archived") {
+      throw new AppError({
+        code: "WORKSPACE_ARCHIVED_READONLY",
+        message: "Workspace is archived and read-only.",
+      });
+    }
+
+    // Attach to request for use in decorators/handlers
+    request.workspaceMember = member;
+    request.workspace = member.workspace;
 
     const minRole = this.reflector.getAllAndOverride<WorkspaceRole | undefined>(
       WORKSPACE_MIN_ROLE_KEY,

@@ -1,21 +1,24 @@
-import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
 import { Type } from "class-transformer";
 import {
   IsArray,
   IsDateString,
   IsEnum,
   IsInt,
+  IsNotEmpty,
   IsOptional,
   IsString,
   IsUUID,
   MaxLength,
   Min,
+  ValidateNested,
 } from "class-validator";
 import { type TaskPriority, type TaskStatus } from "@prisma/client";
 import { CurrentUserId } from "../common/decorators/current-user.decorator.js";
 import { ReqRequestId } from "../common/nest/request-id.decorator.js";
 import {
   createActionResponsePayload,
+  createListResponsePayload,
   createSingleResourcePayload,
   wrapSuccessResponse,
 } from "../common/interceptors/response-envelope.interceptor.js";
@@ -102,6 +105,42 @@ class UpdateTaskStatusBodyDto {
   @IsInt()
   @Min(1)
   position?: number;
+}
+
+class LinkTaskDocumentDto {
+  @IsUUID()
+  @IsNotEmpty()
+  documentId!: string;
+
+  @IsOptional()
+  anchor?: any;
+}
+
+class UpdateTaskStatusBulkDto {
+  @IsUUID()
+  id!: string;
+
+  @IsEnum(["backlog", "todo", "in_progress", "in_review", "done"])
+  status!: TaskStatus;
+}
+
+class BulkTaskOperationDto {
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateTaskBodyDto)
+  create?: CreateTaskBodyDto[];
+
+  @IsOptional()
+  @IsArray()
+  @IsUUID(undefined, { each: true })
+  delete?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => UpdateTaskStatusBulkDto)
+  updateStatus?: UpdateTaskStatusBulkDto[];
 }
 
 @Controller("workspaces/:workspaceId/tasks")
@@ -227,4 +266,58 @@ export class TasksNestController {
     });
   }
 
+  @Get(":taskId/links")
+  async listTaskLinks(
+    @Param("workspaceId") workspaceId: string,
+    @Param("taskId") taskId: string,
+    @CurrentUserId() actorUserId: string,
+    @ReqRequestId() requestId: string,
+  ) {
+    const links = await this.tasksService.listTaskLinks({ actorUserId, workspaceId, taskId });
+    return wrapSuccessResponse({
+      payload: createListResponsePayload({ items: links, total: links.length }),
+      requestId,
+    });
+  }
+
+  @Post(":taskId/links")
+  async linkDocument(
+    @Param("workspaceId") workspaceId: string,
+    @Param("taskId") taskId: string,
+    @CurrentUserId() actorUserId: string,
+    @ReqRequestId() requestId: string,
+    @Body() body: LinkTaskDocumentDto,
+  ) {
+    const link = await this.tasksService.linkTaskToDocument({
+      actorUserId,
+      workspaceId,
+      taskId,
+      documentId: body.documentId,
+      anchor: body.anchor,
+    });
+    return wrapSuccessResponse({
+      payload: createSingleResourcePayload({ link }),
+      requestId,
+    });
+  }
+
+  @Post("bulk")
+  async bulkOperations(
+    @Param("workspaceId") workspaceId: string,
+    @CurrentUserId() actorUserId: string,
+    @ReqRequestId() requestId: string,
+    @Body() body: BulkTaskOperationDto,
+  ) {
+    const result = await this.tasksService.bulkOperations({
+      actorUserId,
+      workspaceId,
+      create: body.create,
+      deleteIds: body.delete,
+      updateStatus: body.updateStatus,
+    });
+    return wrapSuccessResponse({
+      payload: createSingleResourcePayload(result),
+      requestId,
+    });
+  }
 }

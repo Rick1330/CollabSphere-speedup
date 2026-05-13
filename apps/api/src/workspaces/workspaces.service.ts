@@ -267,8 +267,15 @@ export class WorkspacesService {
       select: { id: true, role: true },
     });
 
-    if (!targetMembership || (targetMembership.role !== "ADMIN" && targetMembership.role !== "MANAGER")) {
-      throw new AppError({ code: "INVALID_NEW_OWNER" });
+    if (!targetMembership) {
+      throw new AppError({ code: "MEMBER_NOT_FOUND" });
+    }
+
+    if (targetMembership.role !== "ADMIN" && targetMembership.role !== "MANAGER") {
+      throw new AppError({
+        code: "INVALID_NEW_OWNER",
+        message: "New owner must be an Admin or Manager.",
+      });
     }
 
     const workspace = await this.getWorkspaceOrThrow(workspaceId);
