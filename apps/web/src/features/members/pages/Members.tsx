@@ -67,7 +67,7 @@ const Members = () => {
       <WorkspaceSidebar workspace={sidebar} collapsed={collapsed} onToggle={toggle} />
 
       <div className="flex-1 min-w-0 flex flex-col h-screen">
-        <TopNav user={currentUser} unreadCount={3} onOpenPalette={palette.toggle} />
+        <TopNav user={currentUser} onOpenPalette={palette.toggle} />
 
         <main className="flex-1 min-h-0 flex flex-col overflow-hidden">
           <MemberList

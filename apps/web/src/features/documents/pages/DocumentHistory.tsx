@@ -33,22 +33,46 @@ const WORKSPACES: Record<string, WorkspaceWithRole> = {
   alpha: {
     id: "alpha", name: "Project Alpha", description: "", icon: "📦",
     type: "professional", roleLabel: "TECH LEAD", status: "active", myRole: "ADMIN",
-    permissions: { canCreateContent: true, canEditSettings: true, canViewAnalytics: true },
+    permissions: {
+      canCreateContent: true,
+      canOrganizeContent: true,
+      canDeleteContent: true,
+      canEditSettings: true,
+      canViewAnalytics: true,
+    },
   },
   thesis: {
     id: "thesis", name: "Thesis — Distributed Systems", description: "", icon: "🎓",
     type: "academic", roleLabel: "STUDENT", status: "active", myRole: "MEMBER",
-    permissions: { canCreateContent: true, canEditSettings: false, canViewAnalytics: false },
+    permissions: {
+      canCreateContent: true,
+      canOrganizeContent: true,
+      canDeleteContent: false,
+      canEditSettings: false,
+      canViewAnalytics: false,
+    },
   },
   personal: {
     id: "personal", name: "Personal Notes", description: "", icon: "📝",
     type: "general", roleLabel: "OWNER", status: "active", myRole: "OWNER",
-    permissions: { canCreateContent: true, canEditSettings: true, canViewAnalytics: false },
+    permissions: {
+      canCreateContent: true,
+      canOrganizeContent: true,
+      canDeleteContent: true,
+      canEditSettings: true,
+      canViewAnalytics: false,
+    },
   },
   research: {
     id: "research", name: "Research Group", description: "", icon: "🔬",
     type: "academic", roleLabel: "REVIEWER", status: "archived", myRole: "MEMBER",
-    permissions: { canCreateContent: false, canEditSettings: true, canViewAnalytics: false },
+    permissions: {
+      canCreateContent: false,
+      canOrganizeContent: false,
+      canDeleteContent: false,
+      canEditSettings: true,
+      canViewAnalytics: false,
+    },
   },
 };
 
@@ -156,7 +180,7 @@ const DocumentHistoryPage = () => {
     <div className="app-light min-h-screen flex bg-stone-50">
       <WorkspaceSidebar workspace={workspace} collapsed={collapsed} onToggle={toggle} />
       <div className="flex-1 min-w-0 flex flex-col h-screen">
-        <TopNav user={MOCK_USER} unreadCount={3} onOpenPalette={palette.toggle} />
+        <TopNav user={MOCK_USER} onOpenPalette={palette.toggle} />
 
         <main className="flex-1 min-h-0 overflow-y-auto">
           {/* Editorial archival header */}

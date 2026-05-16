@@ -17,6 +17,7 @@ import {
   type WorkspaceRole,
   type ApiError,
 } from "@/api/adapters/members";
+import { ApiError as ClientApiError } from "@/api/client";
 import {
   getWorkspaceRoleDescription,
   getWorkspaceRoleLabel,
@@ -92,18 +93,34 @@ export const InviteDialog = ({
       onInvited();
     } catch (err) {
       const apiErr = err as ApiError;
-      if (apiErr?.code === "EMAIL_ALREADY_MEMBER") {
+      const code = apiErr?.code;
+      const fallbackMessage =
+        err instanceof ClientApiError ? err.message : apiErr?.message;
+      if (code === "ALREADY_MEMBER" || code === "EMAIL_ALREADY_MEMBER") {
         setServerError("This person is already a member of this workspace.");
-      } else if (apiErr?.code === "INVITATION_ALREADY_PENDING") {
+      } else if (code === "FORBIDDEN_ROLE_ASSIGNMENT") {
+        setServerError("You don't have permission to assign this role.");
+      } else if (code === "INVITATION_ALREADY_PENDING") {
         setServerError("An invitation has already been sent to this email.");
-      } else if (apiErr?.code === "INVITATION_RESEND_RATE_LIMITED") {
+      } else if (code === "INVITATION_RESEND_RATE_LIMITED") {
         setServerError("Invitation was resent recently. Try again in 24 hours.");
-      } else if (apiErr?.code === "WORKSPACE_ARCHIVED") {
+      } else if (code === "WORKSPACE_ARCHIVED" || code === "WORKSPACE_ARCHIVED_READONLY") {
         setServerError("This workspace is archived. Restore it to invite members.");
-      } else if (apiErr?.code === "WORKSPACE_MEMBER_LIMIT_REACHED") {
+      } else if (code === "WORKSPACE_MEMBER_LIMIT_REACHED") {
         setServerError("This workspace has reached the maximum member limit (50).");
+      } else if (code === "SERVICE_UNAVAILABLE") {
+        setServerError(
+          fallbackMessage ||
+            "The invitation could not be queued for email delivery. Check API logs and disk permissions for the email queue.",
+        );
+      } else if (code === "VALIDATION_ERROR") {
+        setServerError(fallbackMessage || "Invalid invitation request.");
       } else {
-        setServerError("Failed to send invitation. Please try again.");
+        setServerError(
+          fallbackMessage && fallbackMessage.length > 0
+            ? fallbackMessage
+            : "Failed to send invitation. Please try again.",
+        );
       }
     }
   };

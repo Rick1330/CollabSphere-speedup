@@ -1,0 +1,1 @@
+`OAuthAccount` (and related template-only auth tables) deferred: current Prisma `User` already carries `authProvider` / `authProviderId` for Google; no product requirement to add a separate OAuth link table in this pass.

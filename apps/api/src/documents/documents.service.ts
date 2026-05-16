@@ -5,6 +5,10 @@ import { PrismaClientProvider } from "../common/prisma/prisma-client.provider.js
 import { parseDocumentTemplateContent } from "../common/templates/template-schema.js";
 import { RealtimeEventsService } from "../realtime/realtime-events.service.js";
 import { canManageLocks, isDocumentReadOnly } from "../../../../packages/shared/src/collab/document-write-policy.js";
+import {
+  canCreateWorkspaceContent,
+  canOrganizeWorkspaceContent,
+} from "../../../../packages/shared/src/collab/workspace-content-policy.js";
 
 const collectTextFromNode = (value: unknown): string[] => {
   if (typeof value === "string") {
@@ -142,6 +146,11 @@ export class DocumentsService {
         properties: true,
         createdAt: true,
         updatedAt: true,
+        contentPlaintext: true,
+        isLocked: true,
+        lockedByUser: { select: { id: true, fullName: true } },
+        createdBy: { select: { id: true, fullName: true } },
+        folder: { select: { name: true } },
       },
     });
 
@@ -168,6 +177,9 @@ export class DocumentsService {
     const membership = await this.requireWorkspaceMembership({ actorUserId, workspaceId });
     if (membership.workspace.status === "archived") {
       throw new AppError({ code: "WORKSPACE_ARCHIVED_READONLY" });
+    }
+    if (!canCreateWorkspaceContent(membership.role)) {
+      throw new AppError({ code: "INSUFFICIENT_ROLE", message: "Member role or higher is required." });
     }
 
     if (folderId) {
@@ -196,6 +208,7 @@ export class DocumentsService {
             category: true,
             version: true,
             schemaVersion: true,
+            contentFormat: true,
             content: true,
           },
         })
@@ -213,7 +226,17 @@ export class DocumentsService {
       throw new AppError({ code: "TEMPLATE_CATEGORY_MISMATCH" });
     }
 
-    const parsedTemplate = template ? parseDocumentTemplateContent(template.content) : null;
+    let parsedTemplate: ReturnType<typeof parseDocumentTemplateContent> | null = null;
+    if (template) {
+      try {
+        parsedTemplate = parseDocumentTemplateContent(template.content);
+      } catch {
+        throw new AppError({
+          code: "TEMPLATE_INVALID",
+          message: "Template content could not be parsed.",
+        });
+      }
+    }
     const plaintext = parsedTemplate
       ? collectTextFromNode(parsedTemplate.blocks).join(" ").slice(0, 20_000)
       : "";
@@ -224,13 +247,26 @@ export class DocumentsService {
               id: template.id,
               version: template.version,
               schemaVersion: template.schemaVersion,
-              format: parsedTemplate.format ?? null,
+              format: parsedTemplate.format ?? template.contentFormat ?? null,
               metadata: parsedTemplate.metadata ?? null,
               properties: parsedTemplate.properties ?? null,
             },
             blocks: parsedTemplate.blocks,
+            ...(parsedTemplate.regions ? { regions: parsedTemplate.regions } : {}),
+            ...(parsedTemplate.variables ? { variables: parsedTemplate.variables } : {}),
           }
         : null;
+
+    const isRichDocument = parsedTemplate?.format === "richdocument";
+    // T1: Yjs binary (`contentYjs`) stays at the DB default (empty) until a collab-layer
+    // `YjsService.seedFromV2Template` (or equivalent) exists; metadata, regions, variables,
+    // and plaintext snapshot are persisted here for API/DB workflows.
+    const regionOrderJson: Prisma.InputJsonValue | undefined =
+      isRichDocument && parsedTemplate?.regions && parsedTemplate.regions.length > 0
+        ? (JSON.parse(JSON.stringify(parsedTemplate.regions.map((r) => r.id))) as Prisma.InputJsonValue)
+        : undefined;
+    const templateSchemaVersion =
+      isRichDocument && template ? template.schemaVersion : undefined;
 
     const maxPosition = await this.prisma.document.findFirst({
       where: {
@@ -244,33 +280,110 @@ export class DocumentsService {
 
     const nextPosition = maxPosition ? Number(maxPosition.position) + 1 : 1;
 
-    const created = await this.prisma.document.create({
-      data: {
-        workspaceId,
-        folderId: folderId ?? null,
-        title,
-        position: nextPosition,
-        contentPlaintext: plaintext,
-        properties: templateProperties
-          ? (JSON.parse(JSON.stringify(templateProperties)) as Prisma.InputJsonValue)
-          : undefined,
-        templateId: template?.id ?? null,
-        templateVersion: template?.version ?? null,
-        createdById: actorUserId,
-      },
-      select: {
-        id: true,
-        workspaceId: true,
-        folderId: true,
-        title: true,
-        status: true,
-        templateId: true,
-        templateVersion: true,
-        createdAt: true,
-      },
+    const created = await this.prisma.$transaction(async (tx) => {
+      const doc = await tx.document.create({
+        data: {
+          workspaceId,
+          folderId: folderId ?? null,
+          title,
+          position: nextPosition,
+          contentPlaintext: plaintext,
+          properties: templateProperties
+            ? (JSON.parse(JSON.stringify(templateProperties)) as Prisma.InputJsonValue)
+            : undefined,
+          templateId: template?.id ?? null,
+          templateVersion: template?.version ?? null,
+          templateSchemaVersion: templateSchemaVersion ?? null,
+          regionOrder: regionOrderJson ?? undefined,
+          createdById: actorUserId,
+        },
+        select: {
+          id: true,
+          workspaceId: true,
+          folderId: true,
+          title: true,
+          status: true,
+          templateId: true,
+          templateVersion: true,
+          templateSchemaVersion: true,
+          regionOrder: true,
+          createdAt: true,
+        },
+      });
+
+      if (parsedTemplate?.variables?.length) {
+        await tx.documentRegionVariable.createMany({
+          data: parsedTemplate.variables.map((v) => ({
+            documentId: doc.id,
+            variableKey: v.key,
+            value: null,
+          })),
+        });
+      }
+
+      return doc;
+    });
+
+    this.realtimeEvents?.emit("workspace:document_created", {
+      workspaceId,
+      userId: actorUserId,
+      data: { documentId: created.id, folderId: created.folderId },
     });
 
     return created;
+  }
+
+  async patchDocumentVariables({
+    actorUserId,
+    workspaceId,
+    documentId,
+    variables,
+  }: {
+    actorUserId: string;
+    workspaceId: string;
+    documentId: string;
+    variables: { variableKey: string; value: string | null | undefined }[];
+  }) {
+    const membership = await this.requireWorkspaceMembership({ actorUserId, workspaceId });
+    if (membership.workspace.status === "archived") {
+      throw new AppError({ code: "WORKSPACE_ARCHIVED_READONLY" });
+    }
+
+    const existing = await this.prisma.document.findFirst({
+      where: {
+        id: documentId,
+        workspaceId,
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+
+    if (!existing) {
+      throw new AppError({ code: "DOCUMENT_NOT_FOUND" });
+    }
+
+    for (const v of variables) {
+      const key = v.variableKey.trim();
+      if (!key.length) {
+        continue;
+      }
+      await this.prisma.documentRegionVariable.upsert({
+        where: {
+          documentId_variableKey: {
+            documentId: existing.id,
+            variableKey: key,
+          },
+        },
+        create: {
+          documentId: existing.id,
+          variableKey: key,
+          value: v.value ?? null,
+        },
+        update: { value: v.value ?? null },
+      });
+    }
+
+    return { updated: variables.length };
   }
 
   async updateDocumentMetadata({
@@ -291,6 +404,9 @@ export class DocumentsService {
     const membership = await this.requireWorkspaceMembership({ actorUserId, workspaceId });
     if (membership.workspace.status === "archived") {
       throw new AppError({ code: "WORKSPACE_ARCHIVED_READONLY" });
+    }
+    if (!canOrganizeWorkspaceContent(membership.role)) {
+      throw new AppError({ code: "INSUFFICIENT_ROLE", message: "Member role or higher is required." });
     }
 
     const existing = await this.prisma.document.findFirst({
@@ -342,6 +458,12 @@ export class DocumentsService {
         templateVersion: true,
         updatedAt: true,
       },
+    });
+
+    this.realtimeEvents?.emit("workspace:document_updated", {
+      workspaceId,
+      userId: actorUserId,
+      data: { documentId: updated.id, folderId: updated.folderId, title: updated.title },
     });
 
     return updated;
@@ -824,6 +946,11 @@ export class DocumentsService {
       data: { deletedAt: new Date(), updatedById: actorUserId },
     });
     this.realtimeEvents?.emit("document:deleted", {
+      workspaceId,
+      userId: actorUserId,
+      data: { documentId },
+    });
+    this.realtimeEvents?.emit("workspace:document_deleted", {
       workspaceId,
       userId: actorUserId,
       data: { documentId },

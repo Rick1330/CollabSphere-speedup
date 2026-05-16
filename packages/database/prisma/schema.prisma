@@ -353,6 +353,8 @@ model Document {
   properties       Json?                    @db.JsonB
   templateId       String?                  @map("template_id") @db.VarChar(120)
   templateVersion  Int?                     @map("template_version")
+  templateSchemaVersion Int?                @map("template_schema_version")
+  regionOrder      Json?                    @map("region_order") @db.JsonB
   createdById      String                   @map("created_by") @db.Uuid
   updatedById      String?                  @map("updated_by") @db.Uuid
   createdAt        DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -366,10 +368,26 @@ model Document {
   updatedBy    User?                @relation("DocumentUpdatedByUser", fields: [updatedById], references: [id], onDelete: SetNull)
   versions     DocumentVersion[]
   submissions  DocumentSubmission[]
-  updates      DocumentUpdate[]
-  taskLinks    TaskDocumentLink[]
+  updates         DocumentUpdate[]
+  taskLinks       TaskDocumentLink[]
+  regionVariables DocumentRegionVariable[]
 
   @@map("documents")
+}
+
+model DocumentRegionVariable {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  documentId  String   @map("document_id") @db.Uuid
+  variableKey String   @map("variable_key") @db.VarChar(120)
+  value       String?  @db.Text
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, variableKey], map: "uq_document_region_variables_doc_key")
+  @@index([documentId], map: "idx_document_region_variables_document")
+  @@map("document_region_variables")
 }
 model DocumentUpdate {
   id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
@@ -644,6 +662,7 @@ model Template {
   id              String   @id @db.VarChar(120)
   kind            String   @db.VarChar(20)
   category        String   @db.VarChar(20)
+  subCategory     String   @default("general") @map("sub_category") @db.VarChar(40)
   scope           String   @default("system") @db.VarChar(20)
   name            String   @db.VarChar(120)
   description     String?  @db.VarChar(280)

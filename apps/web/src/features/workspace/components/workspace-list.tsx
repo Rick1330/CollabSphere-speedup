@@ -19,11 +19,13 @@ import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { WorkspaceCard, type WorkspaceSummary } from "./workspace-card";
+import { PendingInvitationsBanner } from "@/features/workspace/components/pending-invitations-banner";
 import { useStoredWorkspaces, workspaceStore } from "@/features/workspace/store/workspace-store";
 import { CountChip, MetaDivider, MetaStat, PageHeader } from "@/components/shared/page-header";
 import { listMineWorkspaceRows, type MineWorkspaceRow } from "@/api/adapters/workspaces";
 import { getFetchErrorDetails } from "@/lib/fetch-error-details";
 import { getWorkspaceRoleLabel } from "@/lib/role-labels";
+import { isDatabaseWorkspaceId } from "@/lib/workspace-id";
 
 type State = "loading" | "loaded" | "empty" | "error";
 
@@ -57,6 +59,7 @@ export const WorkspaceList = () => {
     queryKey: ["workspaces", "mine"],
     queryFn: listMineWorkspaceRows,
     staleTime: 30_000,
+    refetchOnWindowFocus: true,
   });
 
   const workspaces = useMemo<WorkspaceSummary[]>(() => {
@@ -68,6 +71,7 @@ export const WorkspaceList = () => {
     const apiIds = new Set(fromApi.map((w) => w.id));
     const localOnly: WorkspaceSummary[] = stored
       .filter((w) => !apiIds.has(w.id))
+      .filter((w) => !isDatabaseWorkspaceId(w.id))
       .map((w) => ({
         id: w.id,
         name: w.name,
@@ -282,6 +286,10 @@ export const WorkspaceList = () => {
           ) : undefined
         }
       />
+
+      <div className="mt-6">
+        <PendingInvitationsBanner />
+      </div>
 
       {/* SR-only result announcement */}
       <div role="status" aria-live="polite" className="sr-only">

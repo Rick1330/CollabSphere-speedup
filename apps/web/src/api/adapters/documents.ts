@@ -12,9 +12,10 @@ import type {
   TreeNode,
   TreeFolderNode,
   TreeDocumentNode,
-} from "@/features/documents/components/document-tree";
+} from "@/features/documents/components/document-tree-types";
 
 export type { TreeNode, TreeFolderNode, TreeDocumentNode };
+export { buildTree } from "@/features/documents/components/document-tree-build";
 
 export type VersionReason = "manual" | "auto" | "submitted" | "approved" | "before_restore";
 export interface DocumentVersion {
@@ -87,43 +88,7 @@ type ApiDocument = {
   updatedAt: string;
 };
 
-function buildTree(folders: ApiFolder[], documents: ApiDocument[]): TreeNode[] {
-  const folderNodes = new Map<string, TreeFolderNode>();
-  for (const folder of folders) {
-    folderNodes.set(folder.id, {
-      type: "folder",
-      id: folder.id,
-      name: folder.name,
-      children: [],
-    });
-  }
-  const root: TreeNode[] = [];
-  for (const folder of folders) {
-    const node = folderNodes.get(folder.id);
-    if (!node) continue;
-    if (folder.parentId && folderNodes.has(folder.parentId)) {
-      folderNodes.get(folder.parentId)?.children.push(node);
-    } else {
-      root.push(node);
-    }
-  }
-  for (const document of documents) {
-    const docNode: TreeDocumentNode = {
-      type: "document",
-      id: document.id,
-      title: document.title,
-      status: document.status,
-      isLocked: Boolean(document.isLocked),
-      updatedAt: document.updatedAt,
-    };
-    if (document.folderId && folderNodes.has(document.folderId)) {
-      folderNodes.get(document.folderId)?.children.push(docNode);
-    } else {
-      root.push(docNode);
-    }
-  }
-  return root;
-}
+import { buildTree } from "@/features/documents/components/document-tree-build";
 
 export async function getDocumentTree(workspaceId: string): Promise<TreeNode[]> {
   const payload = await request<unknown>(`/workspaces/${workspaceId}/documents/tree`);
@@ -131,6 +96,154 @@ export async function getDocumentTree(workspaceId: string): Promise<TreeNode[]> 
   const folders = data.folders ?? [];
   const documents = data.documents ?? [];
   return buildTree(folders, documents);
+}
+
+export type WorkspaceDocumentDetail = {
+  id: string;
+  workspaceId: string;
+  folderId: string | null;
+  title: string;
+  status: TreeDocumentNode["status"];
+  templateId: string | null;
+  templateVersion: number | null;
+  contentPlaintext: string;
+  isLocked: boolean;
+  createdAt: string;
+  updatedAt: string;
+  lockedByUser: { id: string; fullName: string } | null;
+  createdBy: { id: string; fullName: string };
+  folder: { name: string } | null;
+};
+
+/** Turn API plaintext snapshot into safe HTML for TipTap when Yjs/HTML body is not loaded yet. */
+export function plaintextToEditorHtml(text: string): string {
+  const raw = text.trim();
+  if (!raw) return "<p></p>";
+  const escaped = raw
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  return escaped
+    .split(/\n\n+/)
+    .filter(Boolean)
+    .map((chunk) => `<p>${chunk.replace(/\n/g, "<br/>")}</p>`)
+    .join("");
+}
+
+export async function fetchWorkspaceDocument(
+  workspaceId: string,
+  documentId: string,
+): Promise<WorkspaceDocumentDetail> {
+  const payload = await request<unknown>(`/workspaces/${workspaceId}/documents/${documentId}`);
+  const res = parseApiSingleEnvelope<{ document?: WorkspaceDocumentDetail }>(payload);
+  if (!res.document?.id) {
+    throw new Error("Document response is missing document.");
+  }
+  return res.document;
+}
+
+export async function updateDocumentMetadata(
+  workspaceId: string,
+  documentId: string,
+  input: { title?: string; folderId?: string | null },
+): Promise<WorkspaceDocumentDetail> {
+  const body: { title?: string; folderId?: string | null } = {};
+  if (input.title !== undefined) body.title = input.title.trim();
+  if (input.folderId !== undefined) body.folderId = input.folderId;
+
+  const payload = await request<unknown>(
+    `/workspaces/${workspaceId}/documents/${documentId}`,
+    { method: "PUT", body },
+  );
+  const res = parseApiSingleEnvelope<{ document?: WorkspaceDocumentDetail }>(payload);
+  if (!res.document?.id) {
+    throw new Error("Document update response is missing document.");
+  }
+  return res.document;
+}
+
+export async function createDocument(
+  workspaceId: string,
+  input: { title: string; folderId?: string | null; templateId?: string | null },
+): Promise<WorkspaceDocumentDetail> {
+  const body: { title: string; folderId?: string | null; templateId?: string | null } = {
+    title: input.title,
+  };
+  if (input.folderId) body.folderId = input.folderId;
+  if (input.templateId) body.templateId = input.templateId;
+
+  const payload = await request<unknown>(`/workspaces/${workspaceId}/documents`, {
+    method: "POST",
+    body,
+  });
+  const res = parseApiSingleEnvelope<{ document?: WorkspaceDocumentDetail }>(payload);
+  if (!res.document?.id) {
+    throw new Error("Document creation response is missing document.");
+  }
+  return res.document;
+}
+
+export async function updateWorkspaceFolder(
+  workspaceId: string,
+  folderId: string,
+  input: { name?: string; parentId?: string | null },
+): Promise<{ id: string; name: string; parentId: string | null }> {
+  const body: { name?: string; parentId?: string | null } = {};
+  if (input.name !== undefined) body.name = input.name.trim();
+  if (input.parentId !== undefined) body.parentId = input.parentId;
+
+  const payload = await request<unknown>(`/workspaces/${workspaceId}/folders/${folderId}`, {
+    method: "PATCH",
+    body,
+  });
+  const res = parseApiSingleEnvelope<{
+    folder?: { id: string; name: string; parentId: string | null };
+  }>(payload);
+  if (!res.folder?.id) {
+    throw new Error("Folder update response is missing folder.");
+  }
+  return res.folder;
+}
+
+export async function deleteWorkspaceFolder(
+  workspaceId: string,
+  folderId: string,
+): Promise<void> {
+  await request<unknown>(`/workspaces/${workspaceId}/folders/${folderId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function deleteDocument(
+  workspaceId: string,
+  documentId: string,
+): Promise<void> {
+  await request<unknown>(`/workspaces/${workspaceId}/documents/${documentId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function createWorkspaceFolder(
+  workspaceId: string,
+  input: { name: string; parentId?: string | null },
+): Promise<{ id: string; name: string; parentId: string | null }> {
+  const body: { name: string; parentId?: string | null } = {
+    name: input.name.trim(),
+  };
+  if (input.parentId) {
+    body.parentId = input.parentId;
+  }
+  const payload = await request<unknown>(`/workspaces/${workspaceId}/folders`, {
+    method: "POST",
+    body,
+  });
+  const res = parseApiSingleEnvelope<{
+    folder?: { id: string; name: string; parentId: string | null };
+  }>(payload);
+  if (!res.folder?.id) {
+    throw new Error("Folder creation response is missing folder.");
+  }
+  return res.folder;
 }
 
 /** Flatten documents from tree for “recent docs” lists (newest first). */

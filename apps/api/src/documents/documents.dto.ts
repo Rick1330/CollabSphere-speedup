@@ -1,4 +1,5 @@
-import { IsArray, IsEnum, IsNotEmpty, IsOptional, IsString, MaxLength, MinLength } from "class-validator";
+import { IsArray, IsEnum, IsNotEmpty, IsOptional, IsString, MaxLength, MinLength, ValidateNested } from "class-validator";
+import { Type } from "class-transformer";
 import { DocumentStatus } from "@prisma/client";
 
 export class CreateDocumentDto {
@@ -59,4 +60,23 @@ export class TransitionNoteDto {
   @IsNotEmpty()
   @MaxLength(1000)
   note!: string;
+}
+
+export class DocumentVariableEntryDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(120)
+  variableKey!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(8000)
+  value?: string | null;
+}
+
+export class PatchDocumentVariablesDto {
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => DocumentVariableEntryDto)
+  variables!: DocumentVariableEntryDto[];
 }

@@ -19,13 +19,16 @@ const loginSchema = z.object({
 
 type LoginValues = z.infer<typeof loginSchema>;
 
+const DEACTIVATED_ACCOUNT_MSG =
+  "This account has been disabled. Contact your administrator or sign in with another account.";
+
 interface ServerError {
   type: "error" | "warning" | "success";
   message: string;
 }
 
 /** First workspace from API, else dashboard (IDs are DB UUIDs — not mock slugs). */
-async function postLoginPath(): Promise<string> {
+export async function postLoginPath(): Promise<string> {
   try {
     const rows = await listMineWorkspaceRows();
     const first = rows[0]?.workspace?.id;
@@ -38,10 +41,21 @@ async function postLoginPath(): Promise<string> {
 
 export const LoginForm = () => {
   const navigate = useNavigate();
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
   const queryClient = useQueryClient();
   const [showPassword, setShowPassword] = useState(false);
   const [serverError, setServerError] = useState<ServerError | null>(null);
+
+  useEffect(() => {
+    const code = params.get("error");
+    if (!code) return;
+    if (code === "account_deactivated" || code === "ACCOUNT_DEACTIVATED") {
+      setServerError({ type: "error", message: DEACTIVATED_ACCOUNT_MSG });
+    }
+    const next = new URLSearchParams(params);
+    next.delete("error");
+    setParams(next, { replace: true });
+  }, [params, setParams]);
 
   const form = useForm<LoginValues>({
     resolver: zodResolver(loginSchema),
@@ -73,6 +87,8 @@ export const LoginForm = () => {
       if (err instanceof AuthError) {
         if (err.code === "EMAIL_NOT_VERIFIED") {
           setServerError({ type: "warning", message: err.message });
+        } else if (err.code === "ACCOUNT_DEACTIVATED" || err.code === "ACCOUNT_DISABLED") {
+          setServerError({ type: "error", message: err.message || DEACTIVATED_ACCOUNT_MSG });
         } else {
           setServerError({ type: "error", message: err.message });
         }

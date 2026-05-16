@@ -6,11 +6,17 @@ import { WorkspaceList } from "@/features/workspace/components/workspace-list";
 import { useSidebar } from "@/hooks/use-sidebar";
 import { useCommandPalette } from "@/hooks/use-command-palette";
 
-const MOCK_USER = { fullName: "Elshaday Tesfaye", email: "jane@collabsphere.app" };
+import { useCurrentAccount } from "@/lib/auth-session";
+
+const FALLBACK_NAV_USER = { fullName: "Guest", email: "" };
 
 const Workspaces = () => {
   const { collapsed, toggle, width, startResize } = useSidebar();
   const palette = useCommandPalette();
+  const account = useCurrentAccount();
+  const navUser = account
+    ? { fullName: account.fullName, email: account.email }
+    : FALLBACK_NAV_USER;
 
   useEffect(() => {
     document.title = "Workspaces — CollabSphere";
@@ -21,7 +27,7 @@ const Workspaces = () => {
       <AppSidebar collapsed={collapsed} onToggle={toggle} width={width} onResizeStart={startResize} />
 
       <div className="flex-1 min-w-0 flex flex-col">
-        <TopNav user={MOCK_USER} unreadCount={3} onOpenPalette={palette.toggle} />
+        <TopNav user={navUser} onOpenPalette={palette.toggle} />
         <WorkspaceList />
       </div>
 

@@ -53,6 +53,18 @@ export class NestAppErrorFilter implements ExceptionFilter {
         ? request.requestId
         : resolveRequestId(request.get("x-request-id"));
 
+    if (exception instanceof AppError) {
+      const mapped = createErrorResponse({ error: exception, requestId });
+      logApiError({ requestId, normalizedError: mapped.normalizedError });
+      if (mapped.headers) {
+        for (const [k, v] of Object.entries(mapped.headers)) {
+          response.setHeader(k, v);
+        }
+      }
+      response.status(mapped.statusCode).json(mapped.payload);
+      return;
+    }
+
     if (exception instanceof HttpException) {
       const status = exception.getStatus();
       const body = exception.getResponse();

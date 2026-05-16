@@ -9,11 +9,13 @@ import {
   Param,
   Post,
   Put,
+  Patch,
   Query,
   UseGuards,
 } from "@nestjs/common";
 import { CurrentUserId } from "../common/decorators/current-user.decorator.js";
 import { WorkspaceMembershipGuard } from "../common/guards/workspace-membership.guard.js";
+import { WorkspaceRoleAtLeast } from "../common/decorators/workspace-role.decorator.js";
 import { ReqRequestId } from "../common/nest/request-id.decorator.js";
 import {
   createActionResponsePayload,
@@ -27,6 +29,7 @@ import {
   UpdateDocumentContentDto,
   UpdateDocumentDto,
   TransitionNoteDto,
+  PatchDocumentVariablesDto,
 } from "./documents.dto.js";
 
 @Controller("workspaces/:workspaceId/documents")
@@ -70,6 +73,29 @@ export class DocumentsNestController {
     });
   }
 
+  @Patch(":documentId/variables")
+  async patchDocumentVariables(
+    @Param("workspaceId") workspaceId: string,
+    @Param("documentId") documentId: string,
+    @ReqRequestId() requestId: string,
+    @CurrentUserId() actorUserId: string,
+    @Body() body: PatchDocumentVariablesDto,
+  ) {
+    const data = await this.documentsService.patchDocumentVariables({
+      actorUserId,
+      workspaceId,
+      documentId,
+      variables: body.variables.map((v) => ({ variableKey: v.variableKey, value: v.value })),
+    });
+    return wrapSuccessResponse({
+      payload: createActionResponsePayload({
+        message: "Variables updated.",
+        extraData: data,
+      }),
+      requestId,
+    });
+  }
+
   @Get(":documentId")
   async getDocument(
     @Param("workspaceId") workspaceId: string,
@@ -90,6 +116,7 @@ export class DocumentsNestController {
   }
 
   @Post()
+  @WorkspaceRoleAtLeast("MEMBER")
   @HttpCode(HttpStatus.CREATED)
   async createDocument(
     @Param("workspaceId") workspaceId: string,
@@ -110,6 +137,7 @@ export class DocumentsNestController {
   }
 
   @Put(":documentId")
+  @WorkspaceRoleAtLeast("MEMBER")
   async updateDocument(
     @Param("workspaceId") workspaceId: string,
     @Param("documentId") documentId: string,
@@ -153,6 +181,7 @@ export class DocumentsNestController {
   }
 
   @Delete(":documentId")
+  @WorkspaceRoleAtLeast("MANAGER")
   async deleteDocument(
     @Param("workspaceId") workspaceId: string,
     @Param("documentId") documentId: string,

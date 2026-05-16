@@ -34,6 +34,11 @@ import { GoogleOAuthService } from "./google-oauth.service.js";
 import { mapRegisterPersistenceError } from "./auth.service.js";
 import { CSRF_TOKEN_COOKIE, GOOGLE_OAUTH_STATE_COOKIE, REFRESH_TOKEN_COOKIE } from "./auth-cookies.js";
 import { clearRefreshTokenCookie, setCsrfTokenCookie, setRefreshTokenCookie } from "./auth-cookie.util.js";
+import { apiRuntimeEnv } from "../config/api-runtime.js";
+import {
+  createSignedGoogleOAuthState,
+  verifySignedGoogleOAuthState,
+} from "./google-oauth-state.js";
 
 const mapToHttpException = (error: unknown, requestId: string) => {
   if (error instanceof AppError) {
@@ -333,14 +338,7 @@ export class AuthNestController {
       res.status(mapped.statusCode).json(mapped.payload);
       return;
     }
-    const state = randomBytes(16).toString("hex");
-    res.cookie(GOOGLE_OAUTH_STATE_COOKIE, state, {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
-      maxAge: 10 * 60 * 1000,
-      path: "/",
-    });
+    const state = createSignedGoogleOAuthState(apiRuntimeEnv.JWT_ACCESS_SECRET);
     const url = this.googleOAuth.buildAuthorizationUrl(state);
     res.status(HttpStatus.FOUND).redirect(url);
   }
@@ -357,14 +355,18 @@ export class AuthNestController {
     @Res({ passthrough: true }) res: Response,
   ) {
     try {
-      const expected = req.cookies?.[GOOGLE_OAUTH_STATE_COOKIE];
+      const expectedCookie = req.cookies?.[GOOGLE_OAUTH_STATE_COOKIE];
       res.clearCookie(GOOGLE_OAUTH_STATE_COOKIE, {
         httpOnly: true,
         sameSite: "lax",
         secure: process.env.NODE_ENV === "production",
         path: "/",
       });
-      if (!code || !state || !expected || state !== expected) {
+      const stateValid =
+        typeof state === "string" &&
+        (verifySignedGoogleOAuthState(apiRuntimeEnv.JWT_ACCESS_SECRET, state) ||
+          (typeof expectedCookie === "string" && expectedCookie.length > 0 && state === expectedCookie));
+      if (!code || !stateValid) {
         throw new AppError({
           code: "OAUTH_STATE_MISMATCH",
           message: "OAuth state validation failed",
@@ -381,6 +383,26 @@ export class AuthNestController {
       setRefreshTokenCookie(res, session.refreshToken);
       const csrfToken = randomBytes(24).toString("base64url");
       setCsrfTokenCookie(res, csrfToken);
+
+      const spaOrigin = process.env.WEB_APP_URL?.trim() || process.env.BASE_URL?.trim();
+      if (spaOrigin) {
+        const oauthPayload = {
+          accessToken: session.accessToken,
+          csrfToken,
+          user: {
+            id: session.user.id,
+            email: session.user.email,
+            fullName: session.user.fullName,
+            globalRole: session.user.globalRole as "USER" | "ADMIN",
+            authProvider: session.user.authProvider === "google" ? ("google" as const) : ("local" as const),
+          },
+        };
+        const hash = `oauth=${encodeURIComponent(JSON.stringify(oauthPayload))}`;
+        const dest = `${spaOrigin.replace(/\/+$/, "")}/login#${hash}`;
+        res.redirect(HttpStatus.FOUND, dest);
+        return;
+      }
+
       return wrapSuccessResponse({
         payload: createActionResponsePayload({
           message: "Signed in with Google.",
@@ -393,6 +415,12 @@ export class AuthNestController {
         requestId,
       });
     } catch (error) {
+      const spaOrigin = process.env.WEB_APP_URL?.trim() || process.env.BASE_URL?.trim();
+      if (spaOrigin && error instanceof AppError && error.code === "ACCOUNT_DEACTIVATED") {
+        const dest = `${spaOrigin.replace(/\/+$/, "")}/login?error=account_deactivated`;
+        res.redirect(HttpStatus.FOUND, dest);
+        return;
+      }
       mapToHttpException(error, requestId);
     }
   }

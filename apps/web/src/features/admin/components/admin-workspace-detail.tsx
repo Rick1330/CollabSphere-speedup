@@ -49,7 +49,7 @@ export const AdminWorkspaceDetail = ({ workspaceId }: AdminWorkspaceDetailProps)
     },
   });
 
-  const { data: memberResp, isLoading: membersLoading } = useQuery({
+  const { data: memberResp, isLoading: membersLoading, isError: membersError } = useQuery({
     queryKey: ["admin", "workspace", workspaceId, "members"],
     queryFn: () => fetchMembers(workspaceId),
   });
@@ -248,6 +248,11 @@ export const AdminWorkspaceDetail = ({ workspaceId }: AdminWorkspaceDetailProps)
               <Skeleton key={i} className="h-10 w-full rounded-lg" />
             ))}
           </div>
+        ) : membersError ? (
+          <p className="p-8 text-center text-sm text-stone-600">
+            Member list could not be loaded. If this persists, check that you are signed in as a
+            platform admin or a member of this workspace.
+          </p>
         ) : members.length === 0 ? (
           <p className="p-8 text-center text-sm text-stone-500">
             No members in this workspace.
@@ -358,7 +363,7 @@ const StatCard = ({
         {label}
       </p>
       <p className="text-xl font-bold text-stone-900 tabular-nums leading-tight">
-        {value.toLocaleString()}
+        {(value ?? 0).toLocaleString()}
       </p>
     </div>
   </div>

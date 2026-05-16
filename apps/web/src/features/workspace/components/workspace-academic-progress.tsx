@@ -1,4 +1,6 @@
 import { Link } from "react-router-dom";
+import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   GraduationCap,
   Clock,
@@ -8,10 +10,14 @@ import {
   ChevronRight,
   Users,
   AlertCircle,
+  Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { relativeTime, fullDateTime, getInitials, getAvatarColor } from "@/lib/format";
-import { MOCK_ACADEMIC_PROGRESS, type AcademicQueueItem } from "@/lib/mock-academic";
+import type { AcademicQueueItem } from "@/lib/mock-academic";
+import { MOCK_ACADEMIC_PROGRESS } from "@/lib/mock-academic";
+import { getDocumentTree, type TreeNode } from "@/api/adapters/documents";
+import type { TreeDocumentNode } from "@/features/documents/components/document-tree";
 
 interface WorkspaceAcademicProgressProps {
   workspaceId: string;
@@ -19,22 +25,156 @@ interface WorkspaceAcademicProgressProps {
   isSupervisorView: boolean;
 }
 
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isApiWorkspaceId(id: string) {
+  return UUID_RE.test(id.trim());
+}
+
+function flattenDocuments(nodes: TreeNode[]): TreeDocumentNode[] {
+  const out: TreeDocumentNode[] = [];
+  const walk = (ns: TreeNode[]) => {
+    for (const n of ns) {
+      if (n.type === "document") out.push(n);
+      else walk(n.children);
+    }
+  };
+  walk(nodes);
+  return out;
+}
+
+function emptyLiveSnapshot(): ReturnType<typeof buildAcademicSnapshotFromDocs> {
+  return {
+    counts: { draft: 0, submitted: 0, changes_requested: 0, approved: 0 },
+    awaitingReview: [],
+    recentlyReviewed: [],
+    studentsWithOpenCycles: [],
+  };
+}
+
+function buildAcademicSnapshotFromDocs(
+  docs: Array<{
+    id: string;
+    title: string;
+    folderPath: string;
+    updatedAt: string;
+    status: TreeDocumentNode["status"];
+  }>,
+): {
+  counts: { draft: number; submitted: number; changes_requested: number; approved: number };
+  awaitingReview: AcademicQueueItem[];
+  recentlyReviewed: AcademicQueueItem[];
+  studentsWithOpenCycles: {
+    studentId: string;
+    studentName: string;
+    openCount: number;
+    lastEventAt: string;
+  }[];
+} {
+  const counts = { draft: 0, submitted: 0, changes_requested: 0, approved: 0 };
+  for (const d of docs) {
+    if (d.status === "archived") continue;
+    if (d.status in counts) counts[d.status as keyof typeof counts]++;
+  }
+
+  const toQueueItem = (row: (typeof docs)[0]): AcademicQueueItem => ({
+    documentId: row.id,
+    documentTitle: row.title,
+    folderPath: row.folderPath,
+    studentId: row.id,
+    studentName: "Workspace collaborator",
+    status: row.status as AcademicQueueItem["status"],
+    lastEventAt: row.updatedAt,
+  });
+
+  const awaitingReview = docs
+    .filter((d) => d.status === "submitted" || d.status === "changes_requested")
+    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+    .slice(0, 12)
+    .map((d) =>
+      toQueueItem({
+        ...d,
+        status: d.status === "changes_requested" ? "changes_requested" : "submitted",
+      }),
+    );
+
+  const recentlyReviewed = docs
+    .filter((d) => d.status === "approved")
+    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+    .slice(0, 8)
+    .map((d) => toQueueItem({ ...d, status: "approved" }));
+
+  return {
+    counts,
+    awaitingReview,
+    recentlyReviewed,
+    studentsWithOpenCycles: [],
+  };
+}
+
 /**
  * Supervisor progress block for academic workspaces.
  * Shows: status counts strip + "Awaiting your review" queue + recently reviewed.
  *
- * Designed to answer "who is blocked, what needs review, what was approved"
- * at a glance — not as a generic KPI bar.
+ * For real API workspace UUIDs, data is derived from the live document tree.
+ * Legacy non-UUID routes may still use the seeded mock snapshot.
  */
 export const WorkspaceAcademicProgress = ({
   workspaceId,
   isSupervisorView,
 }: WorkspaceAcademicProgressProps) => {
-  const data = MOCK_ACADEMIC_PROGRESS;
+  const useLive = isApiWorkspaceId(workspaceId);
+
+  const treeQuery = useQuery({
+    queryKey: ["workspace-academic", workspaceId, "tree"],
+    queryFn: () => getDocumentTree(workspaceId),
+    enabled: useLive,
+    staleTime: 15_000,
+  });
+
+  const liveSnapshot = useMemo(() => {
+    if (!useLive || !treeQuery.data) return null;
+    const flat = flattenDocuments(treeQuery.data);
+    const rows = flat.map((d) => {
+      const folderPath = findFolderPath(treeQuery.data, d.id);
+      return {
+        id: d.id,
+        title: d.title,
+        folderPath: folderPath ?? "Root",
+        updatedAt: d.updatedAt,
+        status: d.status,
+      };
+    });
+    return buildAcademicSnapshotFromDocs(rows);
+  }, [treeQuery.data, useLive]);
+
+  const data = useLive ? (liveSnapshot ?? emptyLiveSnapshot()) : MOCK_ACADEMIC_PROGRESS;
   const base = `/w/${workspaceId}`;
   const VISIBLE_QUEUE = 5;
   const queue = data.awaitingReview.slice(0, VISIBLE_QUEUE);
   const overflow = Math.max(0, data.awaitingReview.length - VISIBLE_QUEUE);
+
+  if (useLive && treeQuery.isPending) {
+    return (
+      <section aria-labelledby="academic-progress-heading" className="mt-10">
+        <div className="flex items-center gap-2 text-sm text-stone-500 py-8" aria-busy="true">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading academic progress…
+        </div>
+      </section>
+    );
+  }
+
+  if (useLive && treeQuery.isError) {
+    return (
+      <section aria-labelledby="academic-progress-heading" className="mt-10">
+        <div className="rounded-lg border border-red-200 bg-red-50/50 p-4 text-sm text-red-800">
+          Couldn’t load document status for this workspace.
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section
@@ -200,6 +340,18 @@ export const WorkspaceAcademicProgress = ({
     </section>
   );
 };
+
+function findFolderPath(nodes: TreeNode[], documentId: string, trail: string[] = []): string | null {
+  for (const n of nodes) {
+    if (n.type === "folder") {
+      const hit = findFolderPath(n.children, documentId, [...trail, n.name]);
+      if (hit !== null) return hit;
+    } else if (n.id === documentId) {
+      return trail.length ? trail.join(" / ") : null;
+    }
+  }
+  return null;
+}
 
 const CountTile = ({
   label,

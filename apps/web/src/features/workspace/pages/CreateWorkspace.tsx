@@ -18,7 +18,7 @@ const CreateWorkspace = () => {
 
   return (
     <div className="app-light min-h-screen flex flex-col">
-      <TopNav user={currentUser} unreadCount={3} onOpenPalette={palette.toggle} />
+      <TopNav user={currentUser} onOpenPalette={palette.toggle} />
       <main className="flex-1 min-w-0">
         <CreateWorkspaceWizard />
       </main>

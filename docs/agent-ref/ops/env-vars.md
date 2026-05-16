@@ -67,11 +67,15 @@ The following categories must be defined for all non-public environments:
 - Missing `.env.local` or invalid secrets can cause partial startup failures (services may boot but fail at runtime).
 - Mismatched OAuth redirect URLs will break OAuth flows.
 - Inconsistent env values between `api` and `collab` can cause auth or room-authorization failures.
+- Rotating **`JWT_ACCESS_SECRET`** (or shortening **`JWT_ACCESS_TTL_MINUTES`**) invalidates existing access tokens until each user signs in again; the UI may show **Invalid token** on `/users/me` and other protected routes.
 
 ## Validation or Testing Notes
 - Validate `.env.example` includes all required keys for local development.
 - Verify environment variables are loaded consistently across `api`, `collab`, and `worker`.
 - Confirm production/staging secrets are injected via CI/CD and not committed.
+
+## Frontend / API connectivity
+For browser **Failed to fetch** / **Couldn’t load …** errors, see **Frontend “Failed to fetch”** in [`local-dev.md`](./local-dev.md) (Vite **8080** vs API **3001**, default direct API vs `VITE_USE_DEV_PROXY`, Postgres/Redis, `NODE_ENV` vs CORS).
 
 ## Related Files / Domains
 - `docs/agent-ref/ops/local-dev.md`

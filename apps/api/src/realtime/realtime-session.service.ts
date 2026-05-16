@@ -65,6 +65,10 @@ export class RealtimeSessionService {
     return `task:${taskId}`;
   }
 
+  toDocumentRoom(documentId: string): string {
+    return `document:${documentId}`;
+  }
+
   private resolveAccessToken(client: Socket): string {
     const authToken =
       typeof client.handshake.auth?.token === "string" ? client.handshake.auth.token.trim() : "";

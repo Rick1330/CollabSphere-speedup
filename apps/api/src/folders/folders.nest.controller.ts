@@ -8,6 +8,7 @@ import {
   Param,
   Patch,
   Post,
+  UseGuards,
 } from "@nestjs/common";
 import { CurrentUserId } from "../common/decorators/current-user.decorator.js";
 import { ReqRequestId } from "../common/nest/request-id.decorator.js";
@@ -18,12 +19,16 @@ import {
 } from "../common/interceptors/response-envelope.interceptor.js";
 import { FoldersService } from "./folders.service.js";
 import { CreateFolderDto, RenameFolderDto } from "./folders.dto.js";
+import { WorkspaceMembershipGuard } from "../common/guards/workspace-membership.guard.js";
+import { WorkspaceRoleAtLeast } from "../common/decorators/workspace-role.decorator.js";
 
 @Controller("workspaces/:workspaceId/folders")
+@UseGuards(WorkspaceMembershipGuard)
 export class FoldersNestController {
   constructor(@Inject(FoldersService) private readonly foldersService: FoldersService) {}
 
   @Post()
+  @WorkspaceRoleAtLeast("MEMBER")
   @HttpCode(HttpStatus.CREATED)
   async create(
     @Param("workspaceId") workspaceId: string,
@@ -40,6 +45,7 @@ export class FoldersNestController {
   }
 
   @Patch(":folderId")
+  @WorkspaceRoleAtLeast("MEMBER")
   async rename(
     @Param("workspaceId") workspaceId: string,
     @Param("folderId") folderId: string,
@@ -47,16 +53,18 @@ export class FoldersNestController {
     @CurrentUserId() actorUserId: string,
     @Body() body: RenameFolderDto,
   ) {
-    const folder = await this.foldersService.renameFolder({
+    const folder = await this.foldersService.updateFolder({
       actorUserId,
       workspaceId,
       folderId,
       name: body.name,
+      parentId: body.parentId,
     });
     return wrapSuccessResponse({ payload: createSingleResourcePayload({ folder }), requestId });
   }
 
   @Delete(":folderId")
+  @WorkspaceRoleAtLeast("MANAGER")
   async remove(
     @Param("workspaceId") workspaceId: string,
     @Param("folderId") folderId: string,

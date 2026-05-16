@@ -28,6 +28,8 @@ const WORKSPACES: Record<string, WorkspaceWithRole> = {
     myRole: "ADMIN",
     permissions: {
       canCreateContent: true,
+      canOrganizeContent: true,
+      canDeleteContent: true,
       canEditSettings: true,
       canViewAnalytics: true,
     },
@@ -59,7 +61,7 @@ const TasksCalendarPage = () => {
       <WorkspaceSidebar workspace={workspace} collapsed={collapsed} onToggle={toggle} />
 
       <div className="flex-1 min-w-0 flex flex-col h-screen">
-        <TopNav user={MOCK_USER} unreadCount={3} onOpenPalette={palette.toggle} />
+        <TopNav user={MOCK_USER} onOpenPalette={palette.toggle} />
 
         <main className="flex-1 min-h-0 flex flex-col overflow-hidden">
           <TaskCalendar

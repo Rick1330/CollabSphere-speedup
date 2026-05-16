@@ -1,9 +1,10 @@
 import type { SessionContract, UserContract } from "@/api/contracts";
 import { ApiError, request } from "@/api/client";
 import { parseApiActionEnvelope, parseApiSingleEnvelope } from "@/api/client/envelope";
+import { listMineWorkspaceRows } from "@/api/adapters/workspaces";
 import { authSession } from "@/lib/auth-session";
 
-type AuthProvider = "email" | "google";
+type AuthProvider = "local" | "google";
 
 export class AuthError extends Error {
   constructor(
@@ -11,6 +12,7 @@ export class AuthError extends Error {
       | "INVALID_CREDENTIALS"
       | "EMAIL_NOT_VERIFIED"
       | "ACCOUNT_DISABLED"
+      | "ACCOUNT_DEACTIVATED"
       | "PROVIDER_MISMATCH"
       | "EMAIL_TAKEN"
       | "UNAUTHORIZED"
@@ -58,10 +60,12 @@ function toSession(accessToken: string, user: AuthApiUser): SessionContract {
 
 function parseAuthError(error: unknown): never {
   if (error instanceof ApiError) {
-    throw new AuthError(
-      (error.code as AuthError["code"] | undefined) ?? "UNKNOWN_ERROR",
-      error.message || "Authentication request failed.",
-    );
+    const raw = error.code as string | undefined;
+    const code: AuthError["code"] =
+      raw === "ACCOUNT_DEACTIVATED"
+        ? "ACCOUNT_DEACTIVATED"
+        : (raw as AuthError["code"] | undefined) ?? "UNKNOWN_ERROR";
+    throw new AuthError(code, error.message || "Authentication request failed.");
   }
   throw error;
 }
@@ -75,33 +79,54 @@ export async function login(input: {
       method: "POST",
       body: { email: input.email, password: input.password },
     });
-    const { extraData } = parseApiActionEnvelope<{ accessToken: string; user: AuthApiUser }>(payload);
+    const { extraData } = parseApiActionEnvelope<{
+      accessToken: string;
+      user: AuthApiUser;
+      csrfToken?: string;
+    }>(payload);
     const accessToken = extraData.accessToken;
     const user = extraData.user;
+    const csrfToken = typeof extraData.csrfToken === "string" ? extraData.csrfToken : undefined;
     if (!accessToken || !user?.id) {
       throw new Error("Invalid auth login response payload.");
     }
     authSession.signIn(user.id, {
       accessToken,
+      csrfToken,
       user: {
         id: user.id,
         email: user.email,
         fullName: user.fullName,
         avatarUrl: user.avatarUrl,
         globalRole: user.globalRole,
+        authProvider: user.authProvider === "google" ? "google" : "local",
       },
     });
+    try {
+      const rows = await listMineWorkspaceRows();
+      const firstId = rows[0]?.workspace?.id;
+      if (firstId) {
+        authSession.patchSession({ defaultWorkspaceId: firstId });
+      }
+    } catch {
+      /* non-fatal: user can still open /workspaces */
+    }
     return toSession(accessToken, user);
   } catch (error) {
     parseAuthError(error);
   }
 }
 
+/**
+ * Create a local account. The API returns success and sends a verification email;
+ * the user is **not** signed in until they verify and use `login()`.
+ * Does not call `authSession.signIn` (no placeholder session).
+ */
 export async function register(input: {
   email: string;
   password: string;
   fullName: string;
-}): Promise<SessionContract> {
+}): Promise<void> {
   try {
     await request<unknown>("/auth/register", {
       method: "POST",
@@ -112,17 +137,6 @@ export async function register(input: {
         confirmPassword: input.password,
       },
     });
-    return {
-      user: {
-        id: "pending-verification",
-        email: input.email,
-        fullName: input.fullName,
-        role: "member",
-      },
-      accessToken: "",
-      refreshToken: "",
-      expiresAt: new Date().toISOString(),
-    };
   } catch (error) {
     parseAuthError(error);
   }

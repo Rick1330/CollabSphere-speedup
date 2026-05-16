@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -18,10 +19,12 @@ import { createOpaqueId } from "@/lib/secure-random";
 import { createWorkspace } from "@/api/adapters/workspaces";
 import {
   WORKSPACE_TEMPLATES,
+  listWorkspaceTemplatesFromApi,
   getWorkspaceTemplate,
   type WorkspaceTemplate,
   type TemplateCategory,
 } from "@/api/adapters/templates";
+import { resolveWizardWorkspaceTemplateForApi } from "@/lib/document-template-api-map";
 import {
   Dialog,
   DialogContent,
@@ -112,13 +115,17 @@ export const CreateWorkspaceWizard = () => {
     }
     setIsCreating(true);
     try {
+      const wsType = data.type ?? "general";
+      const apiTemplateId =
+        data.templateId && !data.templateId.startsWith("tpl-")
+          ? data.templateId
+          : resolveWizardWorkspaceTemplateForApi(data.templateId, wsType);
       const ws = await createWorkspace({
         name: data.name.trim(),
         description: data.description.trim(),
         icon: data.icon.trim() || undefined,
-        type: data.type ?? "general",
-        // Frontend templates are currently local-only and don't map 1:1 to DB template IDs.
-        templateId: null,
+        type: wsType,
+        templateId: apiTemplateId,
       });
       const tpl = data.templateId ? getWorkspaceTemplate(data.templateId) : null;
       const seededFolders = tpl?.preview.folders.length ?? 0;
@@ -147,7 +154,7 @@ export const CreateWorkspaceWizard = () => {
   const stepDek = {
     1: "A name and a sentence is enough. You can refine everything later.",
     2: "Type controls templates, role labels, and whether submission workflows are available.",
-    3: "Each template seeds a real structure — folders, starter docs, board, and roles.",
+    3: "When a matching layout exists in the catalog, we seed folders and starter content from it. Otherwise you start with a clean workspace.",
     4: "One last look at exactly what we'll create.",
   }[currentStep];
 
@@ -558,14 +565,13 @@ const StepTemplate = ({
 }) => {
   const [previewId, setPreviewId] = useState<string | null>(null);
 
-  const templates = useMemo(
-    () => WORKSPACE_TEMPLATES.filter((t) => t.category === workspaceType),
-    [workspaceType],
-  );
+  const { data: templates = WORKSPACE_TEMPLATES.filter((t) => t.category === workspaceType) } =
+    useQuery({
+      queryKey: ["templates", "workspace", workspaceType],
+      queryFn: () => listWorkspaceTemplatesFromApi(workspaceType),
+    });
 
-  const previewTemplate = previewId
-    ? WORKSPACE_TEMPLATES.find((t) => t.id === previewId) ?? null
-    : null;
+  const previewTemplate = previewId ? templates.find((t) => t.id === previewId) ?? null : null;
 
   return (
     <>

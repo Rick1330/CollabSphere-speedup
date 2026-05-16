@@ -27,6 +27,8 @@ export interface WorkspaceForSidebar {
   status: "active" | "archived";
   permissions: {
     canCreateContent: boolean;
+    canOrganizeContent?: boolean;
+    canDeleteContent?: boolean;
     canEditSettings: boolean;
     canViewAnalytics: boolean;
   };
@@ -59,18 +61,18 @@ export const WorkspaceSidebar = ({ workspace, collapsed, onToggle }: WorkspaceSi
   return (
     <aside
       className={cn(
-        "hidden lg:flex flex-col h-screen sticky top-0 shrink-0 border-r border-stone-200 bg-[#FAFAF9]",
+        "hidden lg:flex flex-col h-screen sticky top-0 shrink-0 border-r border-stone-200 dark:border-stone-800 bg-[#FAFAF9] dark:bg-stone-950",
         "transition-[width] duration-200 ease-out",
         collapsed ? "w-[60px]" : "w-[260px]",
       )}
       aria-label="Workspace navigation"
     >
       {/* Header */}
-      <div className={cn("border-b border-stone-200/70", collapsed ? "px-2 py-3" : "px-3 py-3")}>
+      <div className={cn("border-b border-stone-200/70 dark:border-stone-800", collapsed ? "px-2 py-3" : "px-3 py-3")}>
         <Link
           to="/dashboard"
           className={cn(
-            "flex items-center gap-2 rounded-lg text-sm text-stone-500 hover:text-stone-900 hover:bg-stone-100 transition-colors",
+            "flex items-center gap-2 rounded-lg text-sm text-stone-500 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-100 hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors",
             collapsed ? "justify-center h-8 w-8" : "px-2 py-1.5",
           )}
           aria-label="Back to dashboard"
@@ -89,9 +91,9 @@ export const WorkspaceSidebar = ({ workspace, collapsed, onToggle }: WorkspaceSi
                 </span>
               )}
               <div className="min-w-0">
-                <h2 className="text-sm font-bold text-stone-900 truncate">{workspace.name}</h2>
+                <h2 className="text-sm font-bold text-stone-900 dark:text-stone-100 truncate">{workspace.name}</h2>
                 {workspace.description && (
-                  <p className="text-[11px] text-stone-500 truncate">{workspace.description}</p>
+                  <p className="text-[11px] text-stone-500 dark:text-stone-400 truncate">{workspace.description}</p>
                 )}
               </div>
             </div>
@@ -104,7 +106,7 @@ export const WorkspaceSidebar = ({ workspace, collapsed, onToggle }: WorkspaceSi
               >
                 {workspace.type}
               </span>
-              <span className="font-mono text-[9px] text-stone-400 tracking-wider uppercase">
+              <span className="font-mono text-[9px] text-stone-400 dark:text-stone-500 tracking-wider uppercase">
                 {workspace.roleLabel}
               </span>
             </div>
@@ -133,8 +135,8 @@ export const WorkspaceSidebar = ({ workspace, collapsed, onToggle }: WorkspaceSi
                       "group flex items-center gap-3 rounded-lg text-sm transition-colors duration-150",
                       collapsed ? "justify-center px-2 py-2" : "px-3 py-2",
                       isActive
-                        ? "text-teal-700 bg-teal-50 font-semibold border-l-2 border-teal-600"
-                        : "text-stone-500 hover:text-stone-900 hover:bg-stone-100 font-medium",
+                        ? "text-teal-700 dark:text-teal-400 bg-teal-50 dark:bg-teal-950/40 font-semibold border-l-2 border-teal-600 dark:border-teal-500"
+                        : "text-stone-500 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-100 hover:bg-stone-100 dark:hover:bg-stone-800 font-medium",
                       "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/50 focus-visible:ring-offset-1",
                     )
                   }
@@ -149,7 +151,7 @@ export const WorkspaceSidebar = ({ workspace, collapsed, onToggle }: WorkspaceSi
           })}
 
           {!collapsed && (
-            <li className="pt-2 mt-2 border-t border-stone-200/70" aria-hidden="true" />
+            <li className="pt-2 mt-2 border-t border-stone-200/70 dark:border-stone-800" aria-hidden="true" />
           )}
 
           {/* Analytics — Manager+ */}
@@ -162,8 +164,8 @@ export const WorkspaceSidebar = ({ workspace, collapsed, onToggle }: WorkspaceSi
                     "flex items-center gap-3 rounded-lg text-sm transition-colors duration-150",
                     collapsed ? "justify-center px-2 py-2" : "px-3 py-2",
                     isActive
-                      ? "text-teal-700 bg-teal-50 font-semibold border-l-2 border-teal-600"
-                      : "text-stone-500 hover:text-stone-900 hover:bg-stone-100 font-medium",
+                      ? "text-teal-700 dark:text-teal-400 bg-teal-50 dark:bg-teal-950/40 font-semibold border-l-2 border-teal-600 dark:border-teal-500"
+                      : "text-stone-500 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-100 hover:bg-stone-100 dark:hover:bg-stone-800 font-medium",
                   )
                 }
                 title={collapsed ? "Analytics" : undefined}
@@ -199,8 +201,8 @@ export const WorkspaceSidebar = ({ workspace, collapsed, onToggle }: WorkspaceSi
                   "flex items-center gap-3 rounded-lg text-sm transition-colors duration-150",
                   collapsed ? "justify-center px-2 py-2" : "px-3 py-2",
                   isActive
-                    ? "text-teal-700 bg-teal-50 font-semibold border-l-2 border-teal-600"
-                    : "text-stone-500 hover:text-stone-900 hover:bg-stone-100 font-medium",
+                    ? "text-teal-700 dark:text-teal-400 bg-teal-50 dark:bg-teal-950/40 font-semibold border-l-2 border-teal-600 dark:border-teal-500"
+                    : "text-stone-500 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-100 hover:bg-stone-100 dark:hover:bg-stone-800 font-medium",
                 )
               }
               title={collapsed ? "Templates" : undefined}
@@ -219,8 +221,8 @@ export const WorkspaceSidebar = ({ workspace, collapsed, onToggle }: WorkspaceSi
                     "flex items-center gap-3 rounded-lg text-sm transition-colors duration-150",
                     collapsed ? "justify-center px-2 py-2" : "px-3 py-2",
                     isActive
-                      ? "text-teal-700 bg-teal-50 font-semibold border-l-2 border-teal-600"
-                      : "text-stone-500 hover:text-stone-900 hover:bg-stone-100 font-medium",
+                      ? "text-teal-700 dark:text-teal-400 bg-teal-50 dark:bg-teal-950/40 font-semibold border-l-2 border-teal-600 dark:border-teal-500"
+                      : "text-stone-500 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-100 hover:bg-stone-100 dark:hover:bg-stone-800 font-medium",
                   )
                 }
                 title={collapsed ? "Settings" : undefined}

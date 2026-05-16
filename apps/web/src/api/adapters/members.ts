@@ -13,6 +13,7 @@
  * changes.
  */
 import { request, ApiError as ClientApiError } from "@/api/client";
+import { parseApiSingleEnvelope } from "@/api/client/envelope";
 import { getWorkspaceRoleLabel } from "@/lib/role-labels";
 
 export type WorkspaceRole = "OWNER" | "ADMIN" | "MANAGER" | "MEMBER" | "VIEWER";
@@ -48,6 +49,19 @@ export interface ApiError extends Error {
   requestId?: string;
 }
 
+export interface WorkspaceMemberPeerProfile {
+  membershipId: string;
+  user: {
+    id: string;
+    fullName: string;
+    email?: string;
+    avatarUrl: string | null;
+  };
+  role: WorkspaceRole;
+  joinedAt: string;
+  lastAccessedAt: string | null;
+}
+
 type ListEnvelope<T> = { data?: { items?: T[]; total?: number } };
 type SingleEnvelope<T> = { data?: T };
 
@@ -69,6 +83,7 @@ type ApiInvitation = {
   email: string;
   role: WorkspaceRole;
   invitedById: string;
+  invitedByFullName?: string;
   createdAt: string;
   expiresAt: string;
   revokedAt?: string | null;
@@ -166,12 +181,25 @@ const mapInvitation = (item: ApiInvitation): PendingInvitation => ({
   email: item.email,
   role: item.role,
   roleLabel: getWorkspaceRoleLabel("general", item.role),
-  invitedBy: { id: item.invitedById, fullName: "Workspace admin" },
+  invitedBy: {
+    id: item.invitedById,
+    fullName: item.invitedByFullName?.trim() || "Workspace member",
+  },
   createdAt: item.createdAt,
   expiresAt: item.expiresAt,
   status: new Date(item.expiresAt) < new Date() ? "expired" : "pending",
   lastResentAt: null,
 });
+
+export async function fetchWorkspaceMemberPeerProfile(
+  workspaceId: string,
+  userId: string,
+): Promise<WorkspaceMemberPeerProfile> {
+  const raw = await request<unknown>(
+    `/workspaces/${workspaceId}/members/by-user/${encodeURIComponent(userId)}/profile`,
+  );
+  return parseApiSingleEnvelope<WorkspaceMemberPeerProfile>(raw);
+}
 
 export async function fetchMembers(workspaceId: string): Promise<{ data: { items: WorkspaceMember[] } }> {
   const payload = await request<ListEnvelope<ApiWorkspaceMember>>(`/workspaces/${workspaceId}/members`);
@@ -229,6 +257,20 @@ export async function inviteMember(
         emails: [params.email],
         role: params.role,
       },
+    });
+  } catch (error) {
+    mapApiError(error);
+  }
+}
+
+export async function resendInvitation(
+  workspaceId: string,
+  invitationId: string,
+  _actorRole: WorkspaceRole,
+): Promise<void> {
+  try {
+    await request(`/workspaces/${workspaceId}/invitations/${invitationId}/resend`, {
+      method: "POST",
     });
   } catch (error) {
     mapApiError(error);

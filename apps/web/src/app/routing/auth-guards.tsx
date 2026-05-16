@@ -13,7 +13,7 @@
 
 import type { ReactNode } from "react";
 import { Navigate, useLocation } from "react-router-dom";
-import { useIsAuthenticated } from "@/lib/auth-session";
+import { isAuthFailureSuppressed, useIsAuthenticated } from "@/lib/auth-session";
 
 export const RequireAuth = ({ children }: { children: ReactNode }) => {
   const isAuthed = useIsAuthenticated();
@@ -33,6 +33,6 @@ export const RedirectIfAuthed = ({
   to?: string;
 }) => {
   const isAuthed = useIsAuthenticated();
-  if (isAuthed) return <Navigate to={to} replace />;
+  if (isAuthed && !isAuthFailureSuppressed()) return <Navigate to={to} replace />;
   return <>{children}</>;
 };

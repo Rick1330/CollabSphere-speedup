@@ -1,4 +1,5 @@
 import { io, type Socket } from "socket.io-client";
+import { resolveRealtimeSocketOrigin } from "@/api/client";
 import { authSession } from "@/lib/auth-session";
 
 export type RealtimeConnectionStatus = "connected" | "reconnecting" | "unavailable";
@@ -12,7 +13,7 @@ export type TaskRealtimeEvent =
 let socket: Socket | null = null;
 
 function getRealtimeBaseUrl(): string {
-  return import.meta.env.VITE_REALTIME_BASE_URL ?? import.meta.env.VITE_API_BASE_URL ?? "/";
+  return resolveRealtimeSocketOrigin();
 }
 
 export function getRealtimeSocket(): Socket {

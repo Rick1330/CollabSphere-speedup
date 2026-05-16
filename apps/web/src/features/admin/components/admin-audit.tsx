@@ -25,21 +25,18 @@ import {
   SeverityChip,
 } from "./admin-primitives";
 
+/** Values are `audit_log.action_key` prefixes or full keys (API uses `startsWith`). */
 const AUDIT_EVENT_TYPES = [
-  { value: "auth.login", label: "Login" },
-  { value: "auth.login_failed", label: "Login failed" },
-  { value: "auth.logout", label: "Logout" },
-  { value: "auth.register", label: "Registration" },
-  { value: "auth.password_changed", label: "Password changed" },
-  { value: "auth.password_reset", label: "Password reset" },
-  { value: "user.deactivated", label: "User deactivated" },
-  { value: "user.reactivated", label: "User reactivated" },
-  { value: "user.role_changed", label: "Role changed" },
-  { value: "workspace.deleted", label: "Workspace deleted" },
-  { value: "workspace.archived", label: "Workspace archived" },
-  { value: "member.removed", label: "Member removed" },
-  { value: "document.exported", label: "Document exported" },
-  { value: "ownership.transferred", label: "Ownership transferred" },
+  { value: "admin.user", label: "User administration" },
+  { value: "admin.workspace", label: "Workspace administration" },
+  { value: "admin.audit", label: "Audit log access" },
+  { value: "admin.user.deactivated", label: "User deactivated" },
+  { value: "admin.user.reactivated", label: "User reactivated" },
+  { value: "admin.user.promoted", label: "User promoted to admin" },
+  { value: "admin.user.demoted", label: "User demoted from admin" },
+  { value: "admin.workspace.archived", label: "Workspace archived" },
+  { value: "admin.workspace.unarchived", label: "Workspace unarchived" },
+  { value: "admin.workspace.force_deleted", label: "Workspace force-deleted" },
 ];
 
 const DATE_RANGES = [

@@ -13,14 +13,25 @@ import {
 import { TopNav } from "@/app/shell/top-nav";
 import { CommandPalette } from "@/app/shell/command-palette";
 import { useCommandPalette } from "@/hooks/use-command-palette";
-import { DOCUMENT_TEMPLATES, getDocumentTemplate } from "@/api/adapters/templates";
+import { useQuery } from "@tanstack/react-query";
+import {
+  DOCUMENT_TEMPLATES,
+  getDocumentTemplate,
+  listDocumentTemplatesFromApi,
+} from "@/api/adapters/templates";
 import { buildDocumentSeed, stashPendingDoc } from "@/api/adapters/templates";
+import { createDocument } from "@/api/adapters/documents";
 import { useDocumentTree } from "@/features/documents/hooks/use-document-tree";
 import type { TreeNode } from "@/features/documents/components/document-tree";
+import { useWorkspaceRouteContext } from "@/hooks/use-workspace-route-context";
+import { resolveMockDocumentTemplateForApi } from "@/lib/document-template-api-map";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { isDatabaseWorkspaceId } from "@/lib/workspace-id";
+import { useCurrentAccount } from "@/lib/auth-session";
+import { ApiError } from "@/api/client";
 
-const MOCK_USER = { fullName: "Elshaday Tesfaye", email: "jane@collabsphere.app" };
+const FALLBACK_NAV_USER = { fullName: "Guest", email: "" };
 
 interface FolderOpt {
   id: string;
@@ -44,6 +55,10 @@ const NewDocument = () => {
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const palette = useCommandPalette();
+  const account = useCurrentAccount();
+  const navUser = account
+    ? { fullName: account.fullName, email: account.email }
+    : FALLBACK_NAV_USER;
 
   const [title, setTitle] = useState(params.get("title") ?? "");
   const [folder, setFolder] = useState<string>(params.get("folder") ?? "__root__");
@@ -51,9 +66,16 @@ const NewDocument = () => {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const { tree } = useDocumentTree(workspaceId);
+  const { sidebar } = useWorkspaceRouteContext();
+  const { tree, reload: reloadDocumentTree } = useDocumentTree(workspaceId);
   const folders = useMemo(() => flattenFolders(tree), [tree]);
-  const template = getDocumentTemplate(templateId) ?? DOCUMENT_TEMPLATES[0];
+  const wsType = sidebar?.type ?? "general";
+  const { data: catalogTemplates = DOCUMENT_TEMPLATES } = useQuery({
+    queryKey: ["templates", "document", wsType],
+    queryFn: () => listDocumentTemplatesFromApi(wsType),
+    enabled: isDatabaseWorkspaceId(workspaceId),
+  });
+  const template = getDocumentTemplate(templateId) ?? catalogTemplates[0];
 
   useEffect(() => {
     document.title = "New document — CollabSphere";
@@ -61,38 +83,69 @@ const NewDocument = () => {
 
   const handleCreate = async () => {
     setError(null);
-    if (title.trim().length < 2) {
-      setError("Give the document a title (2 characters minimum).");
+    if (title.trim().length < 3) {
+      setError("Give the document a title (3 characters minimum).");
       return;
     }
     setSubmitting(true);
-    await new Promise((r) => setTimeout(r, 600));
+    try {
+      const folderLabel =
+        folder === "__root__" ? null : folders.find((f) => f.id === folder)?.label ?? null;
 
-    // Resolve the destination folder label (so the editor breadcrumb is right).
-    const folderLabel =
-      folder === "__root__"
-        ? null
-        : folders.find((f) => f.id === folder)?.label ?? null;
+      const seed = buildDocumentSeed(title, templateId, folderLabel);
 
-    // Seed content from the chosen document template, stash it under a fresh
-    // doc id, then open the editor — which will pick the seed up on mount.
-    const newId = `doc-${Date.now().toString(36)}`;
-    const seed = buildDocumentSeed(title, templateId, folderLabel);
-    stashPendingDoc(newId, seed);
+      if (isDatabaseWorkspaceId(workspaceId)) {
+        let apiTemplateId =
+          templateId === "doc-blank"
+            ? null
+            : templateId.startsWith("doc-")
+              ? resolveMockDocumentTemplateForApi(templateId, wsType)
+              : templateId;
+        if (templateId !== "doc-blank" && !apiTemplateId) {
+          toast.message("Template not available for this workspace", {
+            description: "Creating a blank document instead.",
+          });
+          apiTemplateId = null;
+        }
+        const created = await createDocument(workspaceId, {
+          title: title.trim(),
+          folderId: folder === "__root__" ? null : folder,
+          templateId: apiTemplateId,
+        });
+        reloadDocumentTree();
+        stashPendingDoc(created.id, seed);
+        toast.success(`"${seed.title}" created`, {
+          description:
+            seed.templateId === "doc-blank"
+              ? "Opening the editor."
+              : `Seeded from ${seed.templateName}.`,
+        });
+        navigate(`/w/${workspaceId}/documents/${created.id}`);
+        return;
+      }
 
-    setSubmitting(false);
-    toast.success(`"${seed.title}" created`, {
-      description:
-        seed.templateId === "doc-blank"
-          ? "Opening the editor."
-          : `Seeded from ${seed.templateName}.`,
-    });
-    navigate(`/w/${workspaceId}/documents/${newId}`);
+      await new Promise((r) => setTimeout(r, 600));
+      const newId = `doc-${Date.now().toString(36)}`;
+      stashPendingDoc(newId, seed);
+      toast.success(`"${seed.title}" created`, {
+        description:
+          seed.templateId === "doc-blank"
+            ? "Opening the editor."
+            : `Seeded from ${seed.templateName}.`,
+      });
+      navigate(`/w/${workspaceId}/documents/${newId}`);
+    } catch (e) {
+      const msg = e instanceof ApiError ? e.message : "Could not create document.";
+      setError(msg);
+      toast.error(msg);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
     <div className="app-light min-h-screen flex flex-col">
-      <TopNav user={MOCK_USER} unreadCount={3} onOpenPalette={palette.toggle} />
+      <TopNav user={navUser} onOpenPalette={palette.toggle} />
 
       <main className="flex-1 min-w-0">
         <div className="mx-auto max-w-[920px] px-6 sm:px-8 pt-10 pb-24">
@@ -199,7 +252,7 @@ const NewDocument = () => {
                   </Link>
                 </div>
                 <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  {DOCUMENT_TEMPLATES.slice(0, 6).map((t) => {
+                  {catalogTemplates.map((t) => {
                     const active = t.id === templateId;
                     return (
                       <li key={t.id}>

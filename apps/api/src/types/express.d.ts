@@ -1,5 +1,3 @@
-import type { Request } from 'express';
-
 declare global {
   namespace Express {
     interface Request {
@@ -9,7 +7,9 @@ declare global {
         status: string;
       };
       workspaceMember?: {
+        id: string;
         role: string;
+        workspaceId: string;
         workspace: {
           id: string;
           status: string;
@@ -23,3 +23,5 @@ declare global {
     }
   }
 }
+
+export {};

@@ -1,9 +1,10 @@
 /**
  * Review Queue page.
  *
- * Cross-workspace queue of pending submissions for supervisors / reviewers /
- * platform admins. Supports search + sort, inline approve / request-changes
- * with note validation, and a per-document decision history panel.
+ * Cross-workspace queue of pending submissions for supervisors and reviewers
+ * with the appropriate workspace roles. Platform admins are redirected to the dashboard.
+ * Supports search + sort, inline approve / request-changes with note validation, and a
+ * per-document decision history panel.
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -57,7 +58,7 @@ const ReviewQueuePage = () => {
     document.title = "Review queue — CollabSphere";
   }, []);
 
-  if (account && !sessionRole.canReview) {
+  if (account && (!sessionRole.canReview || sessionRole.isPlatformAdmin)) {
     return <Navigate to="/dashboard" replace />;
   }
 
@@ -65,7 +66,7 @@ const ReviewQueuePage = () => {
     <div className="app-light min-h-screen flex">
       <AppSidebar collapsed={collapsed} onToggle={toggle} width={width} onResizeStart={startResize} />
       <div className="flex-1 min-w-0 flex flex-col">
-        <TopNav unreadCount={3} onOpenPalette={palette.toggle} />
+        <TopNav onOpenPalette={palette.toggle} />
         <ReviewQueueBody />
       </div>
       <CommandPalette open={palette.open} onOpenChange={palette.setOpen} />

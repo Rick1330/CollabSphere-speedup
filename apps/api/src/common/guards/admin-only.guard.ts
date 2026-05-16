@@ -1,4 +1,4 @@
-import { Injectable, type CanActivate, type ExecutionContext } from "@nestjs/common";
+import { Inject, Injectable, type CanActivate, type ExecutionContext } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import type { Request } from "express";
 import { ADMIN_ONLY_KEY } from "../decorators/admin-only.decorator.js";
@@ -6,7 +6,7 @@ import { AppError } from "../filters/app-error.filter.js";
 
 @Injectable()
 export class AdminOnlyGuard implements CanActivate {
-  constructor(private readonly reflector: Reflector) {}
+  constructor(@Inject(Reflector) private readonly reflector: Reflector) {}
 
   canActivate(context: ExecutionContext): boolean {
     const adminOnly =

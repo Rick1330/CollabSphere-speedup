@@ -16,12 +16,26 @@ export type DocumentTemplateBlock = {
   content?: unknown[];
 };
 
+export type TemplateVariableSpec = {
+  key: string;
+  label: string;
+  required?: boolean;
+};
+
+export type DocumentTemplateRegionSpec = {
+  id: string;
+  key: string;
+  title: string;
+};
+
 export type DocumentTemplateContentV2 = {
   schemaVersion: 2;
   format?: string;
   metadata?: JsonObject;
   properties?: JsonObject;
   blocks: DocumentTemplateBlock[];
+  regions?: DocumentTemplateRegionSpec[];
+  variables?: TemplateVariableSpec[];
 };
 
 const isRecord = (value: unknown): value is JsonObject =>
@@ -66,31 +80,75 @@ export const parseTemplateEnvelopeV2 = ({
 export const parseDocumentTemplateContent = (raw: unknown): DocumentTemplateContentV2 => {
   const envelope = parseTemplateEnvelopeV2({
     raw,
-    allowedFormats: ["document-v2", "structured"],
+    allowedFormats: ["document-v2", "structured", "richdocument"],
   });
 
   const structure = envelope.structure ?? {};
   const rawBlocks = structure.blocks;
-  if (!Array.isArray(rawBlocks)) {
-    throw new AppError({ code: "TEMPLATE_INVALID" });
+  const isRich = envelope.format === "richdocument";
+
+  const rawRegions = structure.regions;
+  let regions: DocumentTemplateRegionSpec[] | undefined;
+  if (Array.isArray(rawRegions)) {
+    regions = rawRegions.map((entry) => {
+      if (!isRecord(entry)) {
+        throw new AppError({ code: "TEMPLATE_INVALID" });
+      }
+      const id = typeof entry.id === "string" ? entry.id.trim() : "";
+      const key = typeof entry.key === "string" ? entry.key.trim() : "";
+      const title = typeof entry.title === "string" ? entry.title.trim() : "";
+      if (!id || !key || !title) {
+        throw new AppError({ code: "TEMPLATE_INVALID" });
+      }
+      return { id, key, title };
+    });
   }
 
-  const blocks: DocumentTemplateBlock[] = rawBlocks.map((entry) => {
-    if (!isRecord(entry) || typeof entry.type !== "string" || entry.type.trim().length === 0) {
+  const rawVars = structure.variables;
+  let variables: TemplateVariableSpec[] | undefined;
+  if (Array.isArray(rawVars)) {
+    variables = rawVars.map((entry) => {
+      if (!isRecord(entry)) {
+        throw new AppError({ code: "TEMPLATE_INVALID" });
+      }
+      const key = typeof entry.key === "string" ? entry.key.trim() : "";
+      const label = typeof entry.label === "string" ? entry.label.trim() : "";
+      if (!key || !label) {
+        throw new AppError({ code: "TEMPLATE_INVALID" });
+      }
+      return {
+        key,
+        label,
+        required: Boolean(entry.required),
+      };
+    });
+  }
+
+  let blocks: DocumentTemplateBlock[];
+  if (!Array.isArray(rawBlocks)) {
+    if (isRich) {
+      blocks = [];
+    } else {
       throw new AppError({ code: "TEMPLATE_INVALID" });
     }
-    if (entry.attrs !== undefined && entry.attrs !== null && !isRecord(entry.attrs)) {
-      throw new AppError({ code: "TEMPLATE_INVALID" });
-    }
-    if (entry.content !== undefined && !Array.isArray(entry.content)) {
-      throw new AppError({ code: "TEMPLATE_INVALID" });
-    }
-    return {
-      type: entry.type.trim(),
-      attrs: entry.attrs ? { ...entry.attrs } : undefined,
-      content: entry.content ? [...entry.content] : undefined,
-    };
-  });
+  } else {
+    blocks = rawBlocks.map((entry) => {
+      if (!isRecord(entry) || typeof entry.type !== "string" || entry.type.trim().length === 0) {
+        throw new AppError({ code: "TEMPLATE_INVALID" });
+      }
+      if (entry.attrs !== undefined && entry.attrs !== null && !isRecord(entry.attrs)) {
+        throw new AppError({ code: "TEMPLATE_INVALID" });
+      }
+      if (entry.content !== undefined && !Array.isArray(entry.content)) {
+        throw new AppError({ code: "TEMPLATE_INVALID" });
+      }
+      return {
+        type: entry.type.trim(),
+        attrs: entry.attrs ? { ...entry.attrs } : undefined,
+        content: entry.content ? [...entry.content] : undefined,
+      };
+    });
+  }
 
   return {
     schemaVersion: 2,
@@ -98,5 +156,7 @@ export const parseDocumentTemplateContent = (raw: unknown): DocumentTemplateCont
     metadata: envelope.metadata,
     properties: envelope.properties,
     blocks,
+    regions,
+    variables,
   };
 };

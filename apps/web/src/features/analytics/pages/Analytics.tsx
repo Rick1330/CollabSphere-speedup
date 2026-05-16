@@ -104,7 +104,7 @@ const Analytics = () => {
     <div className="app-light min-h-screen flex">
       <WorkspaceSidebar workspace={workspace} collapsed={collapsed} onToggle={toggle} />
       <div className="flex-1 min-w-0 flex flex-col">
-        <TopNav user={currentUser} unreadCount={3} onOpenPalette={palette.toggle} />
+        <TopNav user={currentUser} onOpenPalette={palette.toggle} />
 
         <main className="px-4 sm:px-6 lg:px-10 py-6 lg:py-10 max-w-7xl mx-auto w-full">
           <PageHeader

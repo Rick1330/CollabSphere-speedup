@@ -26,6 +26,7 @@ import {
   fetchMembers,
   fetchPendingInvitations,
   removeMember,
+  resendInvitation,
   revokeInvitation,
   inviteMember,
   sortMembers,
@@ -38,6 +39,7 @@ import { MemberTable } from "./member-table";
 import { MemberCard } from "./member-card";
 import { InviteDialog } from "./invite-dialog";
 import type { WorkspaceTypeForLabels } from "@/lib/role-labels";
+import { authSession } from "@/lib/auth-session";
 
 interface MemberListProps {
   workspaceId: string;
@@ -113,6 +115,13 @@ export const MemberList = ({
         currentUserRole,
         currentUserId,
       );
+      void queryClient.invalidateQueries({ queryKey: ["workspace", workspaceId, "shell"] });
+      void queryClient.invalidateQueries({ queryKey: ["workspaces", "mine"] });
+      if (member.user.id === currentUserId) {
+        authSession.patchSession({
+          user: { defaultWorkspaceRole: newRole as never },
+        });
+      }
       refetchMembers();
       toast.success(`${member.user.fullName}'s role updated to ${newRole}`);
     } catch (err) {
@@ -161,11 +170,7 @@ export const MemberList = ({
 
   const handleResendInvite = async (inv: PendingInvitation) => {
     try {
-      await inviteMember(
-        workspaceId,
-        { email: inv.email, role: inv.role },
-        currentUserRole,
-      );
+      await resendInvitation(workspaceId, inv.id, currentUserRole);
       refetchInvitations();
       toast.success(`Invitation resent to ${inv.email}`);
     } catch (err) {
@@ -174,6 +179,11 @@ export const MemberList = ({
         toast.error("Invitation was resent recently. Try again in 24 hours.");
       } else if (code === "WORKSPACE_ARCHIVED") {
         toast.error("Workspace is archived. Restore it to resend invitations.");
+      } else if (code === "SERVICE_UNAVAILABLE") {
+        toast.error(
+          (err as Error)?.message ||
+            "Could not queue invitation email. Check API logs and the invitation email queue.",
+        );
       } else {
         toast.error("Failed to resend invitation.");
       }
@@ -395,6 +405,7 @@ export const MemberList = ({
         {!isLoading && !isError && !isEmpty && (
           <>
             <MemberTable
+              workspaceId={workspaceId}
               members={sortedMembers}
               currentUserId={currentUserId}
               currentUserRole={currentUserRole}
@@ -409,6 +420,7 @@ export const MemberList = ({
               {sortedMembers.map((m) => (
                 <MemberCard
                   key={m.membershipId}
+                  workspaceId={workspaceId}
                   member={m}
                   currentUserId={currentUserId}
                   currentUserRole={currentUserRole}

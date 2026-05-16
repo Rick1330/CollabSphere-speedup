@@ -1,4 +1,5 @@
 import { request } from "@/api/client";
+import type { QueryClient } from "@tanstack/react-query";
 
 export type GlobalRole = "USER" | "ADMIN";
 export type AdminWorkspaceType = "professional" | "academic" | "general";
@@ -23,6 +24,39 @@ export interface AdminOperationalStats {
   errorEventsLast24h: number;
   eventsTrend: number[];
   activeUsersTrend: number[];
+}
+
+const EMPTY_ADMIN_OPS: AdminOperationalStats = {
+  totalUsers: 0,
+  activeUsersLast7Days: 0,
+  newUsersLast7Days: 0,
+  totalWorkspaces: 0,
+  archivedWorkspaces: 0,
+  newWorkspacesLast7Days: 0,
+  totalDocuments: 0,
+  totalTasks: 0,
+  totalComments: 0,
+  storageUsedBytes: 0,
+  storageQuotaBytes: 0,
+  adminCount: 0,
+  deactivatedUsers: 0,
+  warnEventsLast24h: 0,
+  errorEventsLast24h: 0,
+  eventsTrend: [0, 0, 0, 0, 0, 0, 0],
+  activeUsersTrend: [0, 0, 0, 0, 0, 0, 0],
+};
+
+function normalizeAdminOperationalStats(
+  input: Partial<AdminOperationalStats> | undefined,
+): AdminOperationalStats {
+  const merged: AdminOperationalStats = { ...EMPTY_ADMIN_OPS, ...input };
+  if (!Array.isArray(merged.eventsTrend) || merged.eventsTrend.length !== 7) {
+    merged.eventsTrend = [...EMPTY_ADMIN_OPS.eventsTrend];
+  }
+  if (!Array.isArray(merged.activeUsersTrend) || merged.activeUsersTrend.length !== 7) {
+    merged.activeUsersTrend = [...EMPTY_ADMIN_OPS.activeUsersTrend];
+  }
+  return merged;
 }
 
 export interface AdminUser {
@@ -93,7 +127,8 @@ type SingleEnvelope<T> = { data?: { resource?: T } };
 
 export async function fetchAdminOperationalStats(): Promise<{ data: AdminOperationalStats }> {
   const payload = await request<SingleEnvelope<AdminOperationalStats>>("/admin/overview");
-  return { data: payload.data?.resource as AdminOperationalStats };
+  const raw = payload.data?.resource as Partial<AdminOperationalStats> | undefined;
+  return { data: normalizeAdminOperationalStats(raw) };
 }
 
 export async function fetchRecentCriticalEvents(limit = 8) {
@@ -143,7 +178,17 @@ export async function fetchAuditLog(params: {
   });
   if (params.severity) query.set("severity", params.severity);
   if (params.search) query.set("q", params.search);
+  if (params.eventType) query.set("eventType", params.eventType);
+  if (params.dateRange) query.set("dateRange", params.dateRange);
   return request<ListEnvelope<AuditEvent>>(`/admin/audit?${query.toString()}`);
+}
+
+/** Query keys for admin workspace lists — pass `queryClient` from workspace mutations to stay in sync. */
+export const ADMIN_WORKSPACES_QUERY_KEY = ["admin", "workspaces"] as const;
+
+function invalidateWorkspaceCaches(queryClient?: QueryClient) {
+  queryClient?.invalidateQueries({ queryKey: ADMIN_WORKSPACES_QUERY_KEY });
+  queryClient?.invalidateQueries({ queryKey: ["workspaces", "mine"] });
 }
 
 export async function adminDeactivateUser(userId: string): Promise<void> {
@@ -158,12 +203,15 @@ export async function adminPromoteUser(userId: string): Promise<void> {
 export async function adminDemoteUser(userId: string): Promise<void> {
   await request(`/admin/users/${userId}/demote`, { method: "PATCH" });
 }
-export async function adminArchiveWorkspace(workspaceId: string): Promise<void> {
+export async function adminArchiveWorkspace(workspaceId: string, opts?: { queryClient?: QueryClient }): Promise<void> {
   await request(`/admin/workspaces/${workspaceId}/archive`, { method: "PATCH" });
+  invalidateWorkspaceCaches(opts?.queryClient);
 }
-export async function adminUnarchiveWorkspace(workspaceId: string): Promise<void> {
+export async function adminUnarchiveWorkspace(workspaceId: string, opts?: { queryClient?: QueryClient }): Promise<void> {
   await request(`/admin/workspaces/${workspaceId}/unarchive`, { method: "PATCH" });
+  invalidateWorkspaceCaches(opts?.queryClient);
 }
-export async function adminForceDeleteWorkspace(workspaceId: string): Promise<void> {
+export async function adminForceDeleteWorkspace(workspaceId: string, opts?: { queryClient?: QueryClient }): Promise<void> {
   await request(`/admin/workspaces/${workspaceId}/force-delete`, { method: "PATCH" });
+  invalidateWorkspaceCaches(opts?.queryClient);
 }

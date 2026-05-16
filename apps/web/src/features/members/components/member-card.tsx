@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { Crown, UserMinus } from "lucide-react";
 import {
   fullDateTime,
@@ -13,6 +14,7 @@ import {
 } from "@/api/adapters/members";
 
 interface MemberCardProps {
+  workspaceId: string;
   member: WorkspaceMember;
   currentUserId: string;
   currentUserRole: WorkspaceRole;
@@ -23,6 +25,7 @@ interface MemberCardProps {
 }
 
 export const MemberCard = ({
+  workspaceId,
   member,
   currentUserId,
   currentUserRole,
@@ -49,9 +52,12 @@ export const MemberCard = ({
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-sm font-medium text-stone-900 truncate">
+              <Link
+                to={`/w/${workspaceId}/members/user/${encodeURIComponent(member.user.id)}`}
+                className="text-sm font-medium text-stone-900 truncate hover:text-teal-700"
+              >
                 {member.user.fullName}
-              </span>
+              </Link>
               {isSelf && (
                 <span className="text-[9px] font-mono tracking-wider uppercase px-1.5 py-0.5 rounded-full bg-teal-50 text-teal-600 border border-teal-200">
                   You

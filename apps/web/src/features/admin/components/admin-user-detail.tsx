@@ -236,16 +236,16 @@ export const AdminUserDetailView = ({ userId }: AdminUserDetailViewProps) => {
             <h2 className="text-sm font-semibold text-stone-900 flex items-center gap-2">
               Workspace memberships
               <span className="font-mono text-[10px] text-stone-400 tracking-wider bg-stone-100 border border-stone-200 px-1.5 py-0.5 rounded-full">
-                {user.workspaces.length}
+                {(user.workspaces ?? []).length}
               </span>
             </h2>
-            {user.workspaces.length === 0 ? (
+            {(user.workspaces ?? []).length === 0 ? (
               <p className="text-sm text-stone-400 mt-3 italic">
                 This user is not a member of any workspaces.
               </p>
             ) : (
               <div className="mt-4 space-y-2">
-                {user.workspaces.map((ws) => (
+                {(user.workspaces ?? []).map((ws) => (
                   <div
                     key={ws.id}
                     className="flex items-center justify-between p-3 rounded-lg border border-stone-200 hover:bg-stone-50 transition-colors duration-100"

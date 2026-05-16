@@ -238,6 +238,8 @@ export function usePersonaProfile(): PersonaProfile {
  */
 export function getRolePermissions(role: WorkspaceRoleKey): {
   canCreateContent: boolean;
+  canOrganizeContent: boolean;
+  canDeleteContent: boolean;
   canEditSettings: boolean;
   canViewAnalytics: boolean;
   canReview: boolean;
@@ -247,6 +249,8 @@ export function getRolePermissions(role: WorkspaceRoleKey): {
     case "ADMIN":
       return {
         canCreateContent: true,
+        canOrganizeContent: true,
+        canDeleteContent: true,
         canEditSettings: true,
         canViewAnalytics: true,
         canReview: true,
@@ -255,6 +259,8 @@ export function getRolePermissions(role: WorkspaceRoleKey): {
     case "SUPERVISOR":
       return {
         canCreateContent: true,
+        canOrganizeContent: true,
+        canDeleteContent: true,
         canEditSettings: false,
         canViewAnalytics: true,
         canReview: true,
@@ -263,6 +269,8 @@ export function getRolePermissions(role: WorkspaceRoleKey): {
     case "STUDENT":
       return {
         canCreateContent: true,
+        canOrganizeContent: true,
+        canDeleteContent: false,
         canEditSettings: false,
         canViewAnalytics: false,
         canReview: false,
@@ -270,6 +278,8 @@ export function getRolePermissions(role: WorkspaceRoleKey): {
     case "VIEWER":
       return {
         canCreateContent: false,
+        canOrganizeContent: false,
+        canDeleteContent: false,
         canEditSettings: false,
         canViewAnalytics: false,
         canReview: false,

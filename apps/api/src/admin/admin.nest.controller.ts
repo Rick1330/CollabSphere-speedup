@@ -1,6 +1,6 @@
 import { Controller, Get, Headers, Inject, Ip, Param, Patch, Query } from "@nestjs/common";
-import { Transform } from "class-transformer";
-import { IsIn, IsInt, IsOptional, IsString, Max, Min } from "class-validator";
+import { Type } from "class-transformer";
+import { IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from "class-validator";
 import { AdminOnly } from "../common/decorators/admin-only.decorator.js";
 import { CurrentUser, type RequestUser } from "../common/decorators/current-user.decorator.js";
 import { ReqRequestId } from "../common/nest/request-id.decorator.js";
@@ -13,12 +13,12 @@ import {
 import { AdminService } from "./admin.service.js";
 
 class PagingQueryDto {
-  @Transform(({ value }) => Number(value ?? 1))
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   page = 1;
 
-  @Transform(({ value }) => Number(value ?? 20))
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(100)
@@ -33,6 +33,15 @@ class AuditQueryDto extends PagingQueryDto {
   @IsOptional()
   @IsIn(["info", "warn", "error"])
   severity?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  eventType?: string;
+
+  @IsOptional()
+  @IsIn(["24h", "7d", "30d", "all"])
+  dateRange?: string;
 }
 
 const paginationMeta = (page: number, pageSize: number, totalItems: number) => ({
@@ -249,13 +258,23 @@ export class AdminNestController {
     @Ip() ipAddress: string,
     @Headers("user-agent") userAgent: string | undefined,
   ) {
-    const result = await this.adminService.listAudit(query.page, query.pageSize, query.severity, query.q, {
-      id: actor.sub,
-      email: actor.email,
-      globalRole: actor.globalRole,
-      ipAddress,
-      userAgent,
-    });
+    const result = await this.adminService.listAudit(
+      {
+        page: query.page,
+        pageSize: query.pageSize,
+        severity: query.severity,
+        q: query.q,
+        eventType: query.eventType,
+        dateRange: query.dateRange,
+      },
+      {
+        id: actor.sub,
+        email: actor.email,
+        globalRole: actor.globalRole,
+        ipAddress,
+        userAgent,
+      },
+    );
     return wrapSuccessResponse({
       payload: createListResponsePayload({
         items: result.items,

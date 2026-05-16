@@ -14,8 +14,19 @@ import {
 import { cn } from "@/lib/utils";
 import { relativeTime, fullDateTime } from "@/lib/format";
 import { toast } from "sonner";
-import { TreeContextMenu } from "./tree-context-menu";
+import {
+  createDocument,
+  createWorkspaceFolder,
+  deleteDocument,
+  deleteWorkspaceFolder,
+  updateDocumentMetadata,
+  updateWorkspaceFolder,
+} from "@/api/adapters/documents";
+import { ApiError } from "@/api/client";
+import { filterTree } from "./document-tree-filter";
 import { TreeCreateDialog } from "./tree-create-dialog";
+import { TreeMoveDialog } from "./tree-move-dialog";
+import { TreeDocumentRow, TreeFolderRow } from "./tree-rows";
 
 type DocStatus = "draft" | "submitted" | "changes_requested" | "approved" | "archived";
 
@@ -38,10 +49,32 @@ export interface TreeFolderNode {
 
 export type TreeNode = TreeFolderNode | TreeDocumentNode;
 
+export type TreeContentPermissions = {
+  canCreateContent: boolean;
+  canOrganizeContent: boolean;
+  canDeleteContent: boolean;
+};
+
+export interface WorkspaceDocumentTreeProps {
+  variant?: "page" | "sidebar";
+  workspaceId: string;
+  workspaceType: "professional" | "academic" | "general";
+  tree: TreeNode[];
+  permissions: TreeContentPermissions;
+  activeDocumentId?: string | null;
+  onServerTreeChange?: () => void;
+  onNavigate?: () => void;
+  autoOpen?: "doc" | "folder" | null;
+  onAutoOpenHandled?: () => void;
+}
+
+/** @deprecated Use WorkspaceDocumentTree with `tree` + `permissions`. */
 interface DocumentTreeProps {
   workspaceId: string;
+  workspaceType: "professional" | "academic" | "general";
   initialTree: TreeNode[];
   canCreate: boolean;
+  onServerTreeChange?: () => void;
   autoOpen?: "doc" | "folder" | null;
   onAutoOpenHandled?: () => void;
 }
@@ -67,89 +100,44 @@ const countDocs = (nodes: TreeNode[]): number => {
   return count;
 };
 
-const filterTree = (
-  nodes: TreeNode[],
-  query: string,
-  status: "all" | DocStatus,
-): TreeNode[] => {
-  const q = query.trim().toLowerCase();
-  const next: TreeNode[] = [];
-  for (const node of nodes) {
-    if (node.type === "document") {
-      const matchesQuery = q.length === 0 || node.title.toLowerCase().includes(q);
-      const matchesStatus = status === "all" || node.status === status;
-      if (matchesQuery && matchesStatus) {
-        next.push(node);
-      }
-      continue;
-    }
-    const children = filterTree(node.children, query, status);
-    const folderMatches = q.length > 0 && node.name.toLowerCase().includes(q);
-    if (children.length > 0 || folderMatches) {
-      next.push({ ...node, children });
-    }
-  }
-  return next;
-};
-
-// Mutate helpers (returns new tree)
-const insertChild = (nodes: TreeNode[], parentId: string | null, child: TreeNode): TreeNode[] => {
-  if (parentId === null) return [...nodes, child];
-  return nodes.map((n) => {
-    if (n.type === "folder" && n.id === parentId) {
-      return { ...n, children: [...n.children, child] };
-    }
-    if (n.type === "folder") {
-      return { ...n, children: insertChild(n.children, parentId, child) };
-    }
-    return n;
-  });
-};
-
-const removeNode = (nodes: TreeNode[], id: string): TreeNode[] =>
-  nodes
-    .filter((n) => n.id !== id)
-    .map((n) =>
-      n.type === "folder" ? { ...n, children: removeNode(n.children, id) } : n,
-    );
-
-const renameFolder = (nodes: TreeNode[], id: string, name: string): TreeNode[] =>
-  nodes.map((n) => {
-    if (n.type === "folder" && n.id === id) return { ...n, name };
-    if (n.type === "folder") return { ...n, children: renameFolder(n.children, id, name) };
-    return n;
-  });
-
-const findFolderEmpty = (nodes: TreeNode[], id: string): boolean | null => {
-  for (const n of nodes) {
-    if (n.type === "folder" && n.id === id) return n.children.length === 0;
-    if (n.type === "folder") {
-      const r = findFolderEmpty(n.children, id);
-      if (r !== null) return r;
-    }
-  }
-  return null;
-};
-
-export const DocumentTree = ({
+export const WorkspaceDocumentTree = ({
+  variant = "page",
   workspaceId,
-  initialTree,
-  canCreate,
+  workspaceType,
+  tree,
+  permissions,
+  activeDocumentId = null,
+  onServerTreeChange,
+  onNavigate,
   autoOpen,
   onAutoOpenHandled,
-}: DocumentTreeProps) => {
+}: WorkspaceDocumentTreeProps) => {
   const navigate = useNavigate();
-  const [tree, setTree] = useState<TreeNode[]>(initialTree);
+  const isSidebar = variant === "sidebar";
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | DocStatus>("all");
 
-  // Expand all on first load
   useEffect(() => {
     const all = new Set<string>();
-    collectFolderIds(initialTree, all);
+    collectFolderIds(tree, all);
+    if (activeDocumentId) {
+      const expandParents = (nodes: TreeNode[], ancestors: string[]): boolean => {
+        for (const n of nodes) {
+          if (n.type === "document" && n.id === activeDocumentId) {
+            for (const id of ancestors) all.add(id);
+            return true;
+          }
+          if (n.type === "folder") {
+            if (expandParents(n.children, [...ancestors, n.id])) return true;
+          }
+        }
+        return false;
+      };
+      expandParents(tree, []);
+    }
     setExpanded(all);
-  }, [initialTree]);
+  }, [tree, activeDocumentId]);
 
   const totalDocs = useMemo(() => countDocs(tree), [tree]);
   const visibleTree = useMemo(
@@ -167,6 +155,10 @@ export const DocumentTree = ({
     parentId: string | null;
     parentName: string | null;
   } | null>(null);
+  const [renameFolderTarget, setRenameFolderTarget] = useState<TreeFolderNode | null>(null);
+  const [moveFolderTarget, setMoveFolderTarget] = useState<TreeFolderNode | null>(null);
+  const [renameDocumentTarget, setRenameDocumentTarget] = useState<TreeDocumentNode | null>(null);
+  const [moveDocumentTarget, setMoveDocumentTarget] = useState<TreeDocumentNode | null>(null);
 
   // Allow parent (page header buttons) to imperatively open a root-level dialog.
   useEffect(() => {
@@ -192,69 +184,172 @@ export const DocumentTree = ({
 
   const collapseAll = () => setExpanded(new Set());
 
-  const handleCreateDoc = (title: string, templateId: string) => {
-    // Non-blank template → hand off to the full /documents/new page so the
-    // template scaffold can be previewed and the body pre-filled.
-    if (templateId && templateId !== "doc-blank") {
-      const params = new URLSearchParams({ title, template: templateId });
+  const handleCreateDoc = async (title: string, mockTemplateId: string) => {
+    if (mockTemplateId && mockTemplateId !== "doc-blank") {
+      const params = new URLSearchParams({ title, template: mockTemplateId });
       const parentId = createDocTarget?.parentId;
       if (parentId) params.set("folder", parentId);
       setCreateDocTarget(null);
       navigate(`/w/${workspaceId}/documents/new?${params.toString()}`);
       return;
     }
-    const id = `doc-${Date.now()}`;
-    const newDoc: TreeDocumentNode = {
-      type: "document",
-      id,
-      title,
-      status: "draft",
-      updatedAt: new Date().toISOString(),
-    };
-    setTree((t) => insertChild(t, createDocTarget?.parentId ?? null, newDoc));
-    setCreateDocTarget(null);
-    toast.success(`Created "${title}"`);
+
+    try {
+      const created = await createDocument(workspaceId, {
+        title: title.trim(),
+        folderId: createDocTarget?.parentId ?? null,
+        templateId: null,
+      });
+      setCreateDocTarget(null);
+      onServerTreeChange?.();
+      toast.success(`Created "${title}"`);
+      navigate(`/w/${workspaceId}/documents/${created.id}`);
+    } catch (e) {
+      const msg = e instanceof ApiError ? e.message : "Could not create document.";
+      toast.error(msg);
+    }
   };
 
-  const handleCreateFolder = (name: string) => {
-    const id = `folder-${Date.now()}`;
-    const newFolder: TreeFolderNode = { type: "folder", id, name, children: [] };
-    setTree((t) => insertChild(t, createFolderTarget?.parentId ?? null, newFolder));
-    setCreateFolderTarget(null);
-    toast.success(`Created folder "${name}"`);
+  const handleCreateFolder = async (name: string) => {
+    try {
+      await createWorkspaceFolder(workspaceId, {
+        name: name.trim(),
+        parentId: createFolderTarget?.parentId ?? null,
+      });
+      setCreateFolderTarget(null);
+      onServerTreeChange?.();
+      toast.success(`Created folder "${name.trim()}"`);
+    } catch (e) {
+      const msg = e instanceof ApiError ? e.message : "Could not create folder.";
+      toast.error(msg);
+    }
   };
 
-  const handleRenameFolder = (folder: TreeFolderNode) => {
-    const newName = prompt("Rename folder:", folder.name);
-    if (!newName || newName.trim() === folder.name) return;
-    setTree((t) => renameFolder(t, folder.id, newName.trim()));
-    toast.success("Folder renamed");
-  };
-
-  const handleDeleteFolder = (folder: TreeFolderNode) => {
-    if (!confirm(`Delete "${folder.name}"? The folder must be empty.`)) return;
-    const empty = findFolderEmpty(tree, folder.id);
-    if (empty === false) {
-      toast.error("Folder is not empty. Move or delete its contents first.");
+  const handleRenameFolder = async (name: string) => {
+    if (!renameFolderTarget) return;
+    const trimmed = name.trim();
+    if (!trimmed || trimmed === renameFolderTarget.name) {
+      setRenameFolderTarget(null);
       return;
     }
-    setTree((t) => removeNode(t, folder.id));
-    toast.success("Folder deleted");
+    try {
+      await updateWorkspaceFolder(workspaceId, renameFolderTarget.id, { name: trimmed });
+      setRenameFolderTarget(null);
+      onServerTreeChange?.();
+      toast.success("Folder renamed");
+    } catch (e) {
+      const msg = e instanceof ApiError ? e.message : "Could not rename folder.";
+      toast.error(msg);
+    }
   };
 
-  const handleDeleteDocument = (doc: TreeDocumentNode) => {
-    if (!confirm(`Delete "${doc.title}"? This cannot be undone.`)) return;
-    setTree((t) => removeNode(t, doc.id));
-    toast.success("Document deleted");
+  const handleMoveFolder = async (parentId: string | null) => {
+    if (!moveFolderTarget) return;
+    try {
+      await updateWorkspaceFolder(workspaceId, moveFolderTarget.id, { parentId });
+      setMoveFolderTarget(null);
+      onServerTreeChange?.();
+      toast.success("Folder moved");
+    } catch (e) {
+      const msg = e instanceof ApiError ? e.message : "Could not move folder.";
+      toast.error(msg);
+    }
   };
+
+  const handleDeleteFolder = async (folder: TreeFolderNode) => {
+    if (!confirm(`Delete "${folder.name}"? The folder must be empty.`)) return;
+    try {
+      await deleteWorkspaceFolder(workspaceId, folder.id);
+      onServerTreeChange?.();
+      toast.success("Folder deleted");
+    } catch (e) {
+      const msg = e instanceof ApiError ? e.message : "Folder is not empty or could not be deleted.";
+      toast.error(msg);
+    }
+  };
+
+  const handleDeleteDocument = async (doc: TreeDocumentNode) => {
+    if (doc.status !== "draft") {
+      toast.error("Only draft documents can be deleted.");
+      return;
+    }
+    if (!confirm(`Delete "${doc.title}"? This cannot be undone.`)) return;
+    try {
+      await deleteDocument(workspaceId, doc.id);
+      onServerTreeChange?.();
+      toast.success("Document deleted");
+    } catch (e) {
+      const msg = e instanceof ApiError ? e.message : "Could not delete document.";
+      toast.error(msg);
+    }
+  };
+
+  const handleRenameDocument = async (title: string) => {
+    if (!renameDocumentTarget) return;
+    const trimmed = title.trim();
+    if (!trimmed || trimmed === renameDocumentTarget.title) {
+      setRenameDocumentTarget(null);
+      return;
+    }
+    try {
+      await updateDocumentMetadata(workspaceId, renameDocumentTarget.id, { title: trimmed });
+      setRenameDocumentTarget(null);
+      onServerTreeChange?.();
+      toast.success("Document renamed");
+    } catch (e) {
+      const msg = e instanceof ApiError ? e.message : "Could not rename document.";
+      toast.error(msg);
+    }
+  };
+
+  const handleMoveDocument = async (parentId: string | null) => {
+    if (!moveDocumentTarget) return;
+    try {
+      await updateDocumentMetadata(workspaceId, moveDocumentTarget.id, { folderId: parentId });
+      setMoveDocumentTarget(null);
+      onServerTreeChange?.();
+      toast.success("Document moved");
+    } catch (e) {
+      const msg = e instanceof ApiError ? e.message : "Could not move document.";
+      toast.error(msg);
+    }
+  };
+
+  const flattenFoldersForMove = (
+    nodes: TreeNode[],
+    excludeFolderId?: string,
+  ): Array<{ id: string; label: string }> => {
+    const out: Array<{ id: string; label: string }> = [{ id: "__root__", label: "Workspace root" }];
+    const walk = (list: TreeNode[], prefix: string) => {
+      for (const n of list) {
+        if (n.type !== "folder" || n.id === excludeFolderId) continue;
+        const label = prefix ? `${prefix} / ${n.name}` : n.name;
+        out.push({ id: n.id, label });
+        walk(n.children, label);
+      }
+    };
+    walk(nodes, "");
+    return out;
+  };
+
+  const displayTree = isSidebar ? tree : visibleTree;
+  const showEmpty = displayTree.length === 0;
+  const canCreate = permissions.canCreateContent;
+  const rowIndent = isSidebar ? 14 : 20;
 
   return (
     <>
-      <div className="rounded-xl border border-stone-200 bg-white shadow-sm overflow-hidden">
-        {/* Tree header */}
-        <div className="px-4 py-2.5 border-b border-stone-100 bg-stone-50/50 space-y-2.5">
+      <div
+        className={cn(
+          isSidebar
+            ? "min-w-0"
+            : "rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-950 shadow-sm overflow-hidden",
+        )}
+      >
+        {!isSidebar && (
+        <div className="px-4 py-2.5 border-b border-stone-100 dark:border-stone-800 bg-stone-50/50 dark:bg-stone-900/50 space-y-2.5">
           <div className="flex items-center justify-between">
-          <span className="font-mono text-[10px] text-stone-400 tracking-[0.1em] uppercase">
+          <span className="font-mono text-[10px] text-stone-400 dark:text-stone-500 tracking-[0.1em] uppercase">
             Workspace files · {visibleDocs}
             {hasFilters ? ` of ${totalDocs}` : ""}{" "}
             {visibleDocs === 1 ? "doc" : "docs"}
@@ -263,7 +358,7 @@ export const DocumentTree = ({
             <button
               type="button"
               onClick={expandAll}
-              className="text-[11px] text-stone-400 hover:text-stone-700 transition-colors"
+              className="text-[11px] text-stone-400 dark:text-stone-500 hover:text-stone-700 dark:hover:text-stone-300 transition-colors"
               aria-label="Expand all folders"
             >
               Expand all
@@ -274,13 +369,13 @@ export const DocumentTree = ({
             <button
               type="button"
               onClick={collapseAll}
-              className="text-[11px] text-stone-400 hover:text-stone-700 transition-colors"
+              className="text-[11px] text-stone-400 dark:text-stone-500 hover:text-stone-700 dark:hover:text-stone-300 transition-colors"
               aria-label="Collapse all folders"
             >
               Collapse all
             </button>
           </div>
-        </div>
+          </div>
           <div className="flex flex-col sm:flex-row sm:items-center gap-2">
             <div className="relative flex-1">
               <Search className="h-3.5 w-3.5 text-stone-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
@@ -317,10 +412,11 @@ export const DocumentTree = ({
             </select>
           </div>
         </div>
+        )}
 
         {/* Tree */}
-        <div role="tree" aria-label="Document tree" className="py-1">
-          {visibleTree.length === 0 ? (
+        <div role="tree" aria-label="Document tree" className={cn("py-1", isSidebar && "py-0")}>
+          {showEmpty ? (
             <div className="py-12 text-center">
               <div className="h-10 w-10 rounded-xl bg-stone-100 border border-stone-200 flex items-center justify-center mx-auto">
                 <FileText className="h-5 w-5 text-stone-400" aria-hidden="true" />
@@ -361,7 +457,7 @@ export const DocumentTree = ({
               )}
             </div>
           ) : (
-            visibleTree.map((node) =>
+            displayTree.map((node) =>
               node.type === "folder" ? (
                 <TreeFolderRow
                   key={node.id}
@@ -370,15 +466,22 @@ export const DocumentTree = ({
                   expanded={expanded}
                   onToggle={toggle}
                   workspaceId={workspaceId}
-                  canCreate={canCreate}
+                  permissions={permissions}
+                  isSidebar={isSidebar}
+                  rowIndent={rowIndent}
+                  activeDocumentId={activeDocumentId}
+                  onNavigate={onNavigate}
                   onCreateDoc={(parentId, parentName) =>
                     setCreateDocTarget({ parentId, parentName })
                   }
                   onCreateFolder={(parentId, parentName) =>
                     setCreateFolderTarget({ parentId, parentName })
                   }
-                  onRenameFolder={handleRenameFolder}
+                  onRenameFolder={(f) => setRenameFolderTarget(f)}
+                  onMoveFolder={(f) => setMoveFolderTarget(f)}
                   onDeleteFolder={handleDeleteFolder}
+                  onRenameDocument={(d) => setRenameDocumentTarget(d)}
+                  onMoveDocument={(d) => setMoveDocumentTarget(d)}
                   onDeleteDocument={handleDeleteDocument}
                 />
               ) : (
@@ -387,7 +490,13 @@ export const DocumentTree = ({
                   document={node}
                   depth={0}
                   workspaceId={workspaceId}
-                  canCreate={canCreate}
+                  permissions={permissions}
+                  isSidebar={isSidebar}
+                  rowIndent={rowIndent}
+                  activeDocumentId={activeDocumentId}
+                  onNavigate={onNavigate}
+                  onRename={(d) => setRenameDocumentTarget(d)}
+                  onMove={(d) => setMoveDocumentTarget(d)}
                   onDelete={handleDeleteDocument}
                 />
               ),
@@ -400,6 +509,7 @@ export const DocumentTree = ({
         <TreeCreateDialog
           open
           kind="document"
+          workspaceType={workspaceType}
           folderName={createDocTarget.parentName}
           onClose={() => setCreateDocTarget(null)}
           onCreated={handleCreateDoc}
@@ -414,217 +524,66 @@ export const DocumentTree = ({
           onCreated={handleCreateFolder}
         />
       )}
+      {renameFolderTarget && (
+        <TreeCreateDialog
+          open
+          kind="folder"
+          parentName={null}
+          defaultName={renameFolderTarget.name}
+          onClose={() => setRenameFolderTarget(null)}
+          onCreated={handleRenameFolder}
+        />
+      )}
+      {moveFolderTarget && (
+        <TreeMoveDialog
+          itemLabel="folder"
+          itemName={moveFolderTarget.name}
+          options={flattenFoldersForMove(tree, moveFolderTarget.id)}
+          onCancel={() => setMoveFolderTarget(null)}
+          onSelect={(id) => void handleMoveFolder(id === "__root__" ? null : id)}
+        />
+      )}
+      {renameDocumentTarget && (
+        <TreeCreateDialog
+          open
+          kind="document"
+          workspaceType={workspaceType}
+          folderName={null}
+          defaultName={renameDocumentTarget.title}
+          onClose={() => setRenameDocumentTarget(null)}
+          onCreated={handleRenameDocument}
+        />
+      )}
+      {moveDocumentTarget && (
+        <TreeMoveDialog
+          itemLabel="document"
+          itemName={moveDocumentTarget.title}
+          options={flattenFoldersForMove(tree)}
+          onCancel={() => setMoveDocumentTarget(null)}
+          onSelect={(id) => void handleMoveDocument(id === "__root__" ? null : id)}
+        />
+      )}
     </>
   );
 };
 
-interface FolderRowProps {
-  folder: TreeFolderNode;
-  depth: number;
-  expanded: Set<string>;
-  onToggle: (id: string) => void;
-  workspaceId: string;
-  canCreate: boolean;
-  onCreateDoc: (parentId: string, parentName: string) => void;
-  onCreateFolder: (parentId: string, parentName: string) => void;
-  onRenameFolder: (folder: TreeFolderNode) => void;
-  onDeleteFolder: (folder: TreeFolderNode) => void;
-  onDeleteDocument: (doc: TreeDocumentNode) => void;
-}
-
-const TreeFolderRow = ({
-  folder,
-  depth,
-  expanded,
-  onToggle,
-  workspaceId,
+export function DocumentTree({
+  initialTree,
   canCreate,
-  onCreateDoc,
-  onCreateFolder,
-  onRenameFolder,
-  onDeleteFolder,
-  onDeleteDocument,
-}: FolderRowProps) => {
-  const isExpanded = expanded.has(folder.id);
-
+  onServerTreeChange,
+  ...rest
+}: DocumentTreeProps) {
   return (
-    <div role="treeitem" aria-expanded={isExpanded} aria-level={depth + 1} aria-selected="false">
-      <button
-        type="button"
-        className="group flex items-center h-8 cursor-pointer select-none hover:bg-stone-50 transition-colors duration-100 pr-2 focus-visible:outline-none focus-visible:bg-stone-50"
-        style={{ paddingLeft: `${depth * 20 + 8}px` }}
-        onClick={() => onToggle(folder.id)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            onToggle(folder.id);
-          }
-          if (e.key === "ArrowRight" && !isExpanded) {
-            e.preventDefault();
-            onToggle(folder.id);
-          }
-          if (e.key === "ArrowLeft" && isExpanded) {
-            e.preventDefault();
-            onToggle(folder.id);
-          }
-        }}
-        aria-label={`${isExpanded ? "Collapse" : "Expand"} ${folder.name}`}
-      >
-        <ChevronRight
-          className={cn(
-            "h-3.5 w-3.5 text-stone-300 flex-shrink-0 mr-1 transition-transform duration-150",
-            isExpanded && "rotate-90 text-stone-400",
-          )}
-          aria-hidden="true"
-        />
-        {isExpanded ? (
-          <FolderOpen className="h-4 w-4 text-teal-600 flex-shrink-0 mr-2" aria-hidden="true" />
-        ) : (
-          <Folder className="h-4 w-4 text-stone-400 flex-shrink-0 mr-2" aria-hidden="true" />
-        )}
-        <span className="text-sm text-stone-700 truncate flex-1 group-hover:text-stone-900 transition-colors duration-100">
-          {folder.name}
-        </span>
-        <span className="font-mono text-[10px] text-stone-300 mr-2 group-hover:text-stone-400 transition-colors">
-          {folder.children.length}
-        </span>
-        {canCreate && (
-          <div className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-100">
-            <TreeContextMenu
-              type="folder"
-              name={folder.name}
-              onNewDoc={() => onCreateDoc(folder.id, folder.name)}
-              onNewFolder={() => onCreateFolder(folder.id, folder.name)}
-              onRename={() => onRenameFolder(folder)}
-              onDelete={() => onDeleteFolder(folder)}
-            />
-          </div>
-        )}
-      </button>
-
-      {isExpanded && (
-        <div className="relative">
-          <div
-            className="absolute top-0 bottom-0 w-px bg-stone-200"
-            style={{ left: `${depth * 20 + 16}px` }}
-            aria-hidden="true"
-          />
-          {folder.children.length === 0 ? (
-            <div
-              className="h-7 flex items-center text-[11px] text-stone-400 italic"
-              style={{ paddingLeft: `${(depth + 1) * 20 + 28}px` }}
-            >
-              Empty folder
-            </div>
-          ) : (
-            folder.children.map((child) =>
-              child.type === "folder" ? (
-                <TreeFolderRow
-                  key={child.id}
-                  folder={child}
-                  depth={depth + 1}
-                  expanded={expanded}
-                  onToggle={onToggle}
-                  workspaceId={workspaceId}
-                  canCreate={canCreate}
-                  onCreateDoc={onCreateDoc}
-                  onCreateFolder={onCreateFolder}
-                  onRenameFolder={onRenameFolder}
-                  onDeleteFolder={onDeleteFolder}
-                  onDeleteDocument={onDeleteDocument}
-                />
-              ) : (
-                <TreeDocumentRow
-                  key={child.id}
-                  document={child}
-                  depth={depth + 1}
-                  workspaceId={workspaceId}
-                  canCreate={canCreate}
-                  onDelete={onDeleteDocument}
-                />
-              ),
-            )
-          )}
-        </div>
-      )}
-    </div>
+    <WorkspaceDocumentTree
+      variant="page"
+      tree={initialTree}
+      permissions={{
+        canCreateContent: canCreate,
+        canOrganizeContent: canCreate,
+        canDeleteContent: false,
+      }}
+      onServerTreeChange={onServerTreeChange}
+      {...rest}
+    />
   );
-};
-
-interface DocumentRowProps {
-  document: TreeDocumentNode;
-  depth: number;
-  workspaceId: string;
-  canCreate: boolean;
-  onDelete: (doc: TreeDocumentNode) => void;
 }
-
-const TreeDocumentRow = ({
-  document: doc,
-  depth,
-  workspaceId,
-  canCreate,
-  onDelete,
-}: DocumentRowProps) => {
-  return (
-    <div role="treeitem" aria-level={depth + 1} aria-selected="false">
-      <Link
-        to={`/w/${workspaceId}/documents/${doc.id}`}
-        className="group flex items-center h-8 hover:bg-stone-50 transition-colors duration-100 pr-2 focus-visible:outline-none focus-visible:bg-stone-50"
-        style={{ paddingLeft: `${depth * 20 + 28}px` }}
-      >
-        <FileText
-          className="h-4 w-4 text-stone-400 flex-shrink-0 mr-2 group-hover:text-teal-600 transition-colors duration-150"
-          aria-hidden="true"
-        />
-        <span className="text-sm text-stone-700 truncate flex-1 group-hover:text-teal-700 transition-colors duration-150">
-          {doc.title}
-        </span>
-        <div className="flex items-center gap-1.5 mr-2 flex-shrink-0">
-          {doc.isLocked && (
-            <Lock
-              className="h-3 w-3 text-amber-500"
-              aria-label={`Locked by ${doc.lockedBy?.fullName ?? "unknown"}`}
-            />
-          )}
-          {doc.status !== "draft" && (
-            <span
-              className={cn(
-                "text-[9px] font-mono tracking-wider uppercase px-1.5 py-0.5 rounded border leading-none",
-                doc.status === "submitted" && "bg-amber-50 text-amber-600 border-amber-200",
-                doc.status === "changes_requested" && "bg-red-50 text-red-600 border-red-200",
-                doc.status === "approved" && "bg-emerald-50 text-emerald-600 border-emerald-200",
-                doc.status === "archived" && "bg-stone-100 text-stone-500 border-stone-200",
-              )}
-            >
-              {doc.status === "changes_requested" ? "CHANGES" : doc.status.toUpperCase()}
-            </span>
-          )}
-          {isRecentlyEdited(doc.updatedAt) && (
-            <div
-              className="h-1.5 w-1.5 rounded-full bg-emerald-500"
-              title="Recently edited"
-              aria-label="Recently edited"
-            />
-          )}
-          <time
-            dateTime={doc.updatedAt}
-            title={fullDateTime(doc.updatedAt)}
-            className="font-mono text-[10px] text-stone-300 tracking-wider group-hover:text-stone-400 transition-colors hidden sm:inline"
-          >
-            {relativeTime(doc.updatedAt)}
-          </time>
-        </div>
-        {canCreate && (
-          <div className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-100">
-            <TreeContextMenu
-              type="document"
-              name={doc.title}
-              onDelete={() => onDelete(doc)}
-            />
-          </div>
-        )}
-      </Link>
-    </div>
-  );
-};

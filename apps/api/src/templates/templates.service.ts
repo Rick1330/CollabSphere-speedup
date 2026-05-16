@@ -1,22 +1,31 @@
 import { Inject, Injectable } from "@nestjs/common";
 import { AppError } from "../common/filters/app-error.filter.js";
 import { PrismaClientProvider } from "../common/prisma/prisma-client.provider.js";
+import type { Prisma } from "@prisma/client";
 
 @Injectable()
 export class TemplatesService {
   constructor(@Inject(PrismaClientProvider) private readonly prisma: PrismaClientProvider) {}
 
-  async listSystemTemplates() {
+  async listSystemTemplates(filters?: { kind?: string; category?: string; schemaVersion?: number }) {
+    const where: Prisma.TemplateWhereInput = {
+      scope: "system",
+      isEnabled: true,
+      ...(filters?.kind ? { kind: filters.kind } : {}),
+      ...(filters?.category ? { category: filters.category } : {}),
+      ...(filters?.schemaVersion !== undefined && Number.isFinite(filters.schemaVersion)
+        ? { schemaVersion: filters.schemaVersion }
+        : {}),
+    };
+
     const items = await this.prisma.template.findMany({
-      where: {
-        scope: "system",
-        isEnabled: true,
-      },
+      where,
       orderBy: [{ kind: "asc" }, { name: "asc" }],
       select: {
         id: true,
         kind: true,
         category: true,
+        subCategory: true,
         name: true,
         description: true,
         version: true,

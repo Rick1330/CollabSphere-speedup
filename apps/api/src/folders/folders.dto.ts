@@ -12,8 +12,13 @@ export class CreateFolderDto {
 }
 
 export class RenameFolderDto {
+  @IsOptional()
   @IsString()
   @IsNotEmpty()
   @MaxLength(120)
-  name!: string;
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  parentId?: string | null;
 }

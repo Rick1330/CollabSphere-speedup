@@ -1,4 +1,4 @@
-import { Controller, Get, Inject, Param } from "@nestjs/common";
+import { Controller, Get, Inject, Param, Query } from "@nestjs/common";
 import { ReqRequestId } from "../common/nest/request-id.decorator.js";
 import {
   createListResponsePayload,
@@ -12,8 +12,22 @@ export class TemplatesNestController {
   constructor(@Inject(TemplatesService) private readonly templatesService: TemplatesService) {}
 
   @Get()
-  async list(@ReqRequestId() requestId: string) {
-    const { items, total } = await this.templatesService.listSystemTemplates();
+  async list(
+    @ReqRequestId() requestId: string,
+    @Query("kind") kind?: string,
+    @Query("category") category?: string,
+    @Query("schemaVersion") schemaVersionRaw?: string,
+  ) {
+    const parsed =
+      schemaVersionRaw !== undefined && schemaVersionRaw.trim().length > 0
+        ? Number.parseInt(schemaVersionRaw, 10)
+        : undefined;
+    const schemaVersion = parsed !== undefined && Number.isFinite(parsed) ? parsed : undefined;
+    const { items, total } = await this.templatesService.listSystemTemplates({
+      kind: kind?.trim() || undefined,
+      category: category?.trim() || undefined,
+      schemaVersion,
+    });
     return wrapSuccessResponse({
       payload: createListResponsePayload({ items, total }),
       requestId,

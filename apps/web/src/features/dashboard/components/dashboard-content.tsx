@@ -6,6 +6,7 @@ import { DashboardWorkspaces } from "./dashboard-workspaces";
 import { DashboardTasks } from "./dashboard-tasks";
 import { DashboardActivity } from "./dashboard-activity";
 import { RolePanel } from "./role-panels";
+import { PendingInvitationsBanner } from "@/features/workspace/components/pending-invitations-banner";
 import { useCurrentAccount } from "@/lib/auth-session";
 import { getSessionRole } from "@/lib/session-role";
 
@@ -65,6 +66,10 @@ export const DashboardContent = ({ user }: DashboardContentProps) => {
       {/* Role-specific panel */}
       <div className="mt-6">
         <RolePanel sessionRole={sessionRole} />
+      </div>
+
+      <div className="mt-6">
+        <PendingInvitationsBanner />
       </div>
 
       {/* Asymmetric grid */}

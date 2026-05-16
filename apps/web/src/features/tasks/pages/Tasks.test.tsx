@@ -28,6 +28,7 @@ vi.mock("@/hooks/use-workspace-route-context", () => ({
     myRole: "OWNER" as const,
     isLoading: false,
     isError: false,
+    error: undefined,
     refetch: vi.fn(),
   }),
 }));

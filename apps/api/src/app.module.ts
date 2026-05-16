@@ -26,6 +26,7 @@ import { AdminOnlyGuard } from "./common/guards/admin-only.guard.js";
 import { CsrfGuard } from "./common/guards/csrf.guard.js";
 import { ExportsNestModule } from "./exports/exports.nest.module.js";
 import { TestingNestModule } from "./testing/testing.nest.module.js";
+import { DevNestModule } from "./dev/dev.nest.module.js";
 import { HttpObservabilityMiddleware } from "./common/observability/http-observability.middleware.js";
 
 @Module({
@@ -33,6 +34,10 @@ import { HttpObservabilityMiddleware } from "./common/observability/http-observa
     ConfigModule.forRoot({
       isGlobal: true,
       validationSchema: configValidationSchema,
+      validationOptions: {
+        allowUnknown: true,
+        stripUnknown: false,
+      },
     }),
     ThrottlerModule.forRoot([
       {
@@ -59,6 +64,7 @@ import { HttpObservabilityMiddleware } from "./common/observability/http-observa
     AdminNestModule,
     ExportsNestModule,
     TestingNestModule,
+    DevNestModule,
   ],
   providers: [
     NestRequestIdMiddleware,

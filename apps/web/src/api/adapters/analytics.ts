@@ -19,6 +19,9 @@ import { fetchMembers } from "@/api/adapters/members";
 import { fetchWorkspaceActivityPaginated } from "@/api/adapters/activity";
 import type { TaskDetail } from "@/features/tasks/mocks/tasks";
 
+/** Matches `ListActivityQueryDto` max in `activity.nest.controller.ts`. */
+const ACTIVITY_PAGE_SIZE_CAP = 100;
+
 export type {
   AnalyticsSnapshot,
   KpiBlock,
@@ -95,12 +98,15 @@ export async function fetchAnalyticsSnapshot(
   workspaceId: string,
   workspaceType: "professional" | "academic" | "general",
 ): Promise<AnalyticsSnapshot> {
-  const [tree, taskMap, membersPayload, activityPage] = await Promise.all([
+  const [tree, taskMap, membersPayload, activityPage1, activityPage2] = await Promise.all([
     getDocumentTree(workspaceId),
     listTasksMap(workspaceId),
     fetchMembers(workspaceId),
-    fetchWorkspaceActivityPaginated(workspaceId, { page: 1, pageSize: 500 }),
+    fetchWorkspaceActivityPaginated(workspaceId, { page: 1, pageSize: ACTIVITY_PAGE_SIZE_CAP }),
+    fetchWorkspaceActivityPaginated(workspaceId, { page: 2, pageSize: ACTIVITY_PAGE_SIZE_CAP }),
   ]);
+
+  const activityItems = [...activityPage1.data.items, ...activityPage2.data.items];
 
   const members = membersPayload.data.items;
   const tasks = Object.values(taskMap);
@@ -158,7 +164,7 @@ export async function fetchAnalyticsSnapshot(
     },
   ];
 
-  const trend = activityTrend(activityPage.data.items);
+  const trend = activityTrend(activityItems);
   const throughput = throughputLast4Weeks(tasks);
 
   const pendingReviews = docCounts.submitted + docCounts.changes_requested;

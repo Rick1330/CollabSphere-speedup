@@ -9,8 +9,11 @@ import {
 import type { OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit } from "@nestjs/websockets";
 import type { Server, Socket } from "socket.io";
 import type {
+  DocumentPresencePayload,
+  JoinDocumentRoomPayload,
   JoinTaskRoomPayload,
   JoinWorkspaceRoomPayload,
+  LeaveDocumentRoomPayload,
   LeaveTaskRoomPayload,
   LeaveWorkspaceRoomPayload,
   RealtimeEventName,
@@ -110,6 +113,58 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     await client.join(workspaceRoom);
     await client.join(taskRoom);
     return { ok: true, rooms: [workspaceRoom, taskRoom] };
+  }
+
+  @SubscribeMessage("room:join:document")
+  async joinDocumentRoom(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: JoinDocumentRoomPayload,
+  ): Promise<{ ok: true; room: string }> {
+    const user = this.sessionService.getAuthenticatedUser(client);
+    await this.sessionService.assertWorkspaceMembership(user.userId, payload.workspaceId);
+    const room = this.sessionService.toDocumentRoom(payload.documentId);
+    await client.join(room);
+    const presence: DocumentPresencePayload = {
+      workspaceId: payload.workspaceId,
+      documentId: payload.documentId,
+      userId: user.userId,
+      fullName: payload.fullName?.trim() || user.email,
+    };
+    client.to(room).emit("document:presence:join", presence);
+    return { ok: true, room };
+  }
+
+  @SubscribeMessage("room:leave:document")
+  async leaveDocumentRoom(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: LeaveDocumentRoomPayload & { workspaceId?: string },
+  ): Promise<{ ok: true; room: string }> {
+    const user = this.sessionService.getAuthenticatedUser(client);
+    const room = this.sessionService.toDocumentRoom(payload.documentId);
+    await client.leave(room);
+    if (payload.workspaceId) {
+      client.to(room).emit("document:presence:leave", {
+        workspaceId: payload.workspaceId,
+        documentId: payload.documentId,
+        userId: user.userId,
+      });
+    }
+    return { ok: true, room };
+  }
+
+  @SubscribeMessage("document:presence:heartbeat")
+  async documentPresenceHeartbeat(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: DocumentPresencePayload,
+  ): Promise<{ ok: true }> {
+    const user = this.sessionService.getAuthenticatedUser(client);
+    await this.sessionService.assertWorkspaceMembership(user.userId, payload.workspaceId);
+    const room = this.sessionService.toDocumentRoom(payload.documentId);
+    client.to(room).emit("document:presence:heartbeat", {
+      ...payload,
+      userId: user.userId,
+    });
+    return { ok: true };
   }
 
   @SubscribeMessage("room:leave:task")

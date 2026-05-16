@@ -3,7 +3,13 @@ import type { WorkspaceRole } from "@prisma/client";
 import { Inject, Injectable } from "@nestjs/common";
 import { AppError } from "../common/filters/app-error.filter.js";
 import { PrismaClientProvider } from "../common/prisma/prisma-client.provider.js";
+import { apiRuntimeEnv } from "../config/api-runtime.js";
 import { canAssignRole } from "../workspaces/workspaces.policy.js";
+import {
+  createWorkspaceInvitationEmailJob,
+  enqueueWorkspaceInvitationEmailJob,
+  encryptInvitationTokenForEmailQueue,
+} from "./invitation-email-queue.js";
 
 const INVITATION_EXPIRY_DAYS = 7;
 const MAX_WORKSPACE_MEMBERS = 50;
@@ -16,6 +22,15 @@ const createInvitationToken = () => randomBytes(32).toString("base64url");
 const normalizeEmail = (email: string) => email.trim().toLowerCase();
 
 const isEmailValid = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
+const invitationRoleLabel = (role: WorkspaceRole) => {
+  if (role === "OWNER") return "Owner";
+  return role
+    .toLowerCase()
+    .split("_")
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(" ");
+};
 
 const futureExpiryDate = () => {
   const expiresAt = new Date();
@@ -49,6 +64,9 @@ export class InvitationsService {
         createdAt: true,
         expiresAt: true,
         acceptedAt: true,
+        invitedByUser: {
+          select: { id: true, fullName: true },
+        },
       },
       orderBy: { createdAt: "desc" },
     });
@@ -57,9 +75,55 @@ export class InvitationsService {
       email: invitation.invitedEmail,
       role: invitation.role,
       invitedById: invitation.invitedByUserId,
+      invitedByFullName: invitation.invitedByUser.fullName,
       createdAt: invitation.createdAt,
       expiresAt: invitation.expiresAt,
       acceptedAt: invitation.acceptedAt,
+    }));
+  }
+
+  async listMyPendingInvitations({ userId }: { userId: string }) {
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, deletedAt: null },
+      select: { email: true },
+    });
+    if (!user) {
+      throw new AppError({ code: "UNAUTHORIZED" });
+    }
+    const now = new Date();
+    const rows = await this.prisma.invitation.findMany({
+      where: {
+        invitedEmail: user.email,
+        status: "pending",
+        deletedAt: null,
+        expiresAt: { gt: now },
+        workspace: { deletedAt: null },
+      },
+      select: {
+        id: true,
+        role: true,
+        expiresAt: true,
+        createdAt: true,
+        workspace: {
+          select: { id: true, name: true, type: true, icon: true, status: true },
+        },
+        invitedByUser: { select: { fullName: true } },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      role: r.role,
+      expiresAt: r.expiresAt,
+      createdAt: r.createdAt,
+      workspace: {
+        id: r.workspace.id,
+        name: r.workspace.name,
+        type: r.workspace.type,
+        icon: r.workspace.icon,
+        status: r.workspace.status,
+      },
+      invitedByFullName: r.invitedByUser.fullName,
     }));
   }
 
@@ -96,7 +160,7 @@ export class InvitationsService {
 
     const workspace = await this.prisma.workspace.findFirst({
       where: { id: workspaceId, deletedAt: null },
-      select: { id: true, status: true },
+      select: { id: true, status: true, name: true },
     });
     if (!workspace) {
       throw new AppError({ code: "WORKSPACE_NOT_FOUND" });
@@ -104,6 +168,12 @@ export class InvitationsService {
     if (workspace.status === "archived") {
       throw new AppError({ code: "WORKSPACE_ARCHIVED_READONLY" });
     }
+
+    const actorUser = await this.prisma.user.findFirst({
+      where: { id: actorUserId, deletedAt: null },
+      select: { fullName: true },
+    });
+    const inviterFullName = actorUser?.fullName?.trim() || "A workspace member";
 
     const activeMemberCount = await this.prisma.workspaceMember.count({
       where: { workspaceId, isActive: true, deletedAt: null },
@@ -159,6 +229,28 @@ export class InvitationsService {
         },
       });
 
+      try {
+        await this.enqueueInvitationEmailJob({
+          token,
+          invitedEmail: email,
+          workspaceName: workspace.name,
+          inviterFullName,
+          role,
+        });
+      } catch {
+        await this.prisma.invitation.update({
+          where: { id: created.id },
+          data: {
+            deletedAt: new Date(),
+            status: "revoked",
+          },
+        });
+        throw new AppError({
+          code: "SERVICE_UNAVAILABLE",
+          message: "Invitation could not be queued for email delivery.",
+        });
+      }
+
       createdInvitations.push({
         id: created.id,
         email: created.invitedEmail,
@@ -182,9 +274,16 @@ export class InvitationsService {
         id: invitation.workspace.id,
         name: invitation.workspace.name,
         description: invitation.workspace.description,
+        type: invitation.workspace.type,
+        icon: invitation.workspace.icon,
+        memberCount: invitation.workspace._count.members,
       },
       role: invitation.role,
       invitedEmail: invitation.invitedEmail,
+      invitedBy: {
+        fullName: invitation.invitedByUser.fullName,
+        email: invitation.invitedByUser.email,
+      },
     };
   }
 
@@ -210,6 +309,192 @@ export class InvitationsService {
       throw new AppError({ code: "EMAIL_MISMATCH" });
     }
 
+    return this.finalizeAcceptInvitation(invitation, user);
+  }
+
+  async acceptMyPendingInvitationById({
+    invitationId,
+    userId,
+  }: {
+    invitationId: string;
+    userId: string;
+  }) {
+    const invitation = await this.findInvitationByIdOrThrow(invitationId);
+    this.assertInvitationUsable(invitation);
+
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, deletedAt: null },
+      select: { id: true, email: true },
+    });
+    if (!user) {
+      throw new AppError({ code: "UNAUTHORIZED" });
+    }
+
+    if (normalizeEmail(user.email) !== normalizeEmail(invitation.invitedEmail)) {
+      throw new AppError({ code: "EMAIL_MISMATCH" });
+    }
+
+    return this.finalizeAcceptInvitation(invitation, user);
+  }
+
+  async resendInvitation({
+    workspaceId,
+    invitationId,
+    actorUserId,
+  }: {
+    workspaceId: string;
+    invitationId: string;
+    actorUserId: string;
+  }) {
+    const actorMembership = await this.findActorMembership({ workspaceId, actorUserId });
+    const invitation = await this.prisma.invitation.findFirst({
+      where: {
+        id: invitationId,
+        workspaceId,
+        deletedAt: null,
+      },
+      select: {
+        id: true,
+        role: true,
+        invitedEmail: true,
+      },
+    });
+    if (!invitation) {
+      throw new AppError({ code: "INVITATION_NOT_FOUND" });
+    }
+
+    if (!canAssignRole({ actorRole: actorMembership.role, targetRole: invitation.role })) {
+      throw new AppError({ code: "FORBIDDEN" });
+    }
+
+    const workspace = await this.prisma.workspace.findFirst({
+      where: { id: workspaceId, deletedAt: null },
+      select: { name: true },
+    });
+    const actorUser = await this.prisma.user.findFirst({
+      where: { id: actorUserId, deletedAt: null },
+      select: { fullName: true },
+    });
+    const inviterFullName = actorUser?.fullName?.trim() || "A workspace member";
+
+    const token = createInvitationToken();
+    const updated = await this.prisma.invitation.update({
+      where: { id: invitation.id },
+      data: {
+        tokenHash: toInvitationTokenHash(token),
+        status: "pending",
+        acceptedAt: null,
+        acceptedByUserId: null,
+        expiresAt: futureExpiryDate(),
+      },
+      select: {
+        id: true,
+        invitedEmail: true,
+        role: true,
+        status: true,
+        expiresAt: true,
+      },
+    });
+
+    if (workspace) {
+      try {
+        await this.enqueueInvitationEmailJob({
+          token,
+          invitedEmail: invitation.invitedEmail,
+          workspaceName: workspace.name,
+          inviterFullName,
+          role: invitation.role,
+        });
+      } catch {
+        throw new AppError({
+          code: "SERVICE_UNAVAILABLE",
+          message: "Could not queue invitation email. The new link was saved; try resending.",
+        });
+      }
+    }
+
+    return updated;
+  }
+
+  async revokeInvitation({
+    workspaceId,
+    invitationId,
+    actorUserId,
+  }: {
+    workspaceId: string;
+    invitationId: string;
+    actorUserId: string;
+  }) {
+    const actorMembership = await this.findActorMembership({ workspaceId, actorUserId });
+    const invitation = await this.prisma.invitation.findFirst({
+      where: { id: invitationId, workspaceId, deletedAt: null },
+      select: { id: true, role: true },
+    });
+    if (!invitation) {
+      throw new AppError({ code: "INVITATION_NOT_FOUND" });
+    }
+    if (!canAssignRole({ actorRole: actorMembership.role, targetRole: invitation.role })) {
+      throw new AppError({ code: "FORBIDDEN" });
+    }
+
+    return this.prisma.invitation.update({
+      where: { id: invitation.id },
+      data: { status: "revoked" },
+      select: { id: true, status: true },
+    });
+  }
+
+  private async findActorMembership({
+    workspaceId,
+    actorUserId,
+  }: {
+    workspaceId: string;
+    actorUserId: string;
+  }) {
+    const membership = await this.prisma.workspaceMember.findFirst({
+      where: {
+        workspaceId,
+        userId: actorUserId,
+        isActive: true,
+        deletedAt: null,
+        workspace: { deletedAt: null },
+      },
+      select: {
+        id: true,
+        role: true,
+      },
+    });
+    if (!membership) {
+      throw new AppError({ code: "NOT_WORKSPACE_MEMBER" });
+    }
+    return membership;
+  }
+
+  private async enqueueInvitationEmailJob(input: {
+    token: string;
+    invitedEmail: string;
+    workspaceName: string;
+    inviterFullName: string;
+    role: WorkspaceRole;
+  }) {
+    const encryptedInviteToken = encryptInvitationTokenForEmailQueue({
+      token: input.token,
+      secret: apiRuntimeEnv.JWT_ACCESS_SECRET,
+    });
+    const job = createWorkspaceInvitationEmailJob({
+      invitedEmail: input.invitedEmail,
+      workspaceName: input.workspaceName,
+      inviterFullName: input.inviterFullName,
+      roleLabel: invitationRoleLabel(input.role),
+      encryptedInviteToken,
+    });
+    await enqueueWorkspaceInvitationEmailJob({ job });
+  }
+
+  private async finalizeAcceptInvitation(
+    invitation: { id: string; workspaceId: string; role: WorkspaceRole },
+    user: { id: string },
+  ) {
     const existingMembership = await this.prisma.workspaceMember.findFirst({
       where: {
         workspaceId: invitation.workspaceId,
@@ -282,107 +567,40 @@ export class InvitationsService {
     };
   }
 
-  async resendInvitation({
-    workspaceId,
-    invitationId,
-    actorUserId,
-  }: {
-    workspaceId: string;
-    invitationId: string;
-    actorUserId: string;
-  }) {
-    const actorMembership = await this.findActorMembership({ workspaceId, actorUserId });
+  private async findInvitationByIdOrThrow(invitationId: string) {
     const invitation = await this.prisma.invitation.findFirst({
       where: {
         id: invitationId,
-        workspaceId,
         deletedAt: null,
       },
-      select: {
-        id: true,
-        role: true,
+      include: {
+        workspace: {
+          select: {
+            id: true,
+            name: true,
+            description: true,
+            deletedAt: true,
+            type: true,
+            icon: true,
+            _count: {
+              select: {
+                members: true,
+              },
+            },
+          },
+        },
+        invitedByUser: {
+          select: { fullName: true, email: true },
+        },
       },
     });
     if (!invitation) {
       throw new AppError({ code: "INVITATION_NOT_FOUND" });
     }
-
-    if (!canAssignRole({ actorRole: actorMembership.role, targetRole: invitation.role })) {
-      throw new AppError({ code: "FORBIDDEN" });
+    if (invitation.workspace.deletedAt) {
+      throw new AppError({ code: "WORKSPACE_NOT_FOUND" });
     }
-
-    const token = createInvitationToken();
-    return this.prisma.invitation.update({
-      where: { id: invitation.id },
-      data: {
-        tokenHash: toInvitationTokenHash(token),
-        status: "pending",
-        acceptedAt: null,
-        acceptedByUserId: null,
-        expiresAt: futureExpiryDate(),
-      },
-      select: {
-        id: true,
-        invitedEmail: true,
-        role: true,
-        status: true,
-        expiresAt: true,
-      },
-    });
-  }
-
-  async revokeInvitation({
-    workspaceId,
-    invitationId,
-    actorUserId,
-  }: {
-    workspaceId: string;
-    invitationId: string;
-    actorUserId: string;
-  }) {
-    const actorMembership = await this.findActorMembership({ workspaceId, actorUserId });
-    const invitation = await this.prisma.invitation.findFirst({
-      where: { id: invitationId, workspaceId, deletedAt: null },
-      select: { id: true, role: true },
-    });
-    if (!invitation) {
-      throw new AppError({ code: "INVITATION_NOT_FOUND" });
-    }
-    if (!canAssignRole({ actorRole: actorMembership.role, targetRole: invitation.role })) {
-      throw new AppError({ code: "FORBIDDEN" });
-    }
-
-    return this.prisma.invitation.update({
-      where: { id: invitation.id },
-      data: { status: "revoked" },
-      select: { id: true, status: true },
-    });
-  }
-
-  private async findActorMembership({
-    workspaceId,
-    actorUserId,
-  }: {
-    workspaceId: string;
-    actorUserId: string;
-  }) {
-    const membership = await this.prisma.workspaceMember.findFirst({
-      where: {
-        workspaceId,
-        userId: actorUserId,
-        isActive: true,
-        deletedAt: null,
-        workspace: { deletedAt: null },
-      },
-      select: {
-        id: true,
-        role: true,
-      },
-    });
-    if (!membership) {
-      throw new AppError({ code: "NOT_WORKSPACE_MEMBER" });
-    }
-    return membership;
+    return invitation;
   }
 
   private async findInvitationByTokenOrThrow(token: string) {
@@ -398,7 +616,17 @@ export class InvitationsService {
             name: true,
             description: true,
             deletedAt: true,
+            type: true,
+            icon: true,
+            _count: {
+              select: {
+                members: true,
+              },
+            },
           },
+        },
+        invitedByUser: {
+          select: { fullName: true, email: true },
         },
       },
     });

@@ -41,7 +41,7 @@ export const SettingsLayout = ({
     <div className="app-light min-h-screen flex bg-stone-50">
       <AppSidebar collapsed={collapsed} onToggle={toggle} width={width} onResizeStart={startResize} />
       <div className="flex-1 min-w-0 flex flex-col bg-stone-50">
-        <TopNav user={currentUser} unreadCount={3} onOpenPalette={palette.toggle} />
+        <TopNav user={currentUser} onOpenPalette={palette.toggle} />
         <main className="flex-1 px-4 sm:px-6 md:px-10 py-8 md:py-10 bg-stone-50">
           <h1 className="sr-only">Settings — {title}</h1>
           <div className="max-w-5xl mx-auto space-y-6">

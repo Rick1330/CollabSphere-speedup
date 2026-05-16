@@ -85,9 +85,15 @@ export const WorkspaceSwitcher = () => {
     staleTime: 30_000,
   });
 
+  const apiWorkspaceIds = useMemo(
+    () => new Set((mineQ.data ?? []).map((row) => row.workspace.id)),
+    [mineQ.data],
+  );
+
   const items: WSItem[] = useMemo(() => {
     const storedItems: WSItem[] = stored
       .filter((w) => w.status === "active")
+      .filter((w) => !mineQ.isSuccess || apiWorkspaceIds.has(w.id))
       .map((w) => ({
         id: w.id,
         name: w.name,
@@ -107,7 +113,7 @@ export const WorkspaceSwitcher = () => {
         roleLabel: getWorkspaceRoleLabel(row.workspace.type, row.role),
       }));
     return [...storedItems, ...fromApi];
-  }, [stored, mineQ.data]);
+  }, [stored, mineQ.data, mineQ.isSuccess, apiWorkspaceIds]);
 
   // Active workspace from URL (e.g. /w/thesis/...)
   const activeId = useMemo(() => {

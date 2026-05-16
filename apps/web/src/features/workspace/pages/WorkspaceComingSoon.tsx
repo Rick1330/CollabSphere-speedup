@@ -24,7 +24,13 @@ const WORKSPACES: Record<string, WorkspaceForSidebar> = {
     type: "professional",
     roleLabel: "TECH LEAD",
     status: "active",
-    permissions: { canCreateContent: true, canEditSettings: true, canViewAnalytics: true },
+    permissions: {
+      canCreateContent: true,
+      canOrganizeContent: true,
+      canDeleteContent: true,
+      canEditSettings: true,
+      canViewAnalytics: true,
+    },
   },
   thesis: {
     id: "thesis",
@@ -34,7 +40,13 @@ const WORKSPACES: Record<string, WorkspaceForSidebar> = {
     type: "academic",
     roleLabel: "STUDENT",
     status: "active",
-    permissions: { canCreateContent: true, canEditSettings: false, canViewAnalytics: false },
+    permissions: {
+      canCreateContent: true,
+      canOrganizeContent: true,
+      canDeleteContent: false,
+      canEditSettings: false,
+      canViewAnalytics: false,
+    },
   },
   personal: {
     id: "personal",
@@ -44,7 +56,13 @@ const WORKSPACES: Record<string, WorkspaceForSidebar> = {
     type: "general",
     roleLabel: "OWNER",
     status: "active",
-    permissions: { canCreateContent: true, canEditSettings: true, canViewAnalytics: false },
+    permissions: {
+      canCreateContent: true,
+      canOrganizeContent: true,
+      canDeleteContent: true,
+      canEditSettings: true,
+      canViewAnalytics: false,
+    },
   },
   research: {
     id: "research",
@@ -54,7 +72,13 @@ const WORKSPACES: Record<string, WorkspaceForSidebar> = {
     type: "academic",
     roleLabel: "REVIEWER",
     status: "archived",
-    permissions: { canCreateContent: false, canEditSettings: true, canViewAnalytics: false },
+    permissions: {
+      canCreateContent: false,
+      canOrganizeContent: false,
+      canDeleteContent: false,
+      canEditSettings: true,
+      canViewAnalytics: false,
+    },
   },
 };
 
@@ -87,7 +111,7 @@ export const WorkspaceComingSoon = ({ title, description }: WorkspaceComingSoonP
     <div className="app-light min-h-screen flex bg-stone-50">
       <WorkspaceSidebar workspace={workspace} collapsed={collapsed} onToggle={toggle} />
       <div className="flex-1 min-w-0 flex flex-col h-screen">
-        <TopNav user={MOCK_USER} unreadCount={3} onOpenPalette={palette.toggle} />
+        <TopNav user={MOCK_USER} onOpenPalette={palette.toggle} />
         <main className="flex-1 min-h-0 overflow-y-auto">
           <div className="mx-auto max-w-2xl px-6 py-16">
             <div className="rounded-2xl border border-dashed border-stone-300 bg-stone-50/60 p-12 text-center">

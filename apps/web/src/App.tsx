@@ -3,11 +3,11 @@ import { AppProviders } from "@/app/providers/app-providers";
 import { AppRoutes } from "@/app/routing/app-routes";
 
 const App = () => (
-  <AppProviders>
-    <BrowserRouter>
+  <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+    <AppProviders>
       <AppRoutes />
-    </BrowserRouter>
-  </AppProviders>
+    </AppProviders>
+  </BrowserRouter>
 );
 
 export default App;

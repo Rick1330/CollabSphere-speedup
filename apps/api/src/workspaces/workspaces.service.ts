@@ -1,6 +1,6 @@
 import type { Prisma, WorkspaceRole, WorkspaceStatus, WorkspaceType } from "@prisma/client";
 import { Inject, Injectable } from "@nestjs/common";
-import { AppError } from "../common/filters/app-error.filter.js";
+import { AppError, ValidationAppError } from "../common/filters/app-error.filter.js";
 import { PrismaClientProvider } from "../common/prisma/prisma-client.provider.js";
 import { canAssignRole, canManageMember } from "./workspaces.policy.js";
 import {
@@ -8,6 +8,7 @@ import {
   buildDefaultWorkspaceSettings,
   parseWorkspaceTemplateContent,
 } from "./workspace-template.application.js";
+import { RealtimeEventsService } from "../realtime/realtime-events.service.js";
 
 type WorkspaceMembership = {
   id: string;
@@ -17,7 +18,10 @@ type WorkspaceMembership = {
 
 @Injectable()
 export class WorkspacesService {
-  constructor(@Inject(PrismaClientProvider) private readonly prisma: PrismaClientProvider) {}
+  constructor(
+    @Inject(PrismaClientProvider) private readonly prisma: PrismaClientProvider,
+    private readonly realtimeEvents: RealtimeEventsService,
+  ) {}
 
   async createWorkspace({
     actorUserId,
@@ -312,6 +316,7 @@ export class WorkspacesService {
         userId,
         isActive: true,
         deletedAt: null,
+        leftAt: null,
         workspace: { deletedAt: null },
       },
       include: {
@@ -358,12 +363,109 @@ export class WorkspacesService {
     });
   }
 
-  async getByIdForUser({ userId, workspaceId }: { userId: string; workspaceId: string }) {
-    const membership = await this.findActorMembership({ userId, workspaceId });
+  async createFolder({
+    actorUserId,
+    workspaceId,
+    name,
+    parentId,
+  }: {
+    actorUserId: string;
+    workspaceId: string;
+    name: string;
+    parentId?: string | null;
+  }) {
+    await this.findActorMembership({ userId: actorUserId, workspaceId });
+
+    const workspace = await this.prisma.workspace.findFirst({
+      where: { id: workspaceId, deletedAt: null },
+      select: { id: true, status: true },
+    });
+    if (!workspace) {
+      throw new AppError({ code: "WORKSPACE_NOT_FOUND" });
+    }
+    if (workspace.status === "archived") {
+      throw new AppError({ code: "WORKSPACE_ARCHIVED_READONLY" });
+    }
+
+    const trimmed = name.trim();
+    if (!trimmed.length) {
+      throw new ValidationAppError({
+        issues: [
+          {
+            field: "name",
+            message: "Folder name is required.",
+            rule: "required",
+          },
+        ],
+      });
+    }
+
+    if (parentId) {
+      const parent = await this.prisma.folder.findFirst({
+        where: {
+          id: parentId,
+          workspaceId,
+          deletedAt: null,
+        },
+        select: { id: true },
+      });
+      if (!parent) {
+        throw new AppError({ code: "FOLDER_NOT_FOUND" });
+      }
+    }
+
+    const maxPosition = await this.prisma.folder.findFirst({
+      where: {
+        workspaceId,
+        parentId: parentId ?? null,
+        deletedAt: null,
+      },
+      orderBy: { position: "desc" },
+      select: { position: true },
+    });
+
+    const nextPosition = maxPosition ? Number(maxPosition.position) + 1 : 1;
+
+    const folder = await this.prisma.folder.create({
+      data: {
+        workspaceId,
+        name: trimmed.slice(0, 120),
+        parentId: parentId ?? null,
+        position: nextPosition,
+        createdById: actorUserId,
+      },
+      select: {
+        id: true,
+        name: true,
+        parentId: true,
+        position: true,
+      },
+    });
+
+    return folder;
+  }
+
+  async getByIdForUser({
+    workspaceId,
+    membership,
+  }: {
+    workspaceId: string;
+    membership: WorkspaceMembership;
+  }) {
     const workspace = await this.prisma.workspace.findFirst({
       where: {
         id: workspaceId,
         deletedAt: null,
+      },
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        icon: true,
+        type: true,
+        status: true,
+        createdAt: true,
+        updatedAt: true,
       },
     });
 
@@ -374,9 +476,7 @@ export class WorkspacesService {
     return { membership, workspace };
   }
 
-  async listMembersForUser({ userId, workspaceId }: { userId: string; workspaceId: string }) {
-    await this.findActorMembership({ userId, workspaceId });
-
+  async listMembersForUser({ workspaceId }: { workspaceId: string }) {
     return this.prisma.workspaceMember.findMany({
       where: {
         workspaceId,
@@ -395,6 +495,84 @@ export class WorkspacesService {
       },
       orderBy: [{ role: "asc" }, { createdAt: "asc" }],
     });
+  }
+
+  async getWorkspaceMemberPeerProfile({
+    actorUserId,
+    workspaceId,
+    targetUserId,
+  }: {
+    actorUserId: string;
+    workspaceId: string;
+    targetUserId: string;
+  }) {
+    const actorUser = await this.prisma.user.findFirst({
+      where: { id: actorUserId, deletedAt: null },
+      select: { globalRole: true },
+    });
+    if (!actorUser) {
+      throw new AppError({ code: "UNAUTHORIZED" });
+    }
+
+    const actorMembership = await this.prisma.workspaceMember.findFirst({
+      where: {
+        workspaceId,
+        userId: actorUserId,
+        isActive: true,
+        deletedAt: null,
+        workspace: { deletedAt: null },
+      },
+      select: {
+        id: true,
+        role: true,
+        workspaceId: true,
+      },
+    });
+
+    if (!actorMembership && actorUser.globalRole !== "ADMIN") {
+      throw new AppError({ code: "NOT_WORKSPACE_MEMBER" });
+    }
+
+    const target = await this.prisma.workspaceMember.findFirst({
+      where: {
+        workspaceId,
+        userId: targetUserId,
+        isActive: true,
+        deletedAt: null,
+        workspace: { deletedAt: null },
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            avatarUrl: true,
+          },
+        },
+      },
+    });
+    if (!target) {
+      throw new AppError({ code: "MEMBER_NOT_FOUND" });
+    }
+
+    const privileged =
+      actorUser.globalRole === "ADMIN" ||
+      actorUserId === targetUserId ||
+      (actorMembership !== null && ["OWNER", "ADMIN"].includes(actorMembership.role));
+
+    return {
+      membershipId: target.id,
+      user: {
+        id: target.user.id,
+        fullName: target.user.fullName,
+        avatarUrl: target.user.avatarUrl,
+        ...(privileged ? { email: target.user.email } : {}),
+      },
+      role: target.role,
+      joinedAt: target.joinedAt,
+      lastAccessedAt: target.lastAccessedAt,
+    };
   }
 
   async updateMemberRole({
@@ -428,10 +606,22 @@ export class WorkspacesService {
       throw new AppError({ code: "FORBIDDEN_ROLE_ASSIGNMENT" });
     }
 
-    return this.prisma.workspaceMember.update({
+    const updated = await this.prisma.workspaceMember.update({
       where: { id: targetMembership.id },
       data: { role },
     });
+
+    this.realtimeEvents.emit("workspace:member_role_changed", {
+      workspaceId,
+      userId: targetMembership.userId,
+      data: {
+        membershipId: targetMembership.id,
+        userId: targetMembership.userId,
+        role,
+      },
+    });
+
+    return updated;
   }
 
   async removeMember({

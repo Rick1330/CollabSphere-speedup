@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, FileX, RefreshCw, Send, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -12,7 +12,12 @@ import { useAnchorDecorations } from "@/features/documents/hooks/use-anchor-deco
 import { AVATAR_COLORS } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useDocumentTree } from "@/features/documents/hooks/use-document-tree";
+import type { TreeContentPermissions } from "@/features/documents/components/document-tree";
+import { getRolePermissions, type WorkspaceRoleKey } from "@/lib/persona-scenario";
 import { listWorkspaceMembers } from "@/api/adapters/tasks";
+import { fetchWorkspaceSidebarContext } from "@/api/adapters/workspaces";
+import { fetchWorkspaceDocument, plaintextToEditorHtml, createDocument, createWorkspaceFolder } from "@/api/adapters/documents";
+import { ApiError } from "@/api/client";
 import { EditorHeader, type EditorDocument } from "@/features/documents/components/editor/editor-header";
 import {
   EditorReadOnlyBanner,
@@ -54,6 +59,9 @@ import {
   stashPendingDoc,
 } from "@/api/adapters/templates";
 import { resolveDocumentParam, resolveWorkspaceParam } from "@/lib/route-params";
+import { useCurrentAccount } from "@/lib/auth-session";
+import { isDatabaseWorkspaceId } from "@/lib/workspace-id";
+import { useDocumentPresence } from "@/hooks/use-document-presence";
 import {
   CreateTaskDialog,
   type SourceDocumentLink,
@@ -80,6 +88,8 @@ interface MockWorkspace {
   myRole: WorkspaceRole;
   /** Enables academic submit-for-review workflow. */
   isAcademic: boolean;
+  type: "professional" | "academic" | "general";
+  permissions?: TreeContentPermissions;
 }
 
 interface MockDocument extends EditorDocument {
@@ -92,10 +102,10 @@ interface MockDocument extends EditorDocument {
 const CURRENT_USER_ID = "user-jane";
 
 const WORKSPACES: Record<string, MockWorkspace> = {
-  alpha: { id: "alpha", name: "Project Alpha", status: "active", myRole: "ADMIN", isAcademic: false },
-  thesis: { id: "thesis", name: "Thesis", status: "active", myRole: "MEMBER", isAcademic: true },
-  personal: { id: "personal", name: "Personal Notes", status: "active", myRole: "OWNER", isAcademic: false },
-  research: { id: "research", name: "Research Group", status: "archived", myRole: "MEMBER", isAcademic: true },
+  alpha: { id: "alpha", name: "Project Alpha", status: "active", myRole: "ADMIN", isAcademic: false, type: "professional" },
+  thesis: { id: "thesis", name: "Thesis", status: "active", myRole: "MEMBER", isAcademic: true, type: "academic" },
+  personal: { id: "personal", name: "Personal Notes", status: "active", myRole: "OWNER", isAcademic: false, type: "general" },
+  research: { id: "research", name: "Research Group", status: "archived", myRole: "MEMBER", isAcademic: true, type: "academic" },
 };
 
 const SAMPLE_CONTENT = `
@@ -292,33 +302,6 @@ function getReadOnlyReason(
   return null;
 }
 
-const MOCK_PRESENCE: PresenceUser[] = [
-  {
-    id: CURRENT_USER_ID,
-    fullName: "Elshaday Tesfaye",
-    color: AVATAR_COLORS[0],
-    profileHref: "/settings/profile",
-    roleLabel: "You",
-    statusLabel: "Editing now",
-  },
-  {
-    id: "u_eyob",
-    fullName: "Eyob Bekele",
-    color: AVATAR_COLORS[2],
-    profileHref: "/admin/users/u_eyob",
-    roleLabel: "Admin",
-    statusLabel: "Online",
-  },
-  {
-    id: "u_hanna",
-    fullName: "Hanna Girma",
-    color: AVATAR_COLORS[1],
-    profileHref: "/admin/users/u_hanna",
-    roleLabel: "Designer",
-    statusLabel: "Reviewing",
-  },
-];
-
 // ---------- Tree skeleton (left panel during load) ----------
 const TreeSkeleton = () => (
   <div className="flex flex-col h-full bg-stone-50/60 border-r border-stone-200">
@@ -407,19 +390,39 @@ interface DocumentEditorState {
 
 const DocumentEditorPage = () => {
   const params = useParams();
-  const workspaceId = resolveWorkspaceParam(params.workspaceId);
+  const location = useLocation();
+  const account = useCurrentAccount();
+  const effectiveUserId = account?.id ?? CURRENT_USER_ID;
+  const rawWorkspaceId = params.workspaceId?.trim() ?? "";
+  const workspaceId = useMemo(
+    () => resolveWorkspaceParam(params.workspaceId, account?.defaultWorkspaceId),
+    [params.workspaceId, account?.defaultWorkspaceId],
+  );
   const documentId = resolveDocumentParam(params.documentId);
   const isMobile = useIsMobile();
   const navigate = useNavigate();
 
+  useEffect(() => {
+    if (!rawWorkspaceId || isDatabaseWorkspaceId(rawWorkspaceId)) return;
+    if (!isDatabaseWorkspaceId(workspaceId)) return;
+    const nextPath = location.pathname.replace(`/w/${rawWorkspaceId}`, `/w/${workspaceId}`);
+    if (nextPath !== location.pathname) {
+      navigate(`${nextPath}${location.search}`, { replace: true });
+    }
+  }, [rawWorkspaceId, workspaceId, location.pathname, location.search, navigate]);
+
   // Adapter-driven data: tree + assignable workspace members.
-  const { tree: documentTree } = useDocumentTree(workspaceId);
+  const { tree: documentTree, reload: reloadDocumentTree } = useDocumentTree(workspaceId);
   const [workspaceMembers, setWorkspaceMembers] = useState<TaskAssignee[]>([]);
   useEffect(() => {
     let cancelled = false;
-    listWorkspaceMembers(workspaceId).then((m) => {
-      if (!cancelled) setWorkspaceMembers(m);
-    });
+    listWorkspaceMembers(workspaceId)
+      .then((m) => {
+        if (!cancelled) setWorkspaceMembers(m);
+      })
+      .catch(() => {
+        if (!cancelled) setWorkspaceMembers([]);
+      });
     return () => {
       cancelled = true;
     };
@@ -432,10 +435,65 @@ const DocumentEditorPage = () => {
   });
   const [retryNonce, setRetryNonce] = useState(0);
 
-  // Mock fetch
+  // Load workspace + document (API for UUID ids, mock catalog for legacy slugs).
   useEffect(() => {
     let cancelled = false;
     setState({ status: "loading", doc: null, workspace: null });
+
+    const liveWs = isDatabaseWorkspaceId(workspaceId);
+    const liveDoc = documentId ? isDatabaseWorkspaceId(documentId) : false;
+
+    if (liveWs && liveDoc) {
+      void (async () => {
+        try {
+          const [{ sidebar, myRole }, apiDoc] = await Promise.all([
+            fetchWorkspaceSidebarContext(workspaceId),
+            fetchWorkspaceDocument(workspaceId, documentId),
+          ]);
+          if (cancelled) return;
+          const pending = readPendingDoc(documentId);
+          const folderName = apiDoc.folder?.name ?? null;
+          const contentHtml = pending?.contentHTML ?? plaintextToEditorHtml(apiDoc.contentPlaintext ?? "");
+          if (pending) clearPendingDoc(documentId);
+          const doc: MockDocument = {
+            id: apiDoc.id,
+            title: apiDoc.title,
+            status: apiDoc.status as MockDocument["status"],
+            isLocked: apiDoc.isLocked,
+            lockedBy: apiDoc.lockedByUser
+              ? { id: apiDoc.lockedByUser.id, fullName: apiDoc.lockedByUser.fullName }
+              : undefined,
+            folderName,
+            content: contentHtml,
+            createdBy: { id: apiDoc.createdBy.id, fullName: apiDoc.createdBy.fullName },
+            templateId: apiDoc.templateId ?? undefined,
+          };
+          const ws: MockWorkspace = {
+            id: sidebar.id,
+            name: sidebar.name,
+            status: sidebar.status,
+            myRole: myRole as MockWorkspace["myRole"],
+            isAcademic: sidebar.type === "academic",
+            type: sidebar.type,
+            permissions: {
+              canCreateContent:
+                sidebar.status === "active" && sidebar.permissions.canCreateContent,
+              canOrganizeContent:
+                sidebar.status === "active" && sidebar.permissions.canOrganizeContent,
+              canDeleteContent:
+                sidebar.status === "active" && sidebar.permissions.canDeleteContent,
+            },
+          };
+          setState({ status: "loaded", doc, workspace: ws });
+        } catch {
+          if (!cancelled) setState({ status: "error", doc: null, workspace: null });
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }
+
     const t = window.setTimeout(() => {
       if (cancelled) return;
       const ws = WORKSPACES[workspaceId] ?? {
@@ -444,10 +502,9 @@ const DocumentEditorPage = () => {
         status: "active" as const,
         myRole: "OWNER" as const,
         isAcademic: false,
+        type: "general" as const,
       };
       const known = DOCUMENTS[documentId];
-      // If this id was created via the new-doc flow, pick up the seeded
-      // template content from sessionStorage and surface it as the doc body.
       const pending = !known ? readPendingDoc(documentId) : null;
       const doc: MockDocument = known
         ? { ...known }
@@ -459,12 +516,10 @@ const DocumentEditorPage = () => {
               isLocked: false,
               folderName: pending.folderName,
               content: pending.contentHTML,
-              createdBy: { id: CURRENT_USER_ID, fullName: "Elshaday Tesfaye" },
+              createdBy: { id: effectiveUserId, fullName: account?.fullName ?? "You" },
               templateId: pending.templateId,
             }
           : { ...FALLBACK_DOC, id: documentId || "untitled" };
-      // Keep the seed around for retries within this tab, but clear once we
-      // know the editor mounted with it on this load.
       if (pending) clearPendingDoc(documentId);
       setState({ status: "loaded", doc, workspace: ws });
     }, 350);
@@ -472,7 +527,33 @@ const DocumentEditorPage = () => {
       cancelled = true;
       window.clearTimeout(t);
     };
-  }, [workspaceId, documentId, retryNonce]);
+  }, [workspaceId, documentId, retryNonce, effectiveUserId, account?.fullName]);
+
+  const livePresence = useDocumentPresence(
+    isDatabaseWorkspaceId(workspaceId) ? workspaceId : "",
+    documentId && isDatabaseWorkspaceId(documentId) ? documentId : "",
+    {
+      userId: effectiveUserId,
+      fullName: account?.fullName ?? "You",
+    },
+  );
+
+  const headerPresence: PresenceUser[] = useMemo(() => {
+    if (isDatabaseWorkspaceId(workspaceId) && isDatabaseWorkspaceId(documentId)) {
+      return livePresence;
+    }
+    if (!account) return [];
+    return [
+      {
+        id: effectiveUserId,
+        fullName: account.fullName,
+        color: AVATAR_COLORS[0],
+        profileHref: "/settings/profile",
+        roleLabel: "You",
+        statusLabel: "Editing now",
+      },
+    ];
+  }, [workspaceId, documentId, livePresence, account, effectiveUserId]);
 
   const { doc, workspace } = state;
 
@@ -486,6 +567,23 @@ const DocumentEditorPage = () => {
     () => (doc ? { ...doc, ...overrides } : null),
     [doc, overrides],
   );
+
+  const treePermissions = (() => {
+    if (!workspace) {
+      return {
+        canCreateContent: false,
+        canOrganizeContent: false,
+        canDeleteContent: false,
+      };
+    }
+    const rp = getRolePermissions(workspace.myRole as WorkspaceRoleKey);
+    const active = workspace.status === "active";
+    return {
+      canCreateContent: active && rp.canCreateContent,
+      canOrganizeContent: active && rp.canOrganizeContent,
+      canDeleteContent: active && rp.canDeleteContent,
+    };
+  })();
 
   // ─────── Academic submission state ───────
   // Per-document submission history (mock-seeded, locally-mutable).
@@ -508,7 +606,7 @@ const DocumentEditorPage = () => {
   const [collabReadOnlyReason, setCollabReadOnlyReason] = useState<ReadOnlyReason | null>(null);
   const readOnlyReason =
     collabReadOnlyReason ??
-    (mergedDoc && workspace ? getReadOnlyReason(mergedDoc, workspace, CURRENT_USER_ID) : null);
+    (mergedDoc && workspace ? getReadOnlyReason(mergedDoc, workspace, effectiveUserId) : null);
   const isEditable = state.status === "loaded" && readOnlyReason === null;
 
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
@@ -621,7 +719,7 @@ const DocumentEditorPage = () => {
   } = useDocumentComments({
     workspaceId,
     documentId: mergedDoc?.id ?? "",
-    currentUserId: CURRENT_USER_ID,
+    currentUserId: effectiveUserId,
   });
   const { activeThreadId, focusThread, flashAnchorId, flashAnchor } =
     useDocumentThreadFocus();
@@ -773,6 +871,7 @@ const DocumentEditorPage = () => {
   // Tree panel quick-create dialogs
   const [createDocOpen, setCreateDocOpen] = useState(false);
   const [createFolderOpen, setCreateFolderOpen] = useState(false);
+  const [createTargetFolderId, setCreateTargetFolderId] = useState<string | null>(null);
   const [submitDialogOpen, setSubmitDialogOpen] = useState(false);
   const [tableDialogOpen, setTableDialogOpen] = useState(false);
 
@@ -782,11 +881,30 @@ const DocumentEditorPage = () => {
       .run();
   };
 
-  const handleCreateDoc = (title: string, templateId: string) => {
+  const handleCreateDoc = async (title: string, templateId: string) => {
     setCreateDocOpen(false);
-    // Seed the chosen template into a fresh doc id and open it directly —
-    // skipping the /documents/new screen since the user already picked a
-    // template inline.
+    if (isDatabaseWorkspaceId(workspaceId)) {
+      if (templateId && templateId !== "doc-blank") {
+        const params = new URLSearchParams({ title, template: templateId });
+        navigate(`/w/${workspaceId}/documents/new?${params.toString()}`);
+        return;
+      }
+      try {
+        const created = await createDocument(workspaceId, {
+          title: title.trim(),
+          folderId: createTargetFolderId,
+          templateId: null,
+        });
+        setCreateTargetFolderId(null);
+        reloadDocumentTree();
+        toast.success(`Created "${created.title}"`, { description: "Opening new document…" });
+        navigate(`/w/${workspaceId}/documents/${created.id}`);
+      } catch (e) {
+        const msg = e instanceof ApiError ? e.message : "Could not create document.";
+        toast.error(msg);
+      }
+      return;
+    }
     const newId = `doc-${Date.now().toString(36)}`;
     const seed = buildDocumentSeed(title, templateId, null);
     stashPendingDoc(newId, seed);
@@ -798,8 +916,19 @@ const DocumentEditorPage = () => {
     });
     navigate(`/w/${workspaceId}/documents/${newId}`);
   };
-  const handleCreateFolder = (name: string) => {
+  const handleCreateFolder = async (name: string) => {
     setCreateFolderOpen(false);
+    if (isDatabaseWorkspaceId(workspaceId)) {
+      try {
+        await createWorkspaceFolder(workspaceId, { name: name.trim(), parentId: null });
+        reloadDocumentTree();
+        toast.success(`Created folder "${name.trim()}"`);
+      } catch (e) {
+        const msg = e instanceof ApiError ? e.message : "Could not create folder.";
+        toast.error(msg);
+      }
+      return;
+    }
     toast.success(`Created folder "${name}"`);
   };
 
@@ -825,9 +954,10 @@ const DocumentEditorPage = () => {
             <DocumentTreePanel
               workspaceId={workspaceId}
               workspaceName={WORKSPACES[workspaceId]?.name ?? workspaceId}
+              workspaceType={WORKSPACES[workspaceId]?.type ?? "general"}
               tree={documentTree}
               activeDocumentId={null}
-              canCreate={false}
+              permissions={treePermissions}
             />
           </div>
         )}
@@ -869,9 +999,7 @@ const DocumentEditorPage = () => {
     workspace.myRole === "MANAGER";
   const canDelete =
     canLock ||
-    (workspace.myRole === "MEMBER" && mergedDoc.createdBy.id === CURRENT_USER_ID);
-  const canCreate =
-    workspace.status === "active" && workspace.myRole !== "VIEWER";
+    (workspace.myRole === "MEMBER" && mergedDoc.createdBy.id === effectiveUserId);
 
   const handleToggleLock = () => {
     setOverrides((prev) => {
@@ -881,7 +1009,7 @@ const DocumentEditorPage = () => {
         ...prev,
         isLocked: nowLocked,
         lockedBy: nowLocked
-          ? { id: CURRENT_USER_ID, fullName: "Elshaday Tesfaye" }
+          ? { id: effectiveUserId, fullName: account?.fullName ?? "You" }
           : undefined,
       };
     });
@@ -897,11 +1025,11 @@ const DocumentEditorPage = () => {
     <DocumentTreePanel
       workspaceId={workspaceId}
       workspaceName={workspace.name}
+      workspaceType={workspace.type}
       tree={documentTree}
       activeDocumentId={mergedDoc.id}
-      canCreate={canCreate}
-      onNewDoc={() => setCreateDocOpen(true)}
-      onNewFolder={() => setCreateFolderOpen(true)}
+      permissions={treePermissions}
+      onServerTreeChange={() => reloadDocumentTree()}
       onNavigate={handleTreeNavigate}
     />
   );
@@ -975,7 +1103,7 @@ const DocumentEditorPage = () => {
     workspace.myRole === "OWNER" ||
     workspace.myRole === "ADMIN" ||
     workspace.myRole === "MANAGER";
-  const isSubmitter = mergedDoc.createdBy.id === CURRENT_USER_ID;
+  const isSubmitter = mergedDoc.createdBy.id === effectiveUserId;
   const academicEnabled = workspace.isAcademic && workspace.status === "active";
 
   // Most recent submission record (used for review panel + feedback banner)
@@ -1033,8 +1161,8 @@ const DocumentEditorPage = () => {
     const newRecord: SubmissionRecord = {
       id: `sub-${Date.now()}`,
       documentId: mergedDoc.id,
-      submittedById: CURRENT_USER_ID,
-      submittedByName: "Elshaday Tesfaye",
+      submittedById: effectiveUserId,
+      submittedByName: account?.fullName ?? "You",
       submittedAt: new Date().toISOString(),
       submissionNote: note,
       versionLabel: nextVersionLabel(),
@@ -1052,8 +1180,8 @@ const DocumentEditorPage = () => {
     const decided: SubmissionRecord = {
       ...pendingSubmission,
       decision: "approved",
-      decidedById: CURRENT_USER_ID,
-      decidedByName: "Elshaday Tesfaye",
+      decidedById: effectiveUserId,
+      decidedByName: account?.fullName ?? "You",
       decidedAt: new Date().toISOString(),
       decisionNote: note,
     };
@@ -1069,8 +1197,8 @@ const DocumentEditorPage = () => {
     const decided: SubmissionRecord = {
       ...pendingSubmission,
       decision: "changes_requested",
-      decidedById: CURRENT_USER_ID,
-      decidedByName: "Elshaday Tesfaye",
+      decidedById: effectiveUserId,
+      decidedByName: account?.fullName ?? "You",
       decidedAt: new Date().toISOString(),
       decisionNote: note,
     };
@@ -1135,7 +1263,7 @@ const DocumentEditorPage = () => {
         <EditorHeader
           workspaceId={workspaceId}
           document={mergedDoc}
-          presence={MOCK_PRESENCE}
+          presence={headerPresence}
           canLock={canLock}
           canDelete={canDelete}
           onToggleLock={handleToggleLock}
@@ -1201,7 +1329,7 @@ const DocumentEditorPage = () => {
           saveStatus={saveStatus}
           lastSavedAt={lastSavedAt}
           connectionStatus={connectionStatus}
-          collaboratorCount={MOCK_PRESENCE.length}
+          collaboratorCount={headerPresence.length}
         />
       </main>
 
@@ -1335,6 +1463,7 @@ const DocumentEditorPage = () => {
         <TreeCreateDialog
           open
           kind="document"
+          workspaceType={workspace.type}
           folderName={null}
           onClose={() => setCreateDocOpen(false)}
           onCreated={handleCreateDoc}
@@ -1372,9 +1501,9 @@ const DocumentEditorPage = () => {
           assignableMembers={
             ["OWNER", "ADMIN", "MANAGER"].includes(workspace.myRole)
               ? workspaceMembers
-              : workspaceMembers.filter((m) => m.id === CURRENT_USER_ID)
+              : workspaceMembers.filter((m) => m.id === effectiveUserId)
           }
-          currentUserId={CURRENT_USER_ID}
+          currentUserId={effectiveUserId}
           sourceLink={{
             documentId: mergedDoc.id,
             documentTitle: mergedDoc.title,

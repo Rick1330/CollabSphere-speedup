@@ -1,17 +1,12 @@
 /**
- * Shared HTTP client for the future backend.
+ * Shared HTTP client for the Nest API (`/api/v1`).
  *
- * This is the single seam where real API calls will eventually be made.
- * Today the app runs on mocks (see src/api/mocks), but every adapter that
- * fronts a domain (auth, documents, tasks, …) is expected to flow through
- * this module so swapping mocks → real fetch is a one-file change per
- * domain.
- *
- * Conventions:
- *   - All requests are JSON in / JSON out.
- *   - Auth headers are injected via setAuthTokenProvider().
- *   - Throws ApiError on non-2xx responses; never swallows errors.
+ * All domain adapters should use `request()` so auth headers, CSRF, refresh-on-401,
+ * and error handling stay consistent.
  */
+
+import { authSession, isAuthFailureSuppressed } from "@/lib/auth-session";
+import { parseApiActionEnvelope } from "@/api/client/envelope";
 
 export class ApiError extends Error {
   constructor(
@@ -26,17 +21,37 @@ export class ApiError extends Error {
 }
 
 type AuthTokenProvider = () => string | null | Promise<string | null>;
+type AuthFailureHandler = () => void;
 
-/** Must match Nest `setGlobalPrefix("api/v1")` (`apps/api/src/main.ts`). */
+/** Must match Nest `setGlobalPrefix("api/v1")` (`apps/api/src/dev.ts`). */
 let baseUrl = "/api/v1";
 let getAuthToken: AuthTokenProvider | null = null;
+let onAuthFailure: AuthFailureHandler | null = null;
+
+const isAuthBootstrapApiPath = (path: string) => {
+  const p = path.startsWith("http") ? (() => { try { return new URL(path).pathname; } catch { return path; } })() : path;
+  return (
+    p.includes("/auth/login") ||
+    p.includes("/auth/register") ||
+    p.includes("/auth/forgot-password") ||
+    p.includes("/auth/reset-password") ||
+    p.includes("/auth/verify-email") ||
+    p.includes("/auth/refresh")
+  );
+};
+
+const isAuthFailure = (status: number, code: string | undefined) =>
+  status === 401 || code === "TOKEN_INVALID" || code === "TOKEN_EXPIRED";
 
 export function configureApiClient(opts: {
   baseUrl?: string;
   getAuthToken?: AuthTokenProvider;
+  /** Called when an authenticated request returns invalid/expired credentials (clears session + redirect). */
+  onAuthFailure?: AuthFailureHandler | null;
 }) {
   if (opts.baseUrl !== undefined) baseUrl = opts.baseUrl;
   if (opts.getAuthToken !== undefined) getAuthToken = opts.getAuthToken;
+  if (opts.onAuthFailure !== undefined) onAuthFailure = opts.onAuthFailure;
 }
 
 /**
@@ -50,14 +65,96 @@ function hostnameForDevApi(hostname: string): string {
 }
 
 /**
- * In dev inside the browser, point at Nest on `:3001` directly. The Vite `/api/v1`
- * proxy can hang or wedge on some Windows setups (dual-stack / stuck sockets),
- * leaving login spinners indefinite.
+ * In dev inside the browser, call Nest on `:3001` directly by default. Same-origin
+ * `/api/v1` via the Vite proxy can hang indefinitely on some Windows setups (dual-stack
+ * / stuck sockets); opt in with `VITE_USE_DEV_PROXY=true` if you prefer one origin in dev.
  */
 export function getBrowserDevApiBaseUrl(): string | null {
   if (!import.meta.env.DEV || typeof window === "undefined") return null;
-  const host = hostnameForDevApi(window.location.hostname);
-  return `http://${host}:3001/api/v1`;
+  // Always target IPv4 loopback so API cookies and Nest listener match `.env` (`127.0.0.1`).
+  return "http://127.0.0.1:3001/api/v1";
+}
+
+/**
+ * When `VITE_API_BASE_URL` is an absolute `http(s)` URL in dev, rewrite
+ * `localhost` / IPv6 loopback to `127.0.0.1` so the browser never calls
+ * `http://::1:...` (invalid) and avoids Windows dual-stack issues where
+ * `localhost` resolves differently than the Nest listener.
+ */
+export function normalizeDevApiAbsoluteUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    if (u.hostname === "::1" || u.hostname === "[::1]") {
+      u.hostname = "127.0.0.1";
+    } else if (u.hostname === "localhost") {
+      u.hostname = "127.0.0.1";
+    }
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
+
+function trimEnvString(value: unknown): string | undefined {
+  if (value == null) return undefined;
+  const s = String(value).trim();
+  return s.length > 0 ? s : undefined;
+}
+
+/** When true in dev, use same-origin `/api/v1` (Vite proxy). Default is false — direct API on :3001 avoids proxy hangs. */
+function readDevProxyFlag(): boolean {
+  const v = trimEnvString(import.meta.env.VITE_USE_DEV_PROXY);
+  return v === "1" || v === "true" || v === "yes";
+}
+
+/** Resolved once at startup in `AppProviders`. */
+export function resolveConfiguredApiBaseUrl(): string {
+  const fromEnv = trimEnvString(import.meta.env.VITE_API_BASE_URL);
+  const devBrowser = import.meta.env.DEV && typeof window !== "undefined";
+
+  let candidate =
+    fromEnv ??
+    (devBrowser ? (readDevProxyFlag() ? "/api/v1" : getBrowserDevApiBaseUrl()) : undefined) ??
+    "/api/v1";
+
+  if (devBrowser && /^https?:\/\//i.test(candidate)) {
+    candidate = normalizeDevApiAbsoluteUrl(candidate);
+  }
+
+  const trimmed = candidate.replace(/\/+$/, "");
+  return trimmed.length > 0 ? trimmed : "/api/v1";
+}
+
+/**
+ * Socket.IO must reach the Nest process (port 3001 in local dev). When the REST client
+ * uses the Vite proxy (`VITE_USE_DEV_PROXY=true`), use same-origin `/` so `/socket.io`
+ * is proxied; otherwise use the API origin matching `getBrowserDevApiBaseUrl()`.
+ */
+export function resolveRealtimeSocketOrigin(): string {
+  const devBrowser = import.meta.env.DEV && typeof window !== "undefined";
+  if (!devBrowser) {
+    return "/";
+  }
+
+  const rt = trimEnvString(import.meta.env.VITE_REALTIME_BASE_URL);
+  const api = trimEnvString(import.meta.env.VITE_API_BASE_URL);
+  const pick = rt ?? api;
+  if (pick && /^https?:\/\//i.test(pick)) {
+    return httpUrlOrigin(normalizeDevApiAbsoluteUrl(pick));
+  }
+
+  if (readDevProxyFlag()) {
+    return "/";
+  }
+
+  const direct = getBrowserDevApiBaseUrl();
+  return direct ? httpUrlOrigin(direct) : "/";
+}
+
+/** HTTP(S) origin only (no path). Socket.IO is served from the API origin, not under `/api/v1`. */
+export function httpUrlOrigin(url: string): string {
+  const u = new URL(url);
+  return `${u.protocol}//${u.host}`;
 }
 
 export interface RequestOptions {
@@ -75,19 +172,61 @@ function mergeSignals(a: AbortSignal | undefined, b: AbortSignal): AbortSignal {
 
 const REQUEST_DEADLINE_MS = 45_000;
 
+/** Single-flight refresh so concurrent 401s share one `/auth/refresh` call. */
+let refreshSessionInFlight: Promise<boolean> | null = null;
+
+/**
+ * Rotate access JWT using refresh cookie + CSRF header (same contract as Nest `POST /auth/refresh`).
+ * Does not use `request()` to avoid recursion. Updates `authSession` on success.
+ */
+function refreshSessionWithCookie(): Promise<boolean> {
+  if (!refreshSessionInFlight) {
+    refreshSessionInFlight = (async (): Promise<boolean> => {
+      const csrf = authSession.getCsrfToken();
+      if (!csrf) return false;
+      const url = `${baseUrl}/auth/refresh`;
+      try {
+        const deadline =
+          typeof AbortSignal.timeout === "function"
+            ? AbortSignal.timeout(REQUEST_DEADLINE_MS)
+            : undefined;
+        const res = await fetch(url, {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+            "X-CSRF-Token": csrf,
+          },
+          credentials: "include",
+          signal: deadline,
+        });
+        if (!res.ok) return false;
+        const payload = (await res.json()) as unknown;
+        const { extraData } = parseApiActionEnvelope<{
+          accessToken?: string;
+          csrfToken?: string;
+        }>(payload);
+        const accessToken = extraData.accessToken;
+        const nextCsrf =
+          typeof extraData.csrfToken === "string" && extraData.csrfToken.length > 0
+            ? extraData.csrfToken
+            : csrf;
+        if (typeof accessToken !== "string" || accessToken.length === 0) return false;
+        authSession.patchSession({ accessToken, csrfToken: nextCsrf });
+        return true;
+      } catch {
+        return false;
+      }
+    })().finally(() => {
+      refreshSessionInFlight = null;
+    });
+  }
+  return refreshSessionInFlight;
+}
+
 export async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   const url = path.startsWith("http") ? path : `${baseUrl}${path}`;
-  const headers: Record<string, string> = {
-    Accept: "application/json",
-    ...opts.headers,
-  };
-
-  if (opts.body !== undefined) headers["Content-Type"] = "application/json";
-
-  if (getAuthToken) {
-    const token = await getAuthToken();
-    if (token) headers.Authorization = `Bearer ${token}`;
-  }
+  const method = opts.method ?? "GET";
 
   const deadline =
     typeof AbortSignal.timeout === "function"
@@ -96,44 +235,95 @@ export async function request<T>(path: string, opts: RequestOptions = {}): Promi
   const mergedSignal =
     deadline === undefined ? opts.signal : mergeSignals(opts.signal, deadline);
 
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      method: opts.method ?? "GET",
-      headers,
-      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
-      signal: mergedSignal,
-      credentials: "include",
-    });
-  } catch (err: unknown) {
-    const aborted =
-      err instanceof Error &&
-      (err.name === "AbortError" || err.name === "TimeoutError");
-    if (aborted)
-      throw new ApiError(
-        0,
-        `${opts.method ?? "GET"} ${path}: request timed out or was cancelled`,
-      );
-    throw err;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const headers: Record<string, string> = {
+      Accept: "application/json",
+      ...opts.headers,
+    };
+
+    if (opts.body !== undefined) headers["Content-Type"] = "application/json";
+
+    if (method === "POST" || method === "PUT" || method === "PATCH" || method === "DELETE") {
+      const csrf = authSession.getCsrfToken();
+      if (csrf) headers["X-CSRF-Token"] = csrf;
+    }
+
+    let hadBearer = false;
+    if (getAuthToken) {
+      const token = await getAuthToken();
+      if (token) {
+        hadBearer = true;
+        headers.Authorization = `Bearer ${token}`;
+      }
+    }
+
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method,
+        headers,
+        body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+        signal: mergedSignal,
+        credentials: "include",
+      });
+    } catch (err: unknown) {
+      const aborted =
+        err instanceof Error &&
+        (err.name === "AbortError" || err.name === "TimeoutError");
+      if (aborted)
+        throw new ApiError(
+          0,
+          `${method} ${path}: request timed out or was cancelled`,
+        );
+      throw err;
+    }
+
+    if (res.ok) {
+      if (res.status === 204) return undefined as T;
+      return (await res.json()) as T;
+    }
+
+    let body: unknown;
+    try {
+      body = await res.json();
+    } catch {
+      body = await res.text().catch(() => undefined);
+    }
+    let message = `${opts.method ?? "GET"} ${path} → ${res.status}`;
+    let code: string | undefined;
+    if (body && typeof body === "object" && "error" in body) {
+      const errorObj = (body as { error?: { message?: string; code?: string } }).error;
+      if (typeof errorObj?.message === "string") message = errorObj.message;
+      if (typeof errorObj?.code === "string") code = errorObj.code;
+    }
+
+    const canTryRefresh =
+      attempt === 0 &&
+      hadBearer &&
+      res.status === 401 &&
+      (code === "TOKEN_EXPIRED" || code === "TOKEN_INVALID") &&
+      !isAuthBootstrapApiPath(path) &&
+      !isAuthFailureSuppressed();
+
+    if (canTryRefresh) {
+      const refreshed = await refreshSessionWithCookie();
+      if (refreshed) continue;
+    }
+
+    if (
+      hadBearer &&
+      isAuthFailure(res.status, code) &&
+      !isAuthBootstrapApiPath(path) &&
+      !isAuthFailureSuppressed()
+    ) {
+      try {
+        onAuthFailure?.();
+      } catch {
+        /* ignore handler errors */
+      }
+    }
+    throw new ApiError(res.status, message, body, code);
   }
 
-  if (res.ok) {
-    if (res.status === 204) return undefined as T;
-    return (await res.json()) as T;
-  }
-
-  let body: unknown;
-  try {
-    body = await res.json();
-  } catch {
-    body = await res.text().catch(() => undefined);
-  }
-  let message = `${opts.method ?? "GET"} ${path} → ${res.status}`;
-  let code: string | undefined;
-  if (body && typeof body === "object" && "error" in body) {
-    const errorObj = (body as { error?: { message?: string; code?: string } }).error;
-    if (typeof errorObj?.message === "string") message = errorObj.message;
-    if (typeof errorObj?.code === "string") code = errorObj.code;
-  }
-  throw new ApiError(res.status, message, body, code);
+  throw new ApiError(0, `${method} ${path}: unexpected retry exhaustion`);
 }

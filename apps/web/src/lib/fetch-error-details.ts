@@ -16,8 +16,9 @@ export function getFetchErrorDetails(error: unknown): {
       requestId = b.error?.requestId ?? b.meta?.requestId;
     }
     let hint: string | undefined;
-    if (error.status === 401) {
-      hint = "Sign out and sign in again — your session may have expired.";
+    if (error.status === 401 || error.code === "TOKEN_INVALID" || error.code === "TOKEN_EXPIRED") {
+      hint =
+        "Sign out and sign in again — your session may have expired, or the API secret changed (JWT_ACCESS_SECRET).";
     } else if (error.status === 403) {
       hint = "You may not have permission for this action.";
     } else if (error.status === 0) {
@@ -29,7 +30,8 @@ export function getFetchErrorDetails(error: unknown): {
   if (error instanceof TypeError && /fetch|Failed to fetch|NetworkError/i.test(error.message)) {
     return {
       message: error.message,
-      hint: "Is the API running on port 3001? If you use IPv6 (::1), reload after updating the app.",
+      hint:
+        "In dev the UI calls the API on port 3001 by default (Vite’s `/api/v1` proxy can hang on some Windows setups). Confirm `pnpm dev` is running the API and try `curl http://127.0.0.1:3001/api/v1/health`. Start Postgres/Redis (`docker compose up -d`) if the API exits on boot. Set `VITE_USE_DEV_PROXY=true` only if you intentionally want same-origin `/api/v1` through Vite on port 8080.",
     };
   }
 

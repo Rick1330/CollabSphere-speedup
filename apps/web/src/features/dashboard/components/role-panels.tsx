@@ -120,12 +120,6 @@ const AdminPanel = () => {
             >
               Audit log
             </Link>
-            <Link
-              to="/review"
-              className="h-9 px-3 rounded-lg border border-stone-200 bg-white text-stone-700 text-xs font-medium hover:bg-stone-50 transition-colors"
-            >
-              Review queue
-            </Link>
           </div>
         </div>
       </div>

@@ -1,4 +1,10 @@
-export type RealtimeEventPrefix = "task" | "comment" | "notification" | "activity" | "document";
+export type RealtimeEventPrefix =
+  | "task"
+  | "comment"
+  | "notification"
+  | "activity"
+  | "document"
+  | "workspace";
 
 export type RealtimeEventName = `${RealtimeEventPrefix}:${string}`;
 
@@ -23,4 +29,21 @@ export type JoinTaskRoomPayload = {
 
 export type LeaveTaskRoomPayload = {
   taskId: string;
+};
+
+export type JoinDocumentRoomPayload = {
+  workspaceId: string;
+  documentId: string;
+  fullName?: string;
+};
+
+export type LeaveDocumentRoomPayload = {
+  documentId: string;
+};
+
+export type DocumentPresencePayload = {
+  workspaceId: string;
+  documentId: string;
+  userId: string;
+  fullName: string;
 };

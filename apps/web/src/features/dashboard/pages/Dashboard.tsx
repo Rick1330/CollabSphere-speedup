@@ -25,7 +25,7 @@ const Dashboard = () => {
       <AppSidebar collapsed={collapsed} onToggle={toggle} width={width} onResizeStart={startResize} />
 
       <div className="flex-1 min-w-0 flex flex-col">
-        <TopNav unreadCount={3} onOpenPalette={palette.toggle} />
+        <TopNav onOpenPalette={palette.toggle} />
         <DashboardContent user={user} />
       </div>
 

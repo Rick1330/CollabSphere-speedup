@@ -38,6 +38,16 @@ export function parseApiActionEnvelope<TExtra extends Record<string, unknown> = 
   return { message, extraData: extraData as TExtra };
 }
 
+export function parseApiListEnvelope<TItem>(payload: unknown): { items: TItem[]; total: number } {
+  if (!payload || typeof payload !== "object" || !("data" in payload)) {
+    return { items: [], total: 0 };
+  }
+  const data = (payload as { data?: { items?: TItem[]; total?: number } }).data;
+  const items = Array.isArray(data?.items) ? data.items : [];
+  const total = typeof data?.total === "number" ? data.total : items.length;
+  return { items, total };
+}
+
 export function parseApiSingleEnvelope<TResource>(payload: unknown): TResource {
   if (!payload || typeof payload !== "object" || !("data" in payload)) {
     throw new Error("Invalid API payload envelope.");

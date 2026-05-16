@@ -60,9 +60,10 @@ export const AdminDashboard = () => {
     : "—";
 
   const data = stats.data;
-  const storagePct = data
-    ? Math.min(100, (data.storageUsedBytes / data.storageQuotaBytes) * 100)
-    : 0;
+  const storageQuota = data?.storageQuotaBytes ?? 0;
+  const storageUsed = data?.storageUsedBytes ?? 0;
+  const storagePct =
+    data && storageQuota > 0 ? Math.min(100, (storageUsed / storageQuota) * 100) : 0;
 
   return (
     <div>
@@ -104,35 +105,35 @@ export const AdminDashboard = () => {
           <>
             <Kpi
               label="ACTIVE 7D"
-              value={data.activeUsersLast7Days.toLocaleString()}
-              hint={`of ${data.totalUsers}`}
-              delta={`+${data.newUsersLast7Days} new`}
-              deltaTone={data.newUsersLast7Days > 0 ? "up" : "neutral"}
+              value={(data.activeUsersLast7Days ?? 0).toLocaleString()}
+              hint={`of ${data.totalUsers ?? 0}`}
+              delta={`+${data.newUsersLast7Days ?? 0} new`}
+              deltaTone={(data.newUsersLast7Days ?? 0) > 0 ? "up" : "neutral"}
               spark={data.activeUsersTrend}
             />
             <Kpi
               label="WORKSPACES"
-              value={data.totalWorkspaces.toLocaleString()}
-              hint={`${data.archivedWorkspaces} archived`}
+              value={(data.totalWorkspaces ?? 0).toLocaleString()}
+              hint={`${data.archivedWorkspaces ?? 0} archived`}
               delta={
-                data.newWorkspacesLast7Days > 0
-                  ? `+${data.newWorkspacesLast7Days} this week`
+                (data.newWorkspacesLast7Days ?? 0) > 0
+                  ? `+${data.newWorkspacesLast7Days ?? 0} this week`
                   : "0 this week"
               }
-              deltaTone={data.newWorkspacesLast7Days > 0 ? "up" : "neutral"}
+              deltaTone={(data.newWorkspacesLast7Days ?? 0) > 0 ? "up" : "neutral"}
             />
             <Kpi
               label="EVENTS (24H)"
-              value={(data.errorEventsLast24h + data.warnEventsLast24h).toLocaleString()}
-              hint={`${data.errorEventsLast24h} err · ${data.warnEventsLast24h} warn`}
-              delta={data.errorEventsLast24h > 0 ? "investigate" : "all clear"}
-              deltaTone={data.errorEventsLast24h > 0 ? "down" : "up"}
+              value={((data.errorEventsLast24h ?? 0) + (data.warnEventsLast24h ?? 0)).toLocaleString()}
+              hint={`${data.errorEventsLast24h ?? 0} err · ${data.warnEventsLast24h ?? 0} warn`}
+              delta={(data.errorEventsLast24h ?? 0) > 0 ? "investigate" : "all clear"}
+              deltaTone={(data.errorEventsLast24h ?? 0) > 0 ? "down" : "up"}
               spark={data.eventsTrend}
             />
             <Kpi
               label="ADMINS"
-              value={data.adminCount.toLocaleString()}
-              hint={`${data.deactivatedUsers} deactivated`}
+              value={(data.adminCount ?? 0).toLocaleString()}
+              hint={`${data.deactivatedUsers ?? 0} deactivated`}
               delta="role count"
               deltaTone="neutral"
             />
@@ -277,7 +278,7 @@ export const AdminDashboard = () => {
                       </span>
                     </div>
                     <span className="font-mono text-[11px] text-stone-700 tabular-nums">
-                      {formatBytes(data.storageUsedBytes)} / {formatBytes(data.storageQuotaBytes)}
+                      {formatBytes(storageUsed)} / {formatBytes(storageQuota || 0)}
                     </span>
                   </div>
                   <div className="h-1.5 rounded-full bg-stone-100 overflow-hidden">

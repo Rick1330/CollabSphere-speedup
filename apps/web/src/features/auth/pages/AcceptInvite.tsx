@@ -17,12 +17,71 @@ import { lookupInvitation, type Invitation } from "@/lib/mock-invitations";
 import { relativeTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { useCurrentAccount } from "@/lib/auth-session";
+import {
+  acceptWorkspaceInvitation,
+  fetchInvitationPreview,
+  type InvitationPreview,
+} from "@/api/adapters/invitations-public";
+import { ApiError } from "@/api/client";
 
-// Toggle this to test the unauthenticated branch.
-const MOCK_AUTH_USER: { fullName: string; email: string } | null = {
-  fullName: "Elshaday Tesfaye",
-  email: "jane@collabsphere.app",
-};
+const DEMO_INVITE_TOKENS = new Set([
+  "demo-pending",
+  "demo-expired",
+  "demo-used",
+  "demo-mismatch",
+  "invalid",
+]);
+
+function mapApiRoleToUi(
+  role: string,
+): Invitation["role"] {
+  switch (role) {
+    case "VIEWER":
+      return "viewer";
+    case "MEMBER":
+      return "member";
+    case "MANAGER":
+      return "manager";
+    case "ADMIN":
+    case "OWNER":
+      return "supervisor";
+    default:
+      return "member";
+  }
+}
+
+function previewToInvitation(token: string, preview: InvitationPreview, viewerEmail: string | null): Invitation {
+  let status: Invitation["status"] = "pending";
+  if (preview.status !== "pending") {
+    status = preview.status === "accepted" ? "used" : "invalid";
+  } else if (new Date(preview.expiresAt).getTime() <= Date.now()) {
+    status = "expired";
+  } else if (
+    viewerEmail &&
+    viewerEmail.trim().toLowerCase() !== preview.invitedEmail.trim().toLowerCase()
+  ) {
+    status = "email_mismatch";
+  }
+
+  return {
+    token,
+    status,
+    workspace: {
+      id: preview.workspace.id,
+      name: preview.workspace.name,
+      description: preview.workspace.description ?? "",
+      icon: preview.workspace.icon ?? "📁",
+      type: preview.workspace.type,
+      memberCount: preview.workspace.memberCount,
+    },
+    invitedBy: preview.invitedBy,
+    email: preview.invitedEmail,
+    role: mapApiRoleToUi(preview.role),
+    createdAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+    expiresAt: preview.expiresAt,
+  };
+}
 
 const ROLE_COPY: Record<Invitation["role"], { label: string; blurb: string }> = {
   viewer: {
@@ -61,6 +120,7 @@ const AcceptInvite = () => {
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const reduced = useReducedMotion();
+  const account = useCurrentAccount();
   const [loading, setLoading] = useState(true);
   const [invite, setInvite] = useState<Invitation | null>(null);
   const [accepting, setAccepting] = useState(false);
@@ -68,7 +128,11 @@ const AcceptInvite = () => {
 
   // Allow ?as=unauth to demo the unauthenticated branch.
   const forceUnauth = params.get("as") === "unauth";
-  const user = forceUnauth ? null : MOCK_AUTH_USER;
+  const user = forceUnauth
+    ? null
+    : account
+      ? { fullName: account.fullName, email: account.email }
+      : null;
 
   useEffect(() => {
     document.title = "Workspace invitation — CollabSphere";
@@ -78,17 +142,41 @@ const AcceptInvite = () => {
     let alive = true;
     setLoading(true);
     setInvite(null);
-    const t = setTimeout(() => {
-      if (!alive) return;
-      const result = lookupInvitation(token);
-      setInvite(result);
-      setLoading(false);
-    }, 320);
+
+    const run = async () => {
+      if (!token) {
+        if (alive) setLoading(false);
+        return;
+      }
+      if (DEMO_INVITE_TOKENS.has(token)) {
+        await new Promise((r) => setTimeout(r, 320));
+        if (!alive) return;
+        setInvite(lookupInvitation(token));
+        setLoading(false);
+        return;
+      }
+      try {
+        const preview = await fetchInvitationPreview(token);
+        if (!alive) return;
+        setInvite(previewToInvitation(token, preview, user?.email ?? null));
+      } catch (err) {
+        if (!alive) return;
+        const code = err instanceof ApiError ? err.code : undefined;
+        if (code === "INVITATION_NOT_FOUND") {
+          setInvite(null);
+        } else {
+          setInvite(null);
+        }
+      } finally {
+        if (alive) setLoading(false);
+      }
+    };
+
+    void run();
     return () => {
       alive = false;
-      clearTimeout(t);
     };
-  }, [token]);
+  }, [token, user?.email]);
 
   const expiresIn = useMemo(() => {
     if (!invite) return null;
@@ -103,10 +191,30 @@ const AcceptInvite = () => {
     if (!invite) return;
     setAcceptError(null);
     setAccepting(true);
-    await new Promise((r) => setTimeout(r, 700));
-    setAccepting(false);
-    toast.success(`Welcome to ${invite.workspace.name}`);
-    navigate(`/w/${invite.workspace.id}`);
+    try {
+      if (DEMO_INVITE_TOKENS.has(token)) {
+        await new Promise((r) => setTimeout(r, 700));
+        toast.success(`Welcome to ${invite.workspace.name}`);
+        navigate(`/w/${invite.workspace.id}`);
+        return;
+      }
+      const { workspaceId } = await acceptWorkspaceInvitation(token);
+      toast.success(`Welcome to ${invite.workspace.name}`);
+      navigate(`/w/${workspaceId}`);
+    } catch (err) {
+      const code = err instanceof ApiError ? err.code : undefined;
+      if (code === "EMAIL_MISMATCH") {
+        setAcceptError("This invite was sent to a different email address than the one you’re signed in with.");
+      } else if (code === "INVITATION_EXPIRED") {
+        setAcceptError("This invitation has expired. Ask the workspace admin to send a new one.");
+      } else if (code === "INVITATION_ALREADY_USED" || code === "ALREADY_MEMBER") {
+        setAcceptError("This invitation was already used or you’re already a member.");
+      } else {
+        setAcceptError("Could not accept this invitation. Try again or ask for a new invite.");
+      }
+    } finally {
+      setAccepting(false);
+    }
   };
 
   const inviteState = loading ? "loading" : getInviteState(invite);
@@ -177,7 +285,8 @@ const AcceptInvite = () => {
           <div className="px-7 pb-7 pt-3">{inviteContent}</div>
         </div>
 
-        {/* Demo state switcher — small, faint */}
+        {/* Demo state switcher — local dev only */}
+        {import.meta.env.DEV && (
         <div className="mt-6 text-center">
           <p className="font-mono-cs text-[10px] tracking-[0.18em] uppercase text-[var(--cs-text-faint)] mb-2">
             Demo states
@@ -194,6 +303,7 @@ const AcceptInvite = () => {
             ))}
           </div>
         </div>
+        )}
       </motion.div>
     </div>
   );

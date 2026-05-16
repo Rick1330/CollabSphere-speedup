@@ -55,6 +55,15 @@ export class InvitationsNestController {
     });
   }
 
+  @Get("invitations/me/pending")
+  async listMyPendingInvitations(@CurrentUserId() userId: string, @ReqRequestId() requestId: string) {
+    const items = await this.invitationsService.listMyPendingInvitations({ userId });
+    return wrapSuccessResponse({
+      payload: createListResponsePayload({ items, total: items.length }),
+      requestId,
+    });
+  }
+
   @Public()
   @Get("invitations/:token")
   async getInvitationPreview(
@@ -75,6 +84,19 @@ export class InvitationsNestController {
     @CurrentUserId() userId: string,
   ) {
     const data = await this.invitationsService.acceptInvitationByToken({ token, userId });
+    return wrapSuccessResponse({
+      payload: createSingleResourcePayload(data),
+      requestId,
+    });
+  }
+
+  @Post("invitations/me/pending/:invitationId/accept")
+  async acceptMyPendingInvitation(
+    @Param("invitationId") invitationId: string,
+    @ReqRequestId() requestId: string,
+    @CurrentUserId() userId: string,
+  ) {
+    const data = await this.invitationsService.acceptMyPendingInvitationById({ invitationId, userId });
     return wrapSuccessResponse({
       payload: createSingleResourcePayload(data),
       requestId,

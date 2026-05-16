@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link, NavLink } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import {
   LayoutDashboard,
   Briefcase,
@@ -11,18 +12,14 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
+import { listMineWorkspaceRows } from "@/api/adapters/workspaces";
 
 interface RecentWorkspace {
   id: string;
   name: string;
   type: "professional" | "academic" | "general";
 }
-
-const RECENT: RecentWorkspace[] = [
-  { id: "alpha", name: "Project Alpha", type: "professional" },
-  { id: "thesis", name: "Thesis — Distributed Systems", type: "academic" },
-  { id: "personal", name: "Personal Notes", type: "general" },
-];
 
 const NAV = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -102,36 +99,94 @@ function SidebarNav({ collapsed }: { collapsed: boolean }) {
   );
 }
 
-function SidebarRecentWorkspaces() {
+function RecentWorkspacesNav({ variant }: { variant: "desktop" | "mobile" }) {
+  const { data: rows, isLoading, isError, refetch, isFetching } = useQuery({
+    queryKey: ["sidebar", "recent-workspaces"],
+    queryFn: listMineWorkspaceRows,
+    staleTime: 60_000,
+  });
+
+  const recent: RecentWorkspace[] = useMemo(() => {
+    if (!rows?.length) return [];
+    return [...rows]
+      .sort(
+        (a, b) =>
+          new Date(b.workspace.updatedAt).getTime() - new Date(a.workspace.updatedAt).getTime(),
+      )
+      .slice(0, 5)
+      .map((r) => ({
+        id: r.workspace.id,
+        name: r.workspace.name,
+        type: r.workspace.type,
+      }));
+  }, [rows]);
+
+  const rowClass =
+    variant === "mobile"
+      ? "flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-sm text-stone-600 hover:bg-stone-100"
+      : "flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-sm text-stone-600 transition-colors duration-150 hover:bg-stone-100 hover:text-stone-900 dark:text-stone-300 dark:hover:bg-stone-800/70 dark:hover:text-stone-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/50 focus-visible:ring-offset-1 focus-visible:ring-offset-[#FAFAF9] dark:focus-visible:ring-offset-[#171412]";
+
+  const newWorkspaceClass =
+    variant === "mobile"
+      ? "flex items-center gap-2.5 px-3 py-1.5 text-sm text-stone-400 hover:text-teal-600"
+      : "flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-sm text-stone-400 transition-colors duration-150 hover:text-teal-600 dark:text-stone-500 dark:hover:text-teal-400";
+
   return (
-    <div className="mt-6">
-      <div className="font-mono text-[10px] text-stone-400 tracking-[0.1em] uppercase mb-2 px-6">
-        Recent workspaces
-      </div>
-      <ul className="px-3 space-y-0.5">
-        {RECENT.map((w) => (
+    <ul className="px-3 space-y-0.5">
+      {isLoading ? (
+        <>
+          {[1, 2, 3].map((i) => (
+            <li key={i} className="py-0.5">
+              <Skeleton className="h-8 w-full rounded-lg" />
+            </li>
+          ))}
+        </>
+      ) : isError ? (
+        <li className="px-3 py-2 text-xs text-stone-500 dark:text-stone-400">
+          Could not load workspaces.{" "}
+          <button
+            type="button"
+            className="font-medium text-teal-600 hover:underline disabled:opacity-50"
+            onClick={() => void refetch()}
+            disabled={isFetching}
+          >
+            Retry
+          </button>
+        </li>
+      ) : recent.length === 0 ? (
+        <li className="px-3 py-2 text-xs text-stone-500 dark:text-stone-400 leading-relaxed">
+          <p>No workspaces yet.</p>
+          <Link to="/workspaces" className="font-medium text-teal-600 hover:underline mt-1 inline-block">
+            Browse workspaces
+          </Link>
+        </li>
+      ) : (
+        recent.map((w) => (
           <li key={w.id}>
-            <Link
-              to={`/w/${w.id}`}
-              className="flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-sm text-stone-600 transition-colors duration-150
-                hover:bg-stone-100 hover:text-stone-900 dark:text-stone-300 dark:hover:bg-stone-800/70 dark:hover:text-stone-100
-                focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/50 focus-visible:ring-offset-1 focus-visible:ring-offset-[#FAFAF9] dark:focus-visible:ring-offset-[#171412]"
-            >
-              <span className={cn("h-2 w-2 rounded-full shrink-0", dotColor(w.type))} aria-hidden="true" />
+            <Link to={`/w/${w.id}`} className={rowClass}>
+              <span className={cn("h-2 w-2 shrink-0 rounded-full", dotColor(w.type))} aria-hidden="true" />
               <span className="truncate">{w.name}</span>
             </Link>
           </li>
-        ))}
-        <li>
-          <Link
-            to="/workspaces/new"
-            className="flex items-center gap-2.5 px-3 py-1.5 text-sm text-stone-400 transition-colors duration-150 hover:text-teal-600 dark:text-stone-500 dark:hover:text-teal-400"
-          >
-            <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-            New workspace
-          </Link>
-        </li>
-      </ul>
+        ))
+      )}
+      <li>
+        <Link to="/workspaces/new" className={newWorkspaceClass}>
+          <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+          New workspace
+        </Link>
+      </li>
+    </ul>
+  );
+}
+
+function SidebarRecentWorkspaces() {
+  return (
+    <div className="mt-6">
+      <div className="mb-2 px-6 font-mono text-[10px] uppercase tracking-[0.1em] text-stone-400">
+        Recent workspaces
+      </div>
+      <RecentWorkspacesNav variant="desktop" />
     </div>
   );
 }
@@ -239,22 +294,10 @@ export const MobileSidebarContent = () => {
           })}
         </ul>
         <div className="mt-6">
-          <div className="font-mono text-[10px] text-stone-400 tracking-[0.1em] uppercase mb-2 px-6">
+          <div className="mb-2 px-6 font-mono text-[10px] uppercase tracking-[0.1em] text-stone-400">
             Recent workspaces
           </div>
-          <ul className="px-3 space-y-0.5">
-            {RECENT.map((w) => (
-              <li key={w.id}>
-                <Link
-                  to={`/w/${w.id}`}
-                  className="flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-sm text-stone-600 hover:bg-stone-100"
-                >
-                  <span className={cn("h-2 w-2 rounded-full", dotColor(w.type))} />
-                  <span className="truncate">{w.name}</span>
-                </Link>
-              </li>
-            ))}
-          </ul>
+          <RecentWorkspacesNav variant="mobile" />
         </div>
       </nav>
     </div>

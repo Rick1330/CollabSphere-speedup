@@ -1,5 +1,6 @@
 import { type CommentTargetType, type WorkspaceRole } from "@prisma/client";
 import { Inject, Injectable } from "@nestjs/common";
+import { isDatabaseUuidParam } from "../common/auth/request-user.js";
 import { AppError, ValidationAppError } from "../common/filters/app-error.filter.js";
 import { PrismaClientProvider } from "../common/prisma/prisma-client.provider.js";
 import { RealtimeEventsService } from "../realtime/realtime-events.service.js";
@@ -425,20 +426,49 @@ export class CommentsService {
   }
 
   private async requireWorkspaceMembership(actorUserId: string, workspaceId: string): Promise<WorkspaceMembership> {
+    if (!isDatabaseUuidParam(workspaceId)) {
+      throw new ValidationAppError({
+        issues: [
+          {
+            field: "workspaceId",
+            message: "Workspace id must be a UUID.",
+            rule: "uuid",
+          },
+        ],
+      });
+    }
+
     const membership = await this.prisma.workspaceMember.findFirst({
       where: {
         userId: actorUserId,
         workspaceId,
         isActive: true,
         deletedAt: null,
+        leftAt: null,
         workspace: { deletedAt: null },
       },
       select: { role: true, workspace: { select: { status: true } } },
     });
-    if (!membership) {
-      throw new AppError({ code: "NOT_WORKSPACE_MEMBER" });
+    if (membership) {
+      return membership;
     }
-    return membership;
+
+    const actor = await this.prisma.user.findFirst({
+      where: { id: actorUserId, deletedAt: null },
+      select: { globalRole: true },
+    });
+    if (actor?.globalRole === "ADMIN") {
+      const workspace = await this.prisma.workspace.findFirst({
+        where: { id: workspaceId, deletedAt: null },
+        select: { status: true },
+      });
+      if (!workspace) {
+        throw new AppError({ code: "WORKSPACE_NOT_FOUND" });
+      }
+      return { role: "VIEWER", workspace };
+    }
+
+    throw new AppError({ code: "NOT_WORKSPACE_MEMBER" });
   }
 
   private assertCanWriteComments(membership: WorkspaceMembership) {

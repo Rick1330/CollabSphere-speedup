@@ -18,6 +18,7 @@ import {
   fetchWorkspaceActivityPaginated,
   type ActivityEvent,
 } from "@/api/adapters/activity";
+import { ApiError } from "@/api/client";
 import { ActivityEventItem } from "./activity-event-item";
 
 interface ActivityFeedProps {
@@ -62,11 +63,18 @@ export function ActivityFeed({ workspaceId }: ActivityFeedProps) {
   );
   const [query, setQuery] = useState("");
 
-  const { data, isLoading, isError, refetch, isFetching } = useQuery({
+  const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ["workspace", workspaceId, "activity", "full", page],
     queryFn: () =>
       fetchWorkspaceActivityPaginated(workspaceId, { page, pageSize: PAGE_SIZE }),
   });
+
+  const errorMessage =
+    error instanceof ApiError
+      ? error.message
+      : error instanceof Error
+        ? error.message
+        : "Activity history is unavailable. Run database migrations and try again.";
 
   const events = data?.data.items ?? [];
   const pagination = data?.meta.pagination;
@@ -175,6 +183,7 @@ export function ActivityFeed({ workspaceId }: ActivityFeedProps) {
         >
           <AlertCircle className="h-6 w-6 text-red-400 mx-auto" aria-hidden="true" />
           <p className="text-sm font-semibold text-stone-900 mt-3">Couldn't load activity</p>
+          <p className="text-xs text-stone-500 mt-2 max-w-md mx-auto">{errorMessage}</p>
           <button
             type="button"
             onClick={() => refetch()}

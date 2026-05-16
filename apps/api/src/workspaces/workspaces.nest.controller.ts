@@ -10,11 +10,15 @@ import {
   Patch,
   Post,
   Put,
+  Req,
   UseGuards,
 } from "@nestjs/common";
+import type { Request } from "express";
+import type { WorkspaceRole } from "@prisma/client";
 import { CurrentUserId } from "../common/decorators/current-user.decorator.js";
 import { WorkspaceMembershipGuard } from "../common/guards/workspace-membership.guard.js";
 import { ReqRequestId } from "../common/nest/request-id.decorator.js";
+import { AppError } from "../common/filters/app-error.filter.js";
 import {
   createActionResponsePayload,
   createListResponsePayload,
@@ -30,7 +34,6 @@ import {
 } from "./workspaces.dto.js";
 
 @Controller("workspaces")
-@UseGuards(WorkspaceMembershipGuard)
 export class WorkspacesNestController {
   constructor(@Inject(WorkspacesService) private readonly workspacesService: WorkspacesService) {}
 
@@ -62,12 +65,23 @@ export class WorkspacesNestController {
   }
 
   @Get(":workspaceId")
+  @UseGuards(WorkspaceMembershipGuard)
   async getWorkspace(
     @Param("workspaceId") workspaceId: string,
+    @Req() req: Request,
     @ReqRequestId() requestId: string,
-    @CurrentUserId() userId: string,
   ) {
-    const data = await this.workspacesService.getByIdForUser({ userId, workspaceId });
+    const wm = req.workspaceMember;
+    if (!wm) {
+      throw new AppError({
+        code: "INTERNAL_ERROR",
+        message: "Missing workspace membership context.",
+      });
+    }
+    const data = await this.workspacesService.getByIdForUser({
+      workspaceId,
+      membership: { id: wm.id, role: wm.role as WorkspaceRole, workspaceId: wm.workspaceId },
+    });
     return wrapSuccessResponse({
       payload: createSingleResourcePayload(data),
       requestId,
@@ -75,19 +89,40 @@ export class WorkspacesNestController {
   }
 
   @Get(":workspaceId/members")
+  @UseGuards(WorkspaceMembershipGuard)
   async listMembers(
     @Param("workspaceId") workspaceId: string,
     @ReqRequestId() requestId: string,
-    @CurrentUserId() userId: string,
+    @CurrentUserId() _userId: string,
   ) {
-    const data = await this.workspacesService.listMembersForUser({ userId, workspaceId });
+    const data = await this.workspacesService.listMembersForUser({ workspaceId });
     return wrapSuccessResponse({
       payload: createListResponsePayload({ items: data, total: data.length }),
       requestId,
     });
   }
 
+  @Get(":workspaceId/members/by-user/:userId/profile")
+  @UseGuards(WorkspaceMembershipGuard)
+  async getWorkspaceMemberPeerProfile(
+    @Param("workspaceId") workspaceId: string,
+    @Param("userId") userId: string,
+    @ReqRequestId() requestId: string,
+    @CurrentUserId() actorUserId: string,
+  ) {
+    const data = await this.workspacesService.getWorkspaceMemberPeerProfile({
+      workspaceId,
+      actorUserId,
+      targetUserId: userId,
+    });
+    return wrapSuccessResponse({
+      payload: createSingleResourcePayload(data),
+      requestId,
+    });
+  }
+
   @Patch(":workspaceId/members/:membershipId/role")
+  @UseGuards(WorkspaceMembershipGuard)
   async updateMemberRole(
     @Param("workspaceId") workspaceId: string,
     @Param("membershipId") membershipId: string,
@@ -109,6 +144,7 @@ export class WorkspacesNestController {
   }
 
   @Delete(":workspaceId/members/:membershipId")
+  @UseGuards(WorkspaceMembershipGuard)
   async removeMember(
     @Param("workspaceId") workspaceId: string,
     @Param("membershipId") membershipId: string,
@@ -128,6 +164,7 @@ export class WorkspacesNestController {
   }
 
   @Put(":workspaceId")
+  @UseGuards(WorkspaceMembershipGuard)
   async updateWorkspace(
     @Param("workspaceId") workspaceId: string,
     @ReqRequestId() requestId: string,
@@ -147,6 +184,7 @@ export class WorkspacesNestController {
   }
 
   @Post(":workspaceId/archive")
+  @UseGuards(WorkspaceMembershipGuard)
   async archiveWorkspace(
     @Param("workspaceId") workspaceId: string,
     @ReqRequestId() requestId: string,
@@ -165,6 +203,7 @@ export class WorkspacesNestController {
   }
 
   @Post(":workspaceId/unarchive")
+  @UseGuards(WorkspaceMembershipGuard)
   async unarchiveWorkspace(
     @Param("workspaceId") workspaceId: string,
     @ReqRequestId() requestId: string,
@@ -183,6 +222,7 @@ export class WorkspacesNestController {
   }
 
   @Delete(":workspaceId")
+  @UseGuards(WorkspaceMembershipGuard)
   async deleteWorkspace(
     @Param("workspaceId") workspaceId: string,
     @ReqRequestId() requestId: string,
@@ -196,6 +236,7 @@ export class WorkspacesNestController {
   }
 
   @Post(":workspaceId/transfer-ownership")
+  @UseGuards(WorkspaceMembershipGuard)
   async transferOwnership(
     @Param("workspaceId") workspaceId: string,
     @ReqRequestId() requestId: string,

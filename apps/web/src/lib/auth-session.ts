@@ -30,6 +30,10 @@ export interface SessionAccount {
 export interface AuthSession {
   accountId: string;
   accessToken: string;
+  /** Mirrors `csrf_token` cookie on the API origin; required for mutating requests when CSRF guard is enabled. */
+  csrfToken?: string;
+  /** First workspace UUID from API after login; avoids legacy `/w/thesis` slugs in deep links. */
+  defaultWorkspaceId?: string;
   issuedAt: string; // ISO
   user?: {
     id: string;
@@ -37,6 +41,8 @@ export interface AuthSession {
     fullName: string;
     avatarUrl?: string | null;
     globalRole?: "USER" | "ADMIN";
+    /** `local` = email/password, `google` = OAuth (matches API Prisma enum). */
+    authProvider?: "local" | "google";
     defaultWorkspaceRole?: WorkspaceRoleKey;
     defaultWorkspaceType?: WorkspaceType;
   };
@@ -62,7 +68,18 @@ function writeSession(s: AuthSession | null) {
 }
 
 let current: AuthSession | null = readSession();
+/** Suppresses `onAuthFailure` while `/login#oauth=` is being applied (avoids double sign-in). */
+let oauthBootstrapping = false;
 const listeners = new Set<() => void>();
+
+export function isOAuthHashPresent(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.location.hash.startsWith("#oauth=");
+}
+
+export function isAuthFailureSuppressed(): boolean {
+  return oauthBootstrapping || isOAuthHashPresent();
+}
 
 function buildResolvedAccountSnapshot(): SessionAccount | null {
   if (!current || !current.user) return null;
@@ -83,9 +100,9 @@ function buildResolvedAccountSnapshot(): SessionAccount | null {
     bio: null,
     avatarUrl: current.user.avatarUrl ?? null,
     globalRole: current.user.globalRole ?? "USER",
-    authProvider: "local",
+    authProvider: current.user.authProvider === "google" ? "google" : "local",
     status: "active",
-    defaultWorkspaceId: "alpha",
+    defaultWorkspaceId: current.defaultWorkspaceId ?? "alpha",
     defaultWorkspaceType: current.user.defaultWorkspaceType ?? "general",
     defaultWorkspaceRole: current.user.defaultWorkspaceRole ?? "MEMBER",
     blurb: "API-authenticated user",
@@ -104,16 +121,36 @@ export const authSession = {
   get(): AuthSession | null {
     return current;
   },
+  getCsrfToken(): string | null {
+    const t = current?.csrfToken;
+    return typeof t === "string" && t.length > 0 ? t : null;
+  },
   getAccessToken(): string | null {
     return current?.accessToken ?? null;
+  },
+  setOAuthBootstrapping(value: boolean) {
+    oauthBootstrapping = value;
+  },
+  isOAuthBootstrapping(): boolean {
+    return oauthBootstrapping;
   },
   getAccount(): SessionAccount | null {
     return resolvedAccountSnapshot;
   },
-  signIn(accountId: string, options?: { accessToken?: string; user?: AuthSession["user"] }) {
+  signIn(
+    accountId: string,
+    options?: {
+      accessToken?: string;
+      csrfToken?: string;
+      defaultWorkspaceId?: string;
+      user?: AuthSession["user"];
+    },
+  ) {
     current = {
       accountId,
       accessToken: options?.accessToken ?? `mock-token-${accountId}-${Date.now()}`,
+      csrfToken: options?.csrfToken,
+      defaultWorkspaceId: options?.defaultWorkspaceId,
       issuedAt: new Date().toISOString(),
       user: options?.user,
     };
@@ -121,12 +158,33 @@ export const authSession = {
     emit();
   },
   signOut() {
+    oauthBootstrapping = false;
     current = null;
     writeSession(null);
     emit();
   },
-  /** Notify subscribers when the underlying account record changes (e.g. profile update). */
+  /** Merge fields into the current session (tokens after `/auth/refresh`, workspace id, etc.). */
+  patchSession(
+    partial: Partial<Pick<AuthSession, "defaultWorkspaceId" | "csrfToken" | "accessToken">> & {
+      user?: Partial<NonNullable<AuthSession["user"]>>;
+    },
+  ) {
+    if (!current) return;
+    const { user: userPartial, ...rest } = partial;
+    current = {
+      ...current,
+      ...rest,
+      ...(userPartial && current.user
+        ? { user: { ...current.user, ...userPartial } }
+        : {}),
+    };
+    writeSession(current);
+    emit();
+  },
+  /** Re-persist current session and notify subscribers (e.g. after external profile overlay writes). */
   touch() {
+    if (!current) return;
+    writeSession(current);
     emit();
   },
   subscribe(fn: () => void) {

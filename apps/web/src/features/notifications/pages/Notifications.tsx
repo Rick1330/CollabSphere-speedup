@@ -23,7 +23,7 @@ const Notifications = () => {
     <div className="app-light min-h-screen flex">
       <AppSidebar collapsed={collapsed} onToggle={toggle} width={width} onResizeStart={startResize} />
       <div className="flex-1 min-w-0 flex flex-col">
-        <TopNav user={currentUser} unreadCount={3} onOpenPalette={palette.toggle} />
+        <TopNav user={currentUser} onOpenPalette={palette.toggle} />
         <main className="flex-1 p-6 sm:p-10">
           <div className="max-w-3xl mx-auto">
             <NotificationCenter />

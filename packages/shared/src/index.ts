@@ -13,4 +13,5 @@ export * from "./constants/index.js";
 export * from "./enums/index.js";
 export * from "./types/index.js";
 export * from "./collab/document-write-policy.js";
+export * from "./collab/workspace-content-policy.js";
 export * from "./env.js";

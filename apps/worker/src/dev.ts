@@ -1,6 +1,7 @@
 import { EnvValidationError, parseRuntimeEnv } from "../../../packages/shared/src/runtime-env.js";
 import { validateServiceEnv } from "../../../packages/shared/src/bootstrap-runtime.js";
 import { startVerificationEmailProcessor } from "./jobs/email/verification-email-processor.js";
+import { startWorkspaceInvitationEmailProcessor } from "./jobs/email/workspace-invitation-email-processor.js";
 import { Queue, Worker } from "bullmq";
 import { Redis } from "ioredis";
 import { PrismaClient } from "@prisma/client";
@@ -91,6 +92,10 @@ const stopVerificationEmailProcessor = startVerificationEmailProcessor({
   jwtAccessSecret: workerEnv.JWT_ACCESS_SECRET,
   baseUrl: workerEnv.BASE_URL,
 });
+const stopWorkspaceInvitationEmailProcessor = startWorkspaceInvitationEmailProcessor({
+  jwtAccessSecret: workerEnv.JWT_ACCESS_SECRET,
+  baseUrl: workerEnv.BASE_URL,
+});
 
 const heartbeatMs = parseHeartbeatMs(process.env.WORKER_HEARTBEAT_MS);
 
@@ -146,6 +151,7 @@ const reminderTimer = setInterval(() => {
 const shutdown = (signal: string) => {
   console.log(`[worker] received ${signal}, shutting down`);
   stopVerificationEmailProcessor();
+  stopWorkspaceInvitationEmailProcessor();
   clearInterval(timer);
   clearInterval(reminderTimer);
   void Promise.all([

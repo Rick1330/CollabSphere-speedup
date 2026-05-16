@@ -37,6 +37,7 @@ import TaskDetail from "@/features/tasks/pages/TaskDetail";
 
 // Governance + support slices
 import Members from "@/features/members/pages/Members";
+import WorkspaceMemberProfile from "@/features/members/pages/WorkspaceMemberProfile";
 import Activity from "@/features/activity/pages/Activity";
 import Notifications from "@/features/notifications/pages/Notifications";
 import Settings from "@/features/settings/pages/Settings";
@@ -110,6 +111,7 @@ export function AppRoutes() {
           path="/w/:workspaceId/tasks/new"
           element={protect(<Tasks />)}
         />
+        <Route path="/w/:workspaceId/members/user/:userId" element={protect(<WorkspaceMemberProfile />)} />
         <Route path="/w/:workspaceId/members" element={protect(<Members />)} />
         <Route path="/w/:workspaceId/activity" element={protect(<Activity />)} />
         <Route path="/w/:workspaceId/files" element={protect(<Files />)} />

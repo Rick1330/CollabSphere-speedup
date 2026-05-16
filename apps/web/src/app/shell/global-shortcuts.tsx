@@ -13,7 +13,8 @@
  * pages themselves so they only fire in the right context.
  *
  * Auth state is read from the session helper so navigation hotkeys silently
- * no-op for guests, and `g r` only fires for accounts that can review.
+ * no-op for guests, and `g r` only fires for accounts that can review submissions
+ * (workspace reviewers), not platform admins.
  *
  * `⌘K` and `?` deliberately use `allowWhenModalOpen` so the user can always
  * toggle the palette and pop the help sheet — every other global shortcut is
@@ -64,7 +65,7 @@ export const GlobalShortcuts = () => {
   };
 
   const openReviewQueue = () => {
-    if (isAuthed && sessionRole.canReview) {
+    if (isAuthed && sessionRole.canReview && !sessionRole.isPlatformAdmin) {
       navigate("/review");
     }
   };

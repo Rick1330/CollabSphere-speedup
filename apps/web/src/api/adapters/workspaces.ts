@@ -126,6 +126,8 @@ export async function fetchWorkspaceSidebarContext(
     roleLabel: getWorkspaceRoleLabel(ws.type, role).toUpperCase(),
     permissions: {
       canCreateContent: rp.canCreateContent,
+      canOrganizeContent: rp.canOrganizeContent,
+      canDeleteContent: rp.canDeleteContent,
       canEditSettings: rp.canEditSettings,
       canViewAnalytics: rp.canViewAnalytics,
     },

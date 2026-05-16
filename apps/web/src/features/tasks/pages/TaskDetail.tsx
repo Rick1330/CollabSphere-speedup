@@ -160,7 +160,7 @@ const TaskDetailPage = () => {
     <div className="app-light min-h-screen flex bg-stone-50">
       <WorkspaceSidebar workspace={sidebar} collapsed={collapsed} onToggle={toggle} />
       <div className="flex-1 min-w-0 flex flex-col h-screen">
-        <TopNav user={currentUser} unreadCount={3} onOpenPalette={palette.toggle} />
+        <TopNav user={currentUser} onOpenPalette={palette.toggle} />
         <main className="flex-1 min-h-0 overflow-hidden flex flex-col">
           <div className="border-b border-stone-200 bg-white">
             <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-3">

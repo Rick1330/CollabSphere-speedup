@@ -1,6 +1,6 @@
 import { Link, useNavigate } from "react-router-dom";
 import { Bell, ClipboardCheck, Keyboard, Menu, Search, ShieldCheck } from "lucide-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import {
   DropdownMenu,
@@ -15,19 +15,29 @@ import { getInitials } from "@/lib/format";
 import { useCurrentAccount } from "@/lib/auth-session";
 import { getSessionRole } from "@/lib/session-role";
 import { logout } from "@/api/adapters/auth";
+import { fetchUnreadCount } from "@/api/adapters/notifications";
 import { emitOpenHelp } from "@/lib/shortcut-events";
 
 interface TopNavProps {
   /** Optional user override — when omitted, the signed-in account is used. */
   user?: { fullName: string; email: string };
+  /** When set, overrides the live unread count from the API (e.g. Storybook). */
   unreadCount?: number;
   onOpenPalette: () => void;
 }
 
-export const TopNav = ({ user: userOverride, unreadCount = 3, onOpenPalette }: TopNavProps) => {
+export const TopNav = ({ user: userOverride, unreadCount: unreadCountOverride, onOpenPalette }: TopNavProps) => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const account = useCurrentAccount();
+  const unreadQ = useQuery({
+    queryKey: ["notifications", "unread-count"],
+    queryFn: fetchUnreadCount,
+    enabled: unreadCountOverride === undefined && !!account,
+    staleTime: 30_000,
+  });
+  const unreadCount =
+    unreadCountOverride !== undefined ? unreadCountOverride : (unreadQ.data?.data.unreadCount ?? 0);
   const sessionRole = getSessionRole(account);
   const user =
     userOverride ??

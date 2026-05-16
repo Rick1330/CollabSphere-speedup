@@ -22,7 +22,8 @@
  *   - everything else               → "member"
  *
  * The `canReview` flag is the gating signal for the review queue / supervisor
- * panels — admins, owners, supervisors and managers can approve work.
+ * panels — workspace owners, supervisors, and managers can approve work.
+ * Platform admins use the admin console, not the submission review queue.
  */
 
 import type { MockAccount } from "@/lib/mock-accounts";
@@ -62,7 +63,7 @@ export function getSessionRole(account: MockAccount | null): SessionRole {
   if (account.globalRole === "ADMIN") {
     return {
       role: "admin",
-      canReview: true,
+      canReview: false,
       isReadOnly: false,
       isPlatformAdmin: true,
       label: "Platform admin",

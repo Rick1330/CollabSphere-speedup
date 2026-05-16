@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Loader2 } from "lucide-react";
+import { resolveConfiguredApiBaseUrl } from "@/api/client";
 
 const GoogleLogo = () => (
   <svg width="20" height="20" viewBox="0 0 24 24">
@@ -19,7 +20,9 @@ export const OAuthButton = ({ label = "Continue with Google" }: OAuthButtonProps
 
   const handleClick = () => {
     setLoading(true);
-    // OAuth redirect would go here
+    const base = resolveConfiguredApiBaseUrl().replace(/\/+$/, "");
+    const startUrl = `${base}/auth/google`;
+    window.location.assign(startUrl);
   };
 
   return (
