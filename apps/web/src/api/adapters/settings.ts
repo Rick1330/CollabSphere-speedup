@@ -74,6 +74,20 @@ export function applyUserProfileToSession(user: UserProfile): void {
   });
 }
 
+/** Refresh session user fields (including globalRole) from GET /users/me. */
+export async function syncSessionFromApi(): Promise<UserProfile | null> {
+  if (!authSession.getAccessToken()) {
+    return null;
+  }
+  try {
+    const user = await fetchCurrentUser();
+    applyUserProfileToSession(user);
+    return user;
+  } catch {
+    return null;
+  }
+}
+
 export async function changePassword(params: {
   currentPassword: string;
   newPassword: string;

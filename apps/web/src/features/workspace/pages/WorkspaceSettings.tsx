@@ -4,6 +4,7 @@ import { Loader2 } from "lucide-react";
 import { TopNav } from "@/app/shell/top-nav";
 import { CommandPalette } from "@/app/shell/command-palette";
 import { WorkspaceSidebar } from "@/features/workspace/components/workspace-sidebar";
+import { WorkspaceMobileNav } from "@/features/workspace/components/workspace-mobile-nav";
 import { WorkspaceSettings } from "@/features/workspace/components/settings/workspace-settings";
 import { useSidebar } from "@/hooks/use-sidebar";
 import { useCommandPalette } from "@/hooks/use-command-palette";
@@ -67,6 +68,7 @@ const WorkspaceSettingsPage = () => {
       <WorkspaceSidebar workspace={sidebar} collapsed={collapsed} onToggle={toggle} />
       <div className="flex-1 min-w-0 flex flex-col h-screen">
         <TopNav user={currentUser} onOpenPalette={palette.toggle} />
+        <WorkspaceMobileNav workspace={sidebar} />
         <main className="flex-1 min-h-0 overflow-y-auto">
           <WorkspaceSettings
             workspaceId={workspaceId}

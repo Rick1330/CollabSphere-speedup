@@ -3,6 +3,7 @@ import { Loader2 } from "lucide-react";
 import { TopNav } from "@/app/shell/top-nav";
 import { CommandPalette } from "@/app/shell/command-palette";
 import { WorkspaceSidebar } from "@/features/workspace/components/workspace-sidebar";
+import { WorkspaceMobileNav } from "@/features/workspace/components/workspace-mobile-nav";
 import { TaskList } from "@/features/tasks/components/task-list";
 import { useSidebar } from "@/hooks/use-sidebar";
 import { useCommandPalette } from "@/hooks/use-command-palette";
@@ -63,6 +64,7 @@ const TasksList = () => {
 
       <div className="flex-1 min-w-0 flex flex-col h-screen">
         <TopNav user={currentUser} onOpenPalette={palette.toggle} />
+        <WorkspaceMobileNav workspace={sidebar} />
 
         <main className="flex-1 min-h-0 flex flex-col overflow-hidden">
           <TaskList workspaceId={workspaceId} workspaceStatus={sidebar.status} myRole={myRole} />

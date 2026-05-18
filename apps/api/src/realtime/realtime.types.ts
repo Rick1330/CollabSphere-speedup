@@ -4,7 +4,8 @@ export type RealtimeEventPrefix =
   | "notification"
   | "activity"
   | "document"
-  | "workspace";
+  | "workspace"
+  | "export";
 
 export type RealtimeEventName = `${RealtimeEventPrefix}:${string}`;
 

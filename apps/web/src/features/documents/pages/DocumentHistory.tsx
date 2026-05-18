@@ -8,6 +8,7 @@ import {
   WorkspaceSidebar,
   type WorkspaceForSidebar,
 } from "@/features/workspace/components/workspace-sidebar";
+import { WorkspaceMobileNav } from "@/features/workspace/components/workspace-mobile-nav";
 import { useSidebar } from "@/hooks/use-sidebar";
 import { useCommandPalette } from "@/hooks/use-command-palette";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -181,6 +182,7 @@ const DocumentHistoryPage = () => {
       <WorkspaceSidebar workspace={workspace} collapsed={collapsed} onToggle={toggle} />
       <div className="flex-1 min-w-0 flex flex-col h-screen">
         <TopNav user={MOCK_USER} onOpenPalette={palette.toggle} />
+        <WorkspaceMobileNav workspace={workspace} />
 
         <main className="flex-1 min-h-0 overflow-y-auto">
           {/* Editorial archival header */}

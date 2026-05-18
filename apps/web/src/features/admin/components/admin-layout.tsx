@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { AdminNav } from "@/features/admin/components/admin-nav";
+import { AdminMobileNav } from "@/features/admin/components/admin-mobile-nav";
 
 interface AdminLayoutProps {
   children: ReactNode;
@@ -8,6 +9,7 @@ interface AdminLayoutProps {
 export const AdminLayout = ({ children }: AdminLayoutProps) => {
   return (
     <div className="app-light min-h-screen" style={{ backgroundColor: "var(--app-bg)" }}>
+      <AdminMobileNav />
       <div className="flex">
         {/* Admin sidebar — fixed */}
         <aside

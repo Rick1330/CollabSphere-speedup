@@ -1,8 +1,8 @@
 import { Inject, Injectable } from "@nestjs/common";
+import { EventEmitter2 } from "@nestjs/event-emitter";
 import { Prisma, type TaskPriority, type TaskStatus } from "@prisma/client";
 import { AppError, ValidationAppError } from "../common/filters/app-error.filter.js";
 import { PrismaClientProvider } from "../common/prisma/prisma-client.provider.js";
-import { RealtimeEventsService } from "../realtime/realtime-events.service.js";
 
 const TASK_TRANSITIONS: Record<TaskStatus, readonly TaskStatus[]> = {
   backlog: ["todo"],
@@ -19,7 +19,7 @@ const TASK_STATUSES: readonly TaskStatus[] = ["backlog", "todo", "in_progress", 
 export class TasksService {
   constructor(
     @Inject(PrismaClientProvider) private readonly prisma: PrismaClientProvider,
-    private readonly realtimeEvents: RealtimeEventsService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   async listTasks(input: { actorUserId: string; workspaceId: string; view: "list" | "board" }) {
@@ -212,6 +212,7 @@ export class TasksService {
       event: "task:status_changed",
       actionKey: "task.status_changed",
       summary: `Task moved to ${updated.status}: ${updated.title}`,
+      fromStatus: task.status,
     });
     return updated;
   }
@@ -291,20 +292,21 @@ export class TasksService {
   }) {
     await this.requireWorkspaceMembership(input.actorUserId, input.workspaceId);
 
-    const results = await this.prisma.$transaction(async (tx) => {
-      const created = [];
-      if (input.create) {
-        for (const item of input.create) {
-          const task = await this.createTask({
-            ...item,
-            actorUserId: input.actorUserId,
-            workspaceId: input.workspaceId,
-          });
-          created.push(task);
-        }
+    const created = [];
+    if (input.create) {
+      for (const item of input.create) {
+        const task = await this.createTask({
+          ...item,
+          actorUserId: input.actorUserId,
+          workspaceId: input.workspaceId,
+        });
+        created.push(task);
       }
+    }
 
-      if (input.deleteIds) {
+    let deletedCount = 0;
+    if (input.deleteIds?.length) {
+      await this.prisma.$transaction(async (tx) => {
         await tx.task.updateMany({
           where: {
             id: { in: input.deleteIds },
@@ -312,37 +314,51 @@ export class TasksService {
           },
           data: { deletedAt: new Date() },
         });
+      });
+      deletedCount = input.deleteIds.length;
+      for (const taskId of input.deleteIds) {
+        this.eventEmitter.emit("task.deleted", {
+          workspaceId: input.workspaceId,
+          actorId: input.actorUserId,
+          taskId,
+        });
       }
+    }
 
-      const updatedStatus = [];
-      if (input.updateStatus) {
-        for (const item of input.updateStatus) {
-          const task = await this.updateTaskStatus({
-            actorUserId: input.actorUserId,
-            workspaceId: input.workspaceId,
-            taskId: item.id,
-            status: item.status,
-          });
-          updatedStatus.push(task);
-        }
+    const updatedStatus = [];
+    if (input.updateStatus) {
+      for (const item of input.updateStatus) {
+        const task = await this.updateTaskStatus({
+          actorUserId: input.actorUserId,
+          workspaceId: input.workspaceId,
+          taskId: item.id,
+          status: item.status,
+        });
+        updatedStatus.push(task);
       }
+    }
 
-      return {
-        created,
-        deletedCount: input.deleteIds?.length ?? 0,
-        updatedStatus,
-      };
-    });
-
-    return results;
+    return {
+      created,
+      deletedCount,
+      updatedStatus,
+    };
   }
 
   private async emitTaskMutation(input: {
-    task: { id: string; workspaceId: string; title: string; assigneeId: string | null };
+    task: {
+      id: string;
+      workspaceId: string;
+      title: string;
+      assigneeId: string | null;
+      status: TaskStatus;
+      position?: Prisma.Decimal | number;
+    };
     actorUserId: string;
     event: `task:${string}`;
     actionKey: string;
     summary: string;
+    fromStatus?: TaskStatus;
   }) {
     const actor = await this.prisma.user.findUnique({
       where: { id: input.actorUserId },
@@ -375,13 +391,46 @@ export class TasksService {
         metadata: { taskId: input.task.id },
       },
     });
-    this.realtimeEvents.emitTask(input.event, {
+    this.eventEmitter.emit("activity.recorded", {
       workspaceId: input.task.workspaceId,
-      userId: input.task.assigneeId,
-      taskId: input.task.id,
-      data: { taskId: input.task.id },
+      activityEvent: activity as unknown as Record<string, unknown>,
     });
-    this.realtimeEvents.emitActivityFromRecord(activity);
+
+    const position =
+      input.task.position !== undefined ? Number(input.task.position) : undefined;
+
+    if (input.event === "task:created") {
+      this.eventEmitter.emit("task.created", {
+        workspaceId: input.task.workspaceId,
+        taskId: input.task.id,
+        status: input.task.status,
+      });
+    } else if (input.event === "task:assigned") {
+      this.eventEmitter.emit("task.assigned", {
+        workspaceId: input.task.workspaceId,
+        taskId: input.task.id,
+        assigneeId: input.task.assigneeId,
+      });
+    } else if (input.event === "task:status_changed") {
+      this.eventEmitter.emit("task.status_changed", {
+        workspaceId: input.task.workspaceId,
+        taskId: input.task.id,
+        toStatus: input.task.status,
+        fromStatus: input.fromStatus,
+        position,
+      });
+      if (input.task.status === "done") {
+        this.eventEmitter.emit("task.completed", {
+          workspaceId: input.task.workspaceId,
+          taskId: input.task.id,
+        });
+      }
+    } else if (input.event === "task:deleted") {
+      this.eventEmitter.emit("task.deleted", {
+        workspaceId: input.task.workspaceId,
+        taskId: input.task.id,
+      });
+    }
   }
 
   private async requireWorkspaceMembership(actorUserId: string, workspaceId: string) {

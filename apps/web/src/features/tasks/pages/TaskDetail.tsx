@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { TopNav } from "@/app/shell/top-nav";
 import { CommandPalette } from "@/app/shell/command-palette";
 import { WorkspaceSidebar } from "@/features/workspace/components/workspace-sidebar";
+import { WorkspaceMobileNav } from "@/features/workspace/components/workspace-mobile-nav";
 import { useSidebar } from "@/hooks/use-sidebar";
 import { useCommandPalette } from "@/hooks/use-command-palette";
 import { useWorkspaceRouteContext } from "@/hooks/use-workspace-route-context";
@@ -161,6 +162,7 @@ const TaskDetailPage = () => {
       <WorkspaceSidebar workspace={sidebar} collapsed={collapsed} onToggle={toggle} />
       <div className="flex-1 min-w-0 flex flex-col h-screen">
         <TopNav user={currentUser} onOpenPalette={palette.toggle} />
+        <WorkspaceMobileNav workspace={sidebar} />
         <main className="flex-1 min-h-0 overflow-hidden flex flex-col">
           <div className="border-b border-stone-200 bg-white">
             <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-3">

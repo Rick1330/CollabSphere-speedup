@@ -17,6 +17,7 @@ import {
 import { TopNav } from "@/app/shell/top-nav";
 import { CommandPalette } from "@/app/shell/command-palette";
 import { WorkspaceSidebar } from "@/features/workspace/components/workspace-sidebar";
+import { WorkspaceMobileNav } from "@/features/workspace/components/workspace-mobile-nav";
 import { useSidebar } from "@/hooks/use-sidebar";
 import { useCommandPalette } from "@/hooks/use-command-palette";
 import { useWorkspaceRouteContext } from "@/hooks/use-workspace-route-context";
@@ -105,6 +106,7 @@ const Analytics = () => {
       <WorkspaceSidebar workspace={workspace} collapsed={collapsed} onToggle={toggle} />
       <div className="flex-1 min-w-0 flex flex-col">
         <TopNav user={currentUser} onOpenPalette={palette.toggle} />
+        <WorkspaceMobileNav workspace={sidebar} />
 
         <main className="px-4 sm:px-6 lg:px-10 py-6 lg:py-10 max-w-7xl mx-auto w-full">
           <PageHeader

@@ -7,6 +7,7 @@ import {
   WorkspaceSidebar,
   type WorkspaceForSidebar,
 } from "@/features/workspace/components/workspace-sidebar";
+import { WorkspaceMobileNav } from "@/features/workspace/components/workspace-mobile-nav";
 import { useSidebar } from "@/hooks/use-sidebar";
 import { useCommandPalette } from "@/hooks/use-command-palette";
 
@@ -112,6 +113,7 @@ export const WorkspaceComingSoon = ({ title, description }: WorkspaceComingSoonP
       <WorkspaceSidebar workspace={workspace} collapsed={collapsed} onToggle={toggle} />
       <div className="flex-1 min-w-0 flex flex-col h-screen">
         <TopNav user={MOCK_USER} onOpenPalette={palette.toggle} />
+        <WorkspaceMobileNav workspace={workspace} />
         <main className="flex-1 min-h-0 overflow-y-auto">
           <div className="mx-auto max-w-2xl px-6 py-16">
             <div className="rounded-2xl border border-dashed border-stone-300 bg-stone-50/60 p-12 text-center">

@@ -1,5 +1,6 @@
 import { Module, RequestMethod, type MiddlewareConsumer, type NestModule } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
+import { EventEmitterModule } from "@nestjs/event-emitter";
 import { ThrottlerModule } from "@nestjs/throttler";
 import { APP_GUARD } from "@nestjs/core";
 import { CollabThrottlerGuard } from "./common/guards/collab-throttler.guard.js";
@@ -30,9 +31,12 @@ import { ExportsNestModule } from "./exports/exports.nest.module.js";
 import { TestingNestModule } from "./testing/testing.nest.module.js";
 import { DevNestModule } from "./dev/dev.nest.module.js";
 import { HttpObservabilityMiddleware } from "./common/observability/http-observability.middleware.js";
+import { RedisPublishModule } from "./common/redis/redis-publish.module.js";
 
 @Module({
   imports: [
+    EventEmitterModule.forRoot(),
+    RedisPublishModule,
     ConfigModule.forRoot({
       isGlobal: true,
       validationSchema: configValidationSchema,

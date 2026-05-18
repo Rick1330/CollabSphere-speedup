@@ -15,10 +15,28 @@ export class RealtimeSessionService {
   async authenticateSocket(client: Socket): Promise<RealtimeAuthUser> {
     const token = this.resolveAccessToken(client);
     const payload = await this.jwtAccessService.verifyAccessToken(token);
+    const user = await this.prisma.user.findFirst({
+      where: {
+        id: payload.sub,
+        isActive: true,
+        deletedAt: null,
+      },
+      select: {
+        id: true,
+        email: true,
+        globalRole: true,
+      },
+    });
+    if (!user) {
+      throw new AppError({
+        code: "UNAUTHORIZED",
+        message: "User inactive or not found",
+      });
+    }
     return {
-      userId: payload.sub,
-      email: payload.email,
-      globalRole: payload.globalRole,
+      userId: user.id,
+      email: user.email,
+      globalRole: user.globalRole,
     };
   }
 

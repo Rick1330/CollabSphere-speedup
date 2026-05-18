@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { WorkspaceRole } from "@prisma/client";
 import { Inject, Injectable } from "@nestjs/common";
+import { EventEmitter2 } from "@nestjs/event-emitter";
 import { AppError } from "../common/filters/app-error.filter.js";
 import { PrismaClientProvider } from "../common/prisma/prisma-client.provider.js";
 import { apiRuntimeEnv } from "../config/api-runtime.js";
@@ -40,7 +41,10 @@ const futureExpiryDate = () => {
 
 @Injectable()
 export class InvitationsService {
-  constructor(@Inject(PrismaClientProvider) private readonly prisma: PrismaClientProvider) {}
+  constructor(
+    @Inject(PrismaClientProvider) private readonly prisma: PrismaClientProvider,
+    private readonly eventEmitter: EventEmitter2,
+  ) {}
 
   async listWorkspaceInvitations({
     workspaceId,
@@ -556,6 +560,12 @@ export class InvitationsService {
       });
 
       return nextMembership;
+    });
+
+    this.eventEmitter.emit("workspace.member_joined", {
+      workspaceId: invitation.workspaceId,
+      userId: user.id,
+      role: membership.role,
     });
 
     return {

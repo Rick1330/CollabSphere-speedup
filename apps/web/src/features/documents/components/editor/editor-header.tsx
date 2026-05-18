@@ -54,7 +54,8 @@ interface EditorHeaderProps {
   onToggleFocusMode?: () => void;
   focusMode?: boolean;
   onToggleContextRail?: () => void;
-  contextRailCollapsed?: boolean;
+  /** True when the context rail (desktop) or sheet (below lg) is visible. */
+  contextRailOpen?: boolean;
   /** Optional slot for academic submit/resubmit action button. */
   submitSlot?: React.ReactNode;
 }
@@ -72,7 +73,7 @@ export const EditorHeader = ({
   onToggleFocusMode,
   focusMode = false,
   onToggleContextRail,
-  contextRailCollapsed = false,
+  contextRailOpen = true,
   submitSlot,
 }: EditorHeaderProps) => {
   return (
@@ -186,13 +187,13 @@ export const EditorHeader = ({
             onClick={onToggleContextRail}
             className={cn(
               "h-7 w-7 rounded-md flex items-center justify-center transition-colors duration-100 shrink-0",
-              contextRailCollapsed
-                ? "bg-teal-50 text-teal-700"
-                : "text-stone-400 hover:text-stone-700 hover:bg-stone-100",
+              contextRailOpen
+                ? "text-stone-400 hover:text-stone-700 hover:bg-stone-100"
+                : "bg-teal-50 text-teal-700",
             )}
-            aria-label={contextRailCollapsed ? "Show context rail" : "Hide context rail"}
-            title={contextRailCollapsed ? "Show context rail" : "Hide context rail"}
-            aria-pressed={!contextRailCollapsed}
+            aria-label={contextRailOpen ? "Hide context rail" : "Show context rail"}
+            title={contextRailOpen ? "Hide context rail" : "Show context rail"}
+            aria-pressed={contextRailOpen}
           >
             <PanelRight className="h-4 w-4" aria-hidden="true" />
           </button>

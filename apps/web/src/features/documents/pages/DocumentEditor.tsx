@@ -5,7 +5,13 @@ import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useTiptapEditor } from "@/features/documents/hooks/use-tiptap-editor";
-import { useIsMobile } from "@/hooks/use-mobile";
+import { useIsBelowLg } from "@/hooks/use-is-below-lg";
+import {
+  isContextRailVisible,
+  isDocumentTreeVisible,
+  toggleContextRailPanel,
+  toggleDocumentTreePanel,
+} from "@/features/documents/lib/editor-panel-toggles";
 import { useDocumentComments } from "@/features/documents/hooks/use-document-comments";
 import { useDocumentThreadFocus } from "@/features/documents/hooks/use-document-thread-focus";
 import { useAnchorDecorations } from "@/features/documents/hooks/use-anchor-decorations";
@@ -400,7 +406,7 @@ const DocumentEditorPage = () => {
     [params.workspaceId, account?.defaultWorkspaceId],
   );
   const documentId = resolveDocumentParam(params.documentId);
-  const isMobile = useIsMobile();
+  const isBelowLg = useIsBelowLg();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -775,14 +781,19 @@ const DocumentEditorPage = () => {
   const handleAnchorClick = (threadId: string) => {
     focusThread(threadId);
     setContextRailCollapsed(false);
-    if (isMobile) {
+    if (isBelowLg) {
       setMobileCommentsOpen(true);
     }
     setSidebarTab("comments");
   };
 
   const handleToggleContextRail = () => {
-    setContextRailCollapsed((collapsed) => !collapsed);
+    const next = toggleContextRailPanel(isBelowLg, {
+      contextRailCollapsed,
+      mobileCommentsOpen,
+    });
+    setContextRailCollapsed(next.contextRailCollapsed);
+    setMobileCommentsOpen(next.mobileCommentsOpen);
   };
 
   const handleContextRailResizeStart = (event: React.PointerEvent<HTMLButtonElement>) => {
@@ -1058,7 +1069,7 @@ const DocumentEditorPage = () => {
     setPendingAnchor(null);
     if (!commentsOpen) {
       setContextRailCollapsed(false);
-      if (isMobile) {
+      if (isBelowLg) {
         setMobileCommentsOpen(true);
       }
       setSidebarTab("comments");
@@ -1260,8 +1271,8 @@ const DocumentEditorPage = () => {
         <div className="w-[280px] h-full">{treePanel}</div>
       </div>
 
-      {/* Mobile/tablet tree drawer */}
-      {isMobile && (
+      {/* Mobile/tablet tree drawer (below lg) */}
+      {isBelowLg && (
         <Sheet open={mobileTreeOpen} onOpenChange={setMobileTreeOpen}>
           <SheetContent side="left" className="p-0 w-[300px] sm:w-[320px]">
             <SheetHeader className="sr-only">
@@ -1283,20 +1294,21 @@ const DocumentEditorPage = () => {
           onToggleLock={handleToggleLock}
           onDelete={handleDelete}
           onToggleTree={() => {
-            if (isMobile) {
-              setMobileTreeOpen(true);
-            } else {
-              setTreeOpen((v) => !v);
-              if (focusMode) {
-                setFocusMode(false);
-              }
+            const next = toggleDocumentTreePanel(isBelowLg, { treeOpen, mobileTreeOpen });
+            setTreeOpen(next.treeOpen);
+            setMobileTreeOpen(next.mobileTreeOpen);
+            if (!isBelowLg && focusMode) {
+              setFocusMode(false);
             }
           }}
-          treeOpen={isMobile ? true : treeOpen}
+          treeOpen={isDocumentTreeVisible(isBelowLg, { treeOpen, mobileTreeOpen })}
           onToggleFocusMode={() => setFocusMode((f) => !f)}
           focusMode={focusMode}
           onToggleContextRail={handleToggleContextRail}
-          contextRailCollapsed={contextRailCollapsed}
+          contextRailOpen={isContextRailVisible(isBelowLg, {
+            contextRailCollapsed,
+            mobileCommentsOpen,
+          })}
           submitSlot={submitButton}
         />
         {/* Supervisor review panel — top priority when present */}

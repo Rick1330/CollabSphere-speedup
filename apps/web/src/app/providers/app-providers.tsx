@@ -9,15 +9,16 @@
  * Must render inside `BrowserRouter` so the API client can register a
  * session-expiry handler that uses `useNavigate`.
  */
-import { useLayoutEffect, useState, type ReactNode } from "react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { useEffect, useLayoutEffect, useState, type ReactNode } from "react";
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useThemePreference } from "@/hooks/use-theme-preference";
 import { configureApiClient, resolveConfiguredApiBaseUrl } from "@/api/client";
-import { authSession, isAuthFailureSuppressed } from "@/lib/auth-session";
+import { applyUserProfileToSession, fetchCurrentUser } from "@/api/adapters/settings";
+import { authSession, isAuthFailureSuppressed, useAuthSession } from "@/lib/auth-session";
 import { teardownAuthSession } from "@/lib/auth-teardown";
 import { logDevSessionContext } from "@/lib/dev-auth-troubleshooting";
 
@@ -37,6 +38,9 @@ function ApiClientAuthBridge({ queryClient }: { queryClient: QueryClient }) {
     configureApiClient({
       baseUrl: resolveConfiguredApiBaseUrl(),
       getAuthToken: () => authSession.getAccessToken(),
+      onAccessTokenRefreshed: () => {
+        void queryClient.invalidateQueries({ queryKey: ["current-user"] });
+      },
       onAuthFailure: () => {
         if (isAuthFailureSuppressed()) return;
         if (typeof window !== "undefined") {
@@ -63,12 +67,34 @@ function ApiClientAuthBridge({ queryClient }: { queryClient: QueryClient }) {
   return null;
 }
 
+/** Sync globalRole and profile fields from GET /users/me on boot and after token refresh. */
+function SessionSyncBridge() {
+  const session = useAuthSession();
+
+  const { data } = useQuery({
+    queryKey: ["current-user"],
+    queryFn: fetchCurrentUser,
+    enabled: !!session?.accessToken,
+    staleTime: 60_000,
+    retry: false,
+  });
+
+  useEffect(() => {
+    if (data) {
+      applyUserProfileToSession(data);
+    }
+  }, [data]);
+
+  return null;
+}
+
 export function AppProviders({ children }: { children: ReactNode }) {
   const [queryClient] = useState(() => new QueryClient());
 
   return (
     <QueryClientProvider client={queryClient}>
       <ApiClientAuthBridge queryClient={queryClient} />
+      <SessionSyncBridge />
       <TooltipProvider>
         <ThemeListener />
         <Toaster />

@@ -7,8 +7,10 @@ export type TaskRealtimeEvent =
   | "task:created"
   | "task:updated"
   | "task:assigned"
+  | "task:moved"
   | "task:status_changed"
-  | "task:deleted";
+  | "task:deleted"
+  | "task:completed";
 
 export type CommentRealtimeEvent =
   | "comment:thread_created"
@@ -18,9 +20,11 @@ export type CommentRealtimeEvent =
   | "comment:resolved"
   | "comment:unresolved";
 
-export type ActivityRealtimeEvent = "activity:created";
+export type ActivityRealtimeEvent = "activity:new" | "activity:created";
 
 export type NotificationRealtimeEvent = "notification:created";
+
+export type WorkspaceRealtimeEvent = "workspace:role_changed";
 
 let socket: Socket | null = null;
 const reconnectListeners = new Set<() => void>();
@@ -141,8 +145,10 @@ const TASK_EVENTS: TaskRealtimeEvent[] = [
   "task:created",
   "task:updated",
   "task:assigned",
+  "task:moved",
   "task:status_changed",
   "task:deleted",
+  "task:completed",
 ];
 
 export function subscribeTaskEvents(
@@ -188,7 +194,7 @@ export function subscribeCommentEvents(
   };
 }
 
-const ACTIVITY_EVENTS: ActivityRealtimeEvent[] = ["activity:created"];
+const ACTIVITY_EVENTS: ActivityRealtimeEvent[] = ["activity:new", "activity:created"];
 
 export function subscribeActivityEvents(
   onEvent: (event: ActivityRealtimeEvent, payload: unknown) => void,
@@ -214,6 +220,25 @@ export function subscribeNotificationEvents(
 ): () => void {
   const instance = connectRealtime();
   const listeners = NOTIFICATION_EVENTS.map((event) => {
+    const handler = (payload: unknown) => onEvent(event, payload);
+    instance.on(event, handler);
+    return { event, handler };
+  });
+
+  return () => {
+    for (const listener of listeners) {
+      instance.off(listener.event, listener.handler);
+    }
+  };
+}
+
+const WORKSPACE_EVENTS: WorkspaceRealtimeEvent[] = ["workspace:role_changed"];
+
+export function subscribeWorkspaceEvents(
+  onEvent: (event: WorkspaceRealtimeEvent, payload: unknown) => void,
+): () => void {
+  const instance = connectRealtime();
+  const listeners = WORKSPACE_EVENTS.map((event) => {
     const handler = (payload: unknown) => onEvent(event, payload);
     instance.on(event, handler);
     return { event, handler };

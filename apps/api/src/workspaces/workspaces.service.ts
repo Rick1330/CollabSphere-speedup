@@ -1,14 +1,16 @@
 import type { Prisma, WorkspaceRole, WorkspaceStatus, WorkspaceType } from "@prisma/client";
 import { Inject, Injectable } from "@nestjs/common";
+import { EventEmitter2 } from "@nestjs/event-emitter";
 import { AppError, ValidationAppError } from "../common/filters/app-error.filter.js";
 import { PrismaClientProvider } from "../common/prisma/prisma-client.provider.js";
+import { RedisPublishService } from "../common/redis/redis-publish.service.js";
 import { canAssignRole, canManageMember } from "./workspaces.policy.js";
 import {
   applyWorkspaceTemplate,
   buildDefaultWorkspaceSettings,
   parseWorkspaceTemplateContent,
 } from "./workspace-template.application.js";
-import { RealtimeEventsService } from "../realtime/realtime-events.service.js";
+const COLLAB_PERMISSION_CHANNEL = "collab:permission-changed";
 
 type WorkspaceMembership = {
   id: string;
@@ -20,7 +22,8 @@ type WorkspaceMembership = {
 export class WorkspacesService {
   constructor(
     @Inject(PrismaClientProvider) private readonly prisma: PrismaClientProvider,
-    private readonly realtimeEvents: RealtimeEventsService,
+    private readonly eventEmitter: EventEmitter2,
+    private readonly redisPublish: RedisPublishService,
   ) {}
 
   async createWorkspace({
@@ -149,6 +152,11 @@ export class WorkspacesService {
       return workspace;
     });
 
+    this.eventEmitter.emit("workspace.updated", {
+      workspaceId: created.id,
+      changes: { created: true },
+    });
+
     return {
       id: created.id,
       name: created.name,
@@ -195,6 +203,15 @@ export class WorkspacesService {
       },
     });
 
+    this.eventEmitter.emit("workspace.settings_updated", {
+      workspaceId: updated.id,
+      settings: {
+        ...(name !== undefined ? { name } : {}),
+        ...(description !== undefined ? { description } : {}),
+        ...(icon !== undefined ? { icon } : {}),
+      },
+    });
+
     return { workspaceId: updated.id, updatedAt: updated.updatedAt };
   }
 
@@ -218,6 +235,18 @@ export class WorkspacesService {
       select: { id: true, status: true },
     });
 
+    if (updated.status === "archived") {
+      this.eventEmitter.emit("workspace.archived", {
+        workspaceId: updated.id,
+        actorId: actorUserId,
+      });
+    } else {
+      this.eventEmitter.emit("workspace.updated", {
+        workspaceId: updated.id,
+        changes: { status: updated.status },
+      });
+    }
+
     return { workspaceId: updated.id, status: updated.status };
   }
 
@@ -238,6 +267,11 @@ export class WorkspacesService {
       where: { id: workspace.id },
       data: { deletedAt: new Date() },
       select: { id: true },
+    });
+
+    this.eventEmitter.emit("workspace.updated", {
+      workspaceId,
+      changes: { deleted: true },
     });
 
     return { message: "Workspace deleted. It can be restored within 90 days." };
@@ -299,6 +333,11 @@ export class WorkspacesService {
         where: { workspaceId, userId: actorUserId },
         data: { role: "ADMIN" },
       });
+    });
+
+    this.eventEmitter.emit("workspace.updated", {
+      workspaceId,
+      changes: { ownerId: newOwnerUserId },
     });
 
     return { workspaceId, newOwnerUserId };
@@ -611,15 +650,17 @@ export class WorkspacesService {
       data: { role },
     });
 
-    this.realtimeEvents.emit("workspace:member_role_changed", {
+    this.eventEmitter.emit("workspace.member_role_changed", {
       workspaceId,
       userId: targetMembership.userId,
-      data: {
-        membershipId: targetMembership.id,
-        userId: targetMembership.userId,
-        role,
-      },
+      newRole: role,
+      oldRole: targetMembership.role,
     });
+
+    await this.redisPublish.publish(
+      COLLAB_PERMISSION_CHANNEL,
+      JSON.stringify({ userId: targetMembership.userId, workspaceId, newRole: role }),
+    );
 
     return updated;
   }
@@ -653,13 +694,20 @@ export class WorkspacesService {
       throw new AppError({ code: "FORBIDDEN" });
     }
 
-    return this.prisma.workspaceMember.update({
+    const removed = await this.prisma.workspaceMember.update({
       where: { id: targetMembership.id },
       data: {
         isActive: false,
         leftAt: new Date(),
       },
     });
+
+    this.eventEmitter.emit("workspace.member_removed", {
+      workspaceId,
+      userId: targetMembership.userId,
+    });
+
+    return removed;
   }
 
   private async findActorMembership({

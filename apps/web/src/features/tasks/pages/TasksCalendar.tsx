@@ -6,6 +6,7 @@ import {
   WorkspaceSidebar,
   type WorkspaceForSidebar,
 } from "@/features/workspace/components/workspace-sidebar";
+import { WorkspaceMobileNav } from "@/features/workspace/components/workspace-mobile-nav";
 import { TaskCalendar } from "@/features/tasks/components/task-calendar";
 import { useSidebar } from "@/hooks/use-sidebar";
 import { useCommandPalette } from "@/hooks/use-command-palette";
@@ -62,6 +63,7 @@ const TasksCalendarPage = () => {
 
       <div className="flex-1 min-w-0 flex flex-col h-screen">
         <TopNav user={MOCK_USER} onOpenPalette={palette.toggle} />
+        <WorkspaceMobileNav workspace={workspace} />
 
         <main className="flex-1 min-h-0 flex flex-col overflow-hidden">
           <TaskCalendar

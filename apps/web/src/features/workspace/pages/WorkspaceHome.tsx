@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { TopNav } from "@/app/shell/top-nav";
 import { CommandPalette } from "@/app/shell/command-palette";
 import { WorkspaceSidebar } from "@/features/workspace/components/workspace-sidebar";
+import { WorkspaceMobileNav } from "@/features/workspace/components/workspace-mobile-nav";
 import { WorkspaceHome as WorkspaceHomeContent } from "@/features/workspace/components/workspace-home";
 import { useSidebar } from "@/hooks/use-sidebar";
 import { useCommandPalette } from "@/hooks/use-command-palette";
@@ -190,6 +191,7 @@ const WorkspaceHomePage = () => {
 
       <div className="flex-1 min-w-0 flex flex-col">
         <TopNav user={currentUser} onOpenPalette={palette.toggle} />
+        <WorkspaceMobileNav workspace={sidebar} />
         <WorkspaceHomeContent
           workspace={workspace}
           templateName={fromStore?.templateName ?? null}

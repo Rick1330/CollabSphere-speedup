@@ -1,21 +1,13 @@
 import { NavLink, Link } from "react-router-dom";
 import {
   ArrowLeft,
-  LayoutDashboard,
-  FileText,
-  CheckSquare,
-  Users,
-  Activity,
-  FolderOpen,
-  BarChart3,
-  LayoutTemplate,
-  Settings,
   Lock,
   Plus,
   ChevronsLeft,
   ChevronsRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { getWorkspaceNavItems } from "./workspace-nav-items";
 
 export interface WorkspaceForSidebar {
   id: string;
@@ -49,14 +41,9 @@ const typeBadge = (t: WorkspaceForSidebar["type"]) =>
 
 export const WorkspaceSidebar = ({ workspace, collapsed, onToggle }: WorkspaceSidebarProps) => {
   const base = `/w/${workspace.id}`;
-  const NAV = [
-    { to: base, label: "Overview", icon: LayoutDashboard, end: true },
-    { to: `${base}/documents`, label: "Documents", icon: FileText },
-    { to: `${base}/tasks`, label: "Tasks", icon: CheckSquare },
-    { to: `${base}/members`, label: "Members", icon: Users },
-    { to: `${base}/activity`, label: "Activity", icon: Activity },
-    { to: `${base}/files`, label: "Files", icon: FolderOpen },
-  ];
+  const allItems = getWorkspaceNavItems(workspace);
+  const primaryNav = allItems.slice(0, 6);
+  const secondaryNav = allItems.slice(6);
 
   return (
     <aside
@@ -123,7 +110,7 @@ export const WorkspaceSidebar = ({ workspace, collapsed, onToggle }: WorkspaceSi
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto py-3">
         <ul className={cn("space-y-1", collapsed ? "px-2" : "px-3")}>
-          {NAV.map((item) => {
+          {primaryNav.map((item) => {
             const Icon = item.icon;
             return (
               <li key={item.to}>
@@ -154,101 +141,53 @@ export const WorkspaceSidebar = ({ workspace, collapsed, onToggle }: WorkspaceSi
             <li className="pt-2 mt-2 border-t border-stone-200/70 dark:border-stone-800" aria-hidden="true" />
           )}
 
-          {/* Analytics — Manager+ */}
-          <li>
-            {workspace.permissions.canViewAnalytics ? (
-              <NavLink
-                to={`${base}/analytics`}
-                className={({ isActive }) =>
-                  cn(
-                    "flex items-center gap-3 rounded-lg text-sm transition-colors duration-150",
-                    collapsed ? "justify-center px-2 py-2" : "px-3 py-2",
-                    isActive
-                      ? "text-teal-700 dark:text-teal-400 bg-teal-50 dark:bg-teal-950/40 font-semibold border-l-2 border-teal-600 dark:border-teal-500"
-                      : "text-stone-500 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-100 hover:bg-stone-100 dark:hover:bg-stone-800 font-medium",
-                  )
-                }
-                title={collapsed ? "Analytics" : undefined}
-              >
-                <BarChart3 className="h-4 w-4 shrink-0" aria-hidden="true" />
-                {!collapsed && <span>Analytics</span>}
-              </NavLink>
-            ) : (
-              <div
-                className={cn(
-                  "flex items-center gap-3 rounded-lg text-sm text-stone-400 cursor-not-allowed",
-                  collapsed ? "justify-center px-2 py-2" : "px-3 py-2",
-                )}
-                title={collapsed ? "Analytics (locked)" : "Manager+ only"}
-                aria-disabled="true"
-              >
-                <BarChart3 className="h-4 w-4 shrink-0" aria-hidden="true" />
-                {!collapsed && (
-                  <>
-                    <span>Analytics</span>
-                    <Lock className="h-3 w-3 ml-auto text-stone-300" aria-hidden="true" />
-                  </>
-                )}
-              </div>
-            )}
-          </li>
+          {secondaryNav.map((item) => {
+            const Icon = item.icon;
+            if (item.locked) {
+              return (
+                <li key={item.to}>
+                  <div
+                    className={cn(
+                      "flex items-center gap-3 rounded-lg text-sm text-stone-400 cursor-not-allowed",
+                      collapsed ? "justify-center px-2 py-2" : "px-3 py-2",
+                    )}
+                    title={collapsed ? `${item.label} (locked)` : item.lockedTitle}
+                    aria-disabled="true"
+                  >
+                    <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                    {!collapsed && (
+                      <>
+                        <span>{item.label}</span>
+                        <Lock className="h-3 w-3 ml-auto text-stone-300" aria-hidden="true" />
+                      </>
+                    )}
+                  </div>
+                </li>
+              );
+            }
 
-          <li>
-            <NavLink
-              to={`${base}/templates`}
-              className={({ isActive }) =>
-                cn(
-                  "flex items-center gap-3 rounded-lg text-sm transition-colors duration-150",
-                  collapsed ? "justify-center px-2 py-2" : "px-3 py-2",
-                  isActive
-                    ? "text-teal-700 dark:text-teal-400 bg-teal-50 dark:bg-teal-950/40 font-semibold border-l-2 border-teal-600 dark:border-teal-500"
-                    : "text-stone-500 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-100 hover:bg-stone-100 dark:hover:bg-stone-800 font-medium",
-                )
-              }
-              title={collapsed ? "Templates" : undefined}
-            >
-              <LayoutTemplate className="h-4 w-4 shrink-0" aria-hidden="true" />
-              {!collapsed && <span>Templates</span>}
-            </NavLink>
-          </li>
-
-          <li>
-            {workspace.permissions.canEditSettings ? (
-              <NavLink
-                to={`${base}/settings`}
-                className={({ isActive }) =>
-                  cn(
-                    "flex items-center gap-3 rounded-lg text-sm transition-colors duration-150",
-                    collapsed ? "justify-center px-2 py-2" : "px-3 py-2",
-                    isActive
-                      ? "text-teal-700 dark:text-teal-400 bg-teal-50 dark:bg-teal-950/40 font-semibold border-l-2 border-teal-600 dark:border-teal-500"
-                      : "text-stone-500 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-100 hover:bg-stone-100 dark:hover:bg-stone-800 font-medium",
-                  )
-                }
-                title={collapsed ? "Settings" : undefined}
-              >
-                <Settings className="h-4 w-4 shrink-0" aria-hidden="true" />
-                {!collapsed && <span>Settings</span>}
-              </NavLink>
-            ) : (
-              <div
-                className={cn(
-                  "flex items-center gap-3 rounded-lg text-sm text-stone-400 cursor-not-allowed",
-                  collapsed ? "justify-center px-2 py-2" : "px-3 py-2",
-                )}
-                title="Admin+ only"
-                aria-disabled="true"
-              >
-                <Settings className="h-4 w-4 shrink-0" aria-hidden="true" />
-                {!collapsed && (
-                  <>
-                    <span>Settings</span>
-                    <Lock className="h-3 w-3 ml-auto text-stone-300" aria-hidden="true" />
-                  </>
-                )}
-              </div>
-            )}
-          </li>
+            return (
+              <li key={item.to}>
+                <NavLink
+                  to={item.to}
+                  end={item.end}
+                  className={({ isActive }) =>
+                    cn(
+                      "flex items-center gap-3 rounded-lg text-sm transition-colors duration-150",
+                      collapsed ? "justify-center px-2 py-2" : "px-3 py-2",
+                      isActive
+                        ? "text-teal-700 dark:text-teal-400 bg-teal-50 dark:bg-teal-950/40 font-semibold border-l-2 border-teal-600 dark:border-teal-500"
+                        : "text-stone-500 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-100 hover:bg-stone-100 dark:hover:bg-stone-800 font-medium",
+                    )
+                  }
+                  title={collapsed ? item.label : undefined}
+                >
+                  <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                  {!collapsed && <span>{item.label}</span>}
+                </NavLink>
+              </li>
+            );
+          })}
         </ul>
 
         {/* Quick actions */}

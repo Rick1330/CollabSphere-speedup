@@ -1,5 +1,6 @@
 import { type CommentTargetType, type WorkspaceRole } from "@prisma/client";
 import { Inject, Injectable } from "@nestjs/common";
+import { EventEmitter2 } from "@nestjs/event-emitter";
 import { isDatabaseUuidParam } from "../common/auth/request-user.js";
 import { AppError, ValidationAppError } from "../common/filters/app-error.filter.js";
 import { PrismaClientProvider } from "../common/prisma/prisma-client.provider.js";
@@ -30,6 +31,7 @@ export class CommentsService {
   constructor(
     @Inject(PrismaClientProvider) private readonly prisma: PrismaClientProvider,
     private readonly realtimeEvents: RealtimeEventsService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   async listThreads(input: {
@@ -117,7 +119,12 @@ export class CommentsService {
       summary: "Comment thread created",
       resourceId: thread.id,
       resourceTitleSnapshot: this.toPlaintext(normalized).slice(0, 255),
-      metadata: { threadId: thread.id, targetType: input.targetType, targetId: input.targetId },
+      metadata: {
+        threadId: thread.id,
+        commentId: thread.comments[0]?.id,
+        targetType: input.targetType,
+        targetId: input.targetId,
+      },
     });
     await this.createMentionNotifications({
       actorUserId: input.actorUserId,
@@ -358,13 +365,48 @@ export class CommentsService {
         metadata: input.metadata as never,
       },
     });
-    this.realtimeEvents.emitComment(input.event, {
+    this.eventEmitter.emit("activity.recorded", {
       workspaceId: input.workspaceId,
-      data: input.metadata,
-      taskId: null,
-      userId: null,
+      activityEvent: activity as unknown as Record<string, unknown>,
     });
-    this.realtimeEvents.emitActivityFromRecord(activity);
+
+    const threadId =
+      typeof input.metadata.threadId === "string" ? input.metadata.threadId : input.resourceId;
+    const targetType =
+      typeof input.metadata.targetType === "string" ? input.metadata.targetType : "document";
+    const targetId =
+      typeof input.metadata.targetId === "string" ? input.metadata.targetId : input.resourceId;
+    const commentId =
+      typeof input.metadata.commentId === "string" ? input.metadata.commentId : undefined;
+
+    if (input.event === "comment:thread_created" || input.event === "comment:reply_created") {
+      this.eventEmitter.emit("comment.created", {
+        workspaceId: input.workspaceId,
+        threadId,
+        commentId,
+        targetType,
+        targetId,
+        authorId: input.actorUserId,
+      });
+    } else if (input.event === "comment:updated" && commentId) {
+      this.eventEmitter.emit("comment.updated", {
+        workspaceId: input.workspaceId,
+        threadId,
+        commentId,
+      });
+    } else if (input.event === "comment:deleted" && commentId) {
+      this.eventEmitter.emit("comment.deleted", {
+        workspaceId: input.workspaceId,
+        threadId,
+        commentId,
+      });
+    } else if (input.event === "comment:resolved") {
+      this.eventEmitter.emit("comment.thread_resolved", {
+        workspaceId: input.workspaceId,
+        threadId,
+        resolvedById: input.actorUserId,
+      });
+    }
   }
 
   private buildMentionNotificationUrl(input: {

@@ -9,11 +9,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const patchSessionMock = vi.fn();
+const getAccessTokenMock = vi.fn();
 
 vi.mock("@/lib/auth-session", () => ({
   authSession: {
+    getAccessToken: getAccessTokenMock,
     patchSession: patchSessionMock,
   },
+}));
+
+vi.mock("@/api/client", () => ({
+  request: vi.fn(),
+  ApiError: class ApiError extends Error {},
 }));
 
 describe("applyUserProfileToSession", () => {
@@ -40,6 +47,50 @@ describe("applyUserProfileToSession", () => {
         email: "elshaday@collabsphere.app",
         avatarUrl: null,
         globalRole: "USER",
+      },
+    });
+  });
+});
+
+describe("syncSessionFromApi", () => {
+  beforeEach(() => {
+    patchSessionMock.mockReset();
+    getAccessTokenMock.mockReset();
+  });
+
+  it("returns null when there is no access token", async () => {
+    getAccessTokenMock.mockReturnValue(null);
+    const { syncSessionFromApi } = await import("./settings");
+    await expect(syncSessionFromApi()).resolves.toBeNull();
+  });
+
+  it("patches session when /users/me succeeds", async () => {
+    getAccessTokenMock.mockReturnValue("token");
+    const { request } = await import("@/api/client");
+    vi.mocked(request).mockResolvedValue({
+      data: {
+        user: {
+          id: "u1",
+          fullName: "Admin User",
+          email: "admin@collabsphere.app",
+          bio: null,
+          avatarUrl: null,
+          globalRole: "ADMIN",
+          authProvider: "email",
+        },
+      },
+    });
+
+    const { syncSessionFromApi } = await import("./settings");
+    const user = await syncSessionFromApi();
+
+    expect(user?.globalRole).toBe("ADMIN");
+    expect(patchSessionMock).toHaveBeenCalledWith({
+      user: {
+        fullName: "Admin User",
+        email: "admin@collabsphere.app",
+        avatarUrl: null,
+        globalRole: "ADMIN",
       },
     });
   });

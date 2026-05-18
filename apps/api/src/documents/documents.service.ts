@@ -1,9 +1,9 @@
 import type { DocumentStatus, Prisma, WorkspaceRole } from "@prisma/client";
 import { Inject, Injectable } from "@nestjs/common";
+import { EventEmitter2 } from "@nestjs/event-emitter";
 import { AppError, ValidationAppError } from "../common/filters/app-error.filter.js";
 import { PrismaClientProvider } from "../common/prisma/prisma-client.provider.js";
 import { parseDocumentTemplateContent } from "../common/templates/template-schema.js";
-import { RealtimeEventsService } from "../realtime/realtime-events.service.js";
 import { canManageLocks, isDocumentReadOnly } from "../../../../packages/shared/src/collab/document-write-policy.js";
 import {
   canCreateWorkspaceContent,
@@ -81,7 +81,7 @@ const parseRequiredBlockTypesFromProperties = (value: unknown): Set<string> => {
 export class DocumentsService {
   constructor(
     @Inject(PrismaClientProvider) private readonly prisma: PrismaClientProvider,
-    private readonly realtimeEvents?: RealtimeEventsService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   async listDocumentsForUser({
@@ -325,10 +325,11 @@ export class DocumentsService {
       return doc;
     });
 
-    this.realtimeEvents?.emit("workspace:document_created", {
+    this.eventEmitter.emit("document.created", {
       workspaceId,
-      userId: actorUserId,
-      data: { documentId: created.id, folderId: created.folderId },
+      documentId: created.id,
+      folderId: created.folderId,
+      title: created.title,
     });
 
     return created;
@@ -363,11 +364,13 @@ export class DocumentsService {
       throw new AppError({ code: "DOCUMENT_NOT_FOUND" });
     }
 
+    let variableWriteCount = 0;
     for (const v of variables) {
       const key = v.variableKey.trim();
       if (!key.length) {
         continue;
       }
+      variableWriteCount += 1;
       await this.prisma.documentRegionVariable.upsert({
         where: {
           documentId_variableKey: {
@@ -382,6 +385,14 @@ export class DocumentsService {
           value: v.value ?? null,
         },
         update: { value: v.value ?? null },
+      });
+    }
+
+    if (variableWriteCount > 0) {
+      this.eventEmitter.emit("document.updated", {
+        workspaceId,
+        actorId: actorUserId,
+        documentId: existing.id,
       });
     }
 
@@ -419,6 +430,7 @@ export class DocumentsService {
       },
       select: {
         id: true,
+        status: true,
       },
     });
 
@@ -462,11 +474,19 @@ export class DocumentsService {
       },
     });
 
-    this.realtimeEvents?.emit("workspace:document_updated", {
+    this.eventEmitter.emit("document.updated", {
       workspaceId,
-      userId: actorUserId,
-      data: { documentId: updated.id, folderId: updated.folderId, title: updated.title },
+      actorId: actorUserId,
+      documentId: updated.id,
     });
+    if (status !== undefined && existing.status !== updated.status) {
+      this.eventEmitter.emit("document.status_changed", {
+        workspaceId,
+        documentId: updated.id,
+        fromStatus: existing.status,
+        toStatus: updated.status,
+      });
+    }
 
     return updated;
   }
@@ -616,17 +636,11 @@ export class DocumentsService {
         version: createdVersion,
       };
     });
-    this.realtimeEvents?.emit("document:updated", {
+
+    this.eventEmitter.emit("document.updated", {
       workspaceId,
-      userId: actorUserId,
-      data: {
-        documentId: result.document.id,
-        title: result.document.title,
-        status: result.document.status,
-        updatedAt: result.document.updatedAt,
-        versionId: result.version.id,
-        versionNumber: result.version.versionNumber,
-      },
+      actorId: actorUserId,
+      documentId: result.document.id,
     });
 
     return result;
@@ -848,7 +862,10 @@ export class DocumentsService {
           },
         },
       });
-      this.realtimeEvents?.emitActivityFromRecord(activityEvent);
+      this.eventEmitter.emit("activity.recorded", {
+        workspaceId,
+        activityEvent: activityEvent as unknown as Record<string, unknown>,
+      });
     } catch (error) {
       console.warn("[documents] failed to write activity event", error);
     }
@@ -873,6 +890,26 @@ export class DocumentsService {
       });
     } catch (error) {
       console.warn("[documents] failed to write audit log", error);
+    }
+
+    this.eventEmitter.emit("document.status_changed", {
+      workspaceId,
+      documentId,
+      fromStatus: document.status,
+      toStatus: nextStatus,
+    });
+    if (action === "submit") {
+      this.eventEmitter.emit("document.submitted", {
+        workspaceId,
+        documentId,
+        submittedById: actorUserId,
+      });
+    } else if (action === "approve") {
+      this.eventEmitter.emit("document.approved", {
+        workspaceId,
+        documentId,
+        approvedById: actorUserId,
+      });
     }
 
     return updated;
@@ -947,15 +984,10 @@ export class DocumentsService {
       where: { id: documentId },
       data: { deletedAt: new Date(), updatedById: actorUserId },
     });
-    this.realtimeEvents?.emit("document:deleted", {
+    this.eventEmitter.emit("document.deleted", {
       workspaceId,
-      userId: actorUserId,
-      data: { documentId },
-    });
-    this.realtimeEvents?.emit("workspace:document_deleted", {
-      workspaceId,
-      userId: actorUserId,
-      data: { documentId },
+      actorId: actorUserId,
+      documentId,
     });
     return { message: "Document deleted." };
   }
@@ -997,10 +1029,10 @@ export class DocumentsService {
         lockedByUserId: true,
       },
     });
-    this.realtimeEvents?.emit("document:locked", {
+    this.eventEmitter.emit("document.locked", {
       workspaceId,
-      userId: actorUserId,
-      data: { documentId: updated.id, isLocked: true, lockedByUserId: updated.lockedByUserId, lockedAt: updated.lockedAt },
+      documentId: updated.id,
+      lockedById: actorUserId,
     });
     return updated;
   }
@@ -1041,10 +1073,9 @@ export class DocumentsService {
         lockedByUserId: true,
       },
     });
-    this.realtimeEvents?.emit("document:locked", {
+    this.eventEmitter.emit("document.unlocked", {
       workspaceId,
-      userId: actorUserId,
-      data: { documentId: updated.id, isLocked: false, lockedByUserId: null, lockedAt: null },
+      documentId: updated.id,
     });
     return updated;
   }
@@ -1157,10 +1188,10 @@ export class DocumentsService {
       });
       return restored;
     });
-    this.realtimeEvents?.emit("document:version-restored", {
+    this.eventEmitter.emit("document.updated", {
       workspaceId,
-      userId: actorUserId,
-      data: { documentId, versionId, updatedAt: result.updatedAt },
+      actorId: actorUserId,
+      documentId,
     });
     return result;
   }

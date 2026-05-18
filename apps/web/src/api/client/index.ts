@@ -22,11 +22,13 @@ export class ApiError extends Error {
 
 type AuthTokenProvider = () => string | null | Promise<string | null>;
 type AuthFailureHandler = () => void;
+type AccessTokenRefreshedHandler = () => void;
 
 /** Must match Nest `setGlobalPrefix("api/v1")` (`apps/api/src/dev.ts`). */
 let baseUrl = "/api/v1";
 let getAuthToken: AuthTokenProvider | null = null;
 let onAuthFailure: AuthFailureHandler | null = null;
+let onAccessTokenRefreshed: AccessTokenRefreshedHandler | null = null;
 
 const isAuthBootstrapApiPath = (path: string) => {
   const p = path.startsWith("http") ? (() => { try { return new URL(path).pathname; } catch { return path; } })() : path;
@@ -48,10 +50,13 @@ export function configureApiClient(opts: {
   getAuthToken?: AuthTokenProvider;
   /** Called when an authenticated request returns invalid/expired credentials (clears session + redirect). */
   onAuthFailure?: AuthFailureHandler | null;
+  /** Called after `/auth/refresh` rotates the access token successfully. */
+  onAccessTokenRefreshed?: AccessTokenRefreshedHandler | null;
 }) {
   if (opts.baseUrl !== undefined) baseUrl = opts.baseUrl;
   if (opts.getAuthToken !== undefined) getAuthToken = opts.getAuthToken;
   if (opts.onAuthFailure !== undefined) onAuthFailure = opts.onAuthFailure;
+  if (opts.onAccessTokenRefreshed !== undefined) onAccessTokenRefreshed = opts.onAccessTokenRefreshed;
 }
 
 /**
@@ -254,6 +259,7 @@ function refreshSessionWithCookie(): Promise<boolean> {
             : csrf;
         if (typeof accessToken !== "string" || accessToken.length === 0) return false;
         authSession.patchSession({ accessToken, csrfToken: nextCsrf });
+        onAccessTokenRefreshed?.();
         return true;
       } catch {
         return false;

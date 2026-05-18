@@ -6,13 +6,22 @@ import {
   onRealtimeReconnect,
   subscribeActivityEvents,
   subscribeNotificationEvents,
+  subscribeWorkspaceEvents,
 } from "@/api/realtime/socket-client";
-import { useCurrentAccount } from "@/lib/auth-session";
+import { authSession, useCurrentAccount } from "@/lib/auth-session";
+import type { WorkspaceRoleKey } from "@/lib/persona-scenario";
 import { isDatabaseWorkspaceId } from "@/lib/workspace-id";
 
 type ActivityCreatedPayload = {
   workspaceId?: string;
   id?: string;
+};
+
+type MemberRoleChangedPayload = {
+  workspaceId?: string;
+  userId?: string;
+  newRole?: WorkspaceRoleKey;
+  oldRole?: WorkspaceRoleKey;
 };
 
 /**
@@ -58,11 +67,30 @@ export function useWorkspaceRealtime(workspaceId: string | undefined) {
       void queryClient.invalidateQueries({ queryKey: ["dashboard", "activity"] });
     });
 
+    const offWorkspace = subscribeWorkspaceEvents((event, payload) => {
+      if (event !== "workspace:role_changed") return;
+      const data = payload as MemberRoleChangedPayload;
+      if (data?.workspaceId && data.workspaceId !== workspaceId) {
+        return;
+      }
+
+      void queryClient.invalidateQueries({ queryKey: ["workspace", workspaceId, "shell"] });
+      void queryClient.invalidateQueries({ queryKey: ["workspace", workspaceId, "members"] });
+      void queryClient.invalidateQueries({ queryKey: ["workspaces", "mine"] });
+
+      if (data.userId === account.id && data.newRole) {
+        authSession.patchSession({
+          user: { defaultWorkspaceRole: data.newRole },
+        });
+      }
+    });
+
     return () => {
       cancelled = true;
       offReconnect();
       offNotifications();
       offActivity();
+      offWorkspace();
     };
   }, [workspaceId, account?.id, queryClient]);
 }

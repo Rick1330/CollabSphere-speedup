@@ -17,7 +17,7 @@ interface AdminNavItem {
   end?: boolean;
 }
 
-const ADMIN_NAV: AdminNavItem[] = [
+export const ADMIN_NAV: AdminNavItem[] = [
   { to: "/admin", label: "Dashboard", icon: LayoutDashboard, end: true },
   { to: "/admin/users", label: "Users", icon: Users },
   { to: "/admin/workspaces", label: "Workspaces", icon: FolderOpen },
