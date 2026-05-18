@@ -7,7 +7,8 @@
  * adapter so the inbox UI can share that surface.
  */
 import { request, ApiError } from "@/api/client";
-import { parseApiSingleEnvelope } from "@/api/client/envelope";
+import { parseApiActionEnvelope, parseApiSingleEnvelope } from "@/api/client/envelope";
+import { authSession } from "@/lib/auth-session";
 
 export type AuthProvider = "email" | "google";
 
@@ -61,15 +62,29 @@ export async function updateProfile(params: {
   return resource.user;
 }
 
+/** Keep navbar, dashboard, and settings header in sync after profile save. */
+export function applyUserProfileToSession(user: UserProfile): void {
+  authSession.patchSession({
+    user: {
+      fullName: user.fullName,
+      email: user.email,
+      avatarUrl: user.avatarUrl,
+      globalRole: user.globalRole,
+    },
+  });
+}
+
 export async function changePassword(params: {
   currentPassword: string;
   newPassword: string;
-}): Promise<void> {
+}): Promise<string> {
   try {
-    await request("/users/me/password", {
+    const payload = await request<unknown>("/users/me/password", {
       method: "PUT",
       body: params,
     });
+    const action = parseApiActionEnvelope(payload);
+    return action.message ?? "Password updated.";
   } catch (error) {
     toSettingsError(error);
   }

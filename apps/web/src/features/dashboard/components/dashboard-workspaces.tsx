@@ -45,7 +45,7 @@ export const DashboardWorkspaces = () => {
           )}
         </h2>
         <Link
-          to="/dashboard"
+          to="/workspaces"
           className="text-[13px] font-medium text-teal-600 hover:text-teal-700 transition-colors"
         >
           View all →

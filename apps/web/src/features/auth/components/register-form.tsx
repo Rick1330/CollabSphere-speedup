@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import { newPasswordZodSchema } from "@/lib/auth-password-policy";
 import { AnimatePresence, motion } from "framer-motion";
 import { AlertCircle, Eye, EyeOff, Loader2 } from "lucide-react";
 import { AuthErrorBanner } from "./auth-error-banner";
@@ -36,14 +37,7 @@ const registerSchema = z
         "Each name part must be at least 2 letters",
       ),
     email: z.string().min(1, "Email is required").email("Invalid email"),
-    password: z
-      .string()
-      .min(1, "Password is required")
-      .min(8, "At least 8 characters")
-      .regex(/[a-z]/, "Needs lowercase")
-      .regex(/[A-Z]/, "Needs uppercase")
-      .regex(/\d/, "Needs a number")
-      .regex(/[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/, "Needs special character"),
+    password: newPasswordZodSchema.min(1, "Password is required"),
     confirmPassword: z.string().min(1, "Confirm your password"),
   })
   .refine((data) => data.password === data.confirmPassword, {

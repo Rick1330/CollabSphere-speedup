@@ -1,5 +1,10 @@
 import { request } from "@/api/client";
-import type { CommentNode, CommentReply, CommentThread } from "@/lib/mock-comments";
+import type {
+  CommentAuthor,
+  CommentNode,
+  CommentReply,
+  CommentThread,
+} from "@/lib/mock-comments";
 
 type SingleEnvelope<TResource> = {
   data?: {
@@ -10,6 +15,8 @@ type SingleEnvelope<TResource> = {
 type ApiComment = {
   id: string;
   authorId?: string | null;
+  authorNameSnapshot?: string | null;
+  authorAvatarSnapshot?: string | null;
   content?: CommentNode[];
   createdAt: string;
 };
@@ -34,22 +41,39 @@ const parseSingleEnvelope = <T,>(payload: unknown): T => {
   return resource;
 };
 
+const mapApiAuthor = (comment: ApiComment): CommentAuthor => ({
+  id: comment.authorId ?? null,
+  fullName: comment.authorNameSnapshot?.trim() || "Unknown user",
+  avatarUrl: comment.authorAvatarSnapshot ?? null,
+});
+
+const mapApiComment = (comment: ApiComment): { author: CommentAuthor; reply: Omit<CommentReply, "author"> & { author: CommentAuthor } } => {
+  const author = mapApiAuthor(comment);
+  return {
+    author,
+    reply: {
+      id: comment.id,
+      authorId: comment.authorId ?? null,
+      author,
+      body: Array.isArray(comment.content) ? comment.content : [],
+      createdAt: comment.createdAt,
+    },
+  };
+};
+
 const mapThread = (documentId: string, thread: ApiThread): CommentThread => {
   const comments = [...(thread.comments ?? [])].sort(
     (left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime(),
   );
   const root = comments[0];
-  const replies: CommentReply[] = comments.slice(1).map((comment) => ({
-    id: comment.id,
-    authorId: comment.authorId ?? "unknown",
-    body: Array.isArray(comment.content) ? comment.content : [],
-    createdAt: comment.createdAt,
-  }));
+  const rootAuthor = root ? mapApiAuthor(root) : mockAuthorFromThreadCreator(thread.createdById);
+  const replies: CommentReply[] = comments.slice(1).map((comment) => mapApiComment(comment).reply);
   return {
     id: thread.id,
     documentId,
     anchor: thread.anchor?.snippet ? { snippet: thread.anchor.snippet, status: thread.anchor.status ?? "ok" } : null,
     authorId: root?.authorId ?? thread.createdById,
+    author: rootAuthor,
     body: Array.isArray(root?.content) ? root.content : [],
     createdAt: root?.createdAt ?? new Date().toISOString(),
     resolved: thread.status === "resolved",
@@ -58,6 +82,14 @@ const mapThread = (documentId: string, thread: ApiThread): CommentThread => {
     replies,
   };
 };
+
+function mockAuthorFromThreadCreator(createdById: string): CommentAuthor {
+  return {
+    id: createdById,
+    fullName: "Unknown user",
+    avatarUrl: null,
+  };
+}
 
 export async function listDocumentThreads(workspaceId: string, documentId: string): Promise<CommentThread[]> {
   const payload = await request<unknown>(

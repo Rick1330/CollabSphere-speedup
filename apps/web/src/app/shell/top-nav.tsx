@@ -14,8 +14,9 @@ import { WorkspaceSwitcher } from "./workspace-switcher";
 import { getInitials } from "@/lib/format";
 import { useCurrentAccount } from "@/lib/auth-session";
 import { getSessionRole } from "@/lib/session-role";
-import { logout } from "@/api/adapters/auth";
+import { teardownAuthSession } from "@/lib/auth-teardown";
 import { fetchUnreadCount } from "@/api/adapters/notifications";
+import { useNotificationRealtime } from "@/hooks/use-notification-realtime";
 import { emitOpenHelp } from "@/lib/shortcut-events";
 
 interface TopNavProps {
@@ -30,6 +31,7 @@ export const TopNav = ({ user: userOverride, unreadCount: unreadCountOverride, o
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const account = useCurrentAccount();
+  useNotificationRealtime();
   const unreadQ = useQuery({
     queryKey: ["notifications", "unread-count"],
     queryFn: fetchUnreadCount,
@@ -47,8 +49,7 @@ export const TopNav = ({ user: userOverride, unreadCount: unreadCountOverride, o
 
   const handleSignOut = async (e: React.MouseEvent) => {
     e.preventDefault();
-    await logout();
-    queryClient.clear();
+    await teardownAuthSession(queryClient, { callApiLogout: true });
     navigate("/login", { replace: true });
   };
 

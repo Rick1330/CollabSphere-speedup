@@ -315,6 +315,7 @@ export class DocumentsService {
         await tx.documentRegionVariable.createMany({
           data: parsedTemplate.variables.map((v) => ({
             documentId: doc.id,
+            workspaceId,
             variableKey: v.key,
             value: null,
           })),
@@ -376,6 +377,7 @@ export class DocumentsService {
         },
         create: {
           documentId: existing.id,
+          workspaceId,
           variableKey: key,
           value: v.value ?? null,
         },

@@ -1,23 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getInitials } from "@/lib/format";
-import { WORKSPACE_MEMBERS, type WorkspaceMember } from "@/lib/mock-comments";
+import type { TaskAssignee } from "@/api/adapters/tasks";
+import { getAvatarColor, getInitials } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 interface DocumentMentionAutocompleteProps {
   query: string;
-  onSelect: (member: WorkspaceMember) => void;
+  members: TaskAssignee[];
+  onSelect: (member: TaskAssignee) => void;
   onClose: () => void;
-  /** Element to anchor positioning under; if null we render statically below caret */
   anchorRect?: DOMRect | null;
 }
 
-/**
- * Workspace-member typeahead. Renders as a small floating panel just under the
- * caret/composer input. Keyboard-controlled by parent via the `register` API:
- * the parent passes keydown events to `onKeyDown` and we intercept arrows/enter.
- */
 export const DocumentMentionAutocomplete = ({
   query,
+  members,
   onSelect,
   onClose,
   anchorRect,
@@ -27,19 +23,20 @@ export const DocumentMentionAutocomplete = ({
 
   const matches = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const all = WORKSPACE_MEMBERS.filter((m) => m.role !== "VIEWER");
-    if (!q) return all.slice(0, 6);
-    return all
-      .filter((m) => m.fullName.toLowerCase().includes(q) || m.email.toLowerCase().includes(q))
+    if (!q) return members.slice(0, 6);
+    return members
+      .filter((m) => m.fullName.toLowerCase().includes(q))
       .slice(0, 6);
-  }, [query]);
+  }, [query, members]);
 
   useEffect(() => setActiveIndex(0), [query]);
 
-  // Bubble keyboard events from window so the parent input remains focused
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (matches.length === 0) return;
+      if (matches.length === 0) {
+        if (e.key === "Escape") onClose();
+        return;
+      }
       if (e.key === "ArrowDown") {
         e.preventDefault();
         setActiveIndex((i) => (i + 1) % matches.length);
@@ -98,17 +95,13 @@ export const DocumentMentionAutocomplete = ({
             >
               <div
                 className="h-7 w-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0"
-                style={{ backgroundColor: m.color }}
+                style={{ backgroundColor: getAvatarColor(m.id) }}
               >
                 {getInitials(m.fullName, 2)}
               </div>
               <div className="min-w-0 flex-1">
                 <div className="text-sm text-stone-900 font-medium truncate">{m.fullName}</div>
-                <div className="text-[11px] text-stone-400 truncate">{m.email}</div>
               </div>
-              <span className="text-[9px] font-mono tracking-wider text-stone-400 uppercase">
-                {m.role}
-              </span>
             </button>
           </li>
         ))}

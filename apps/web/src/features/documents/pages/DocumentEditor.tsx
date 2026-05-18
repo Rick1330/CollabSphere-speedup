@@ -73,7 +73,8 @@ import {
   type TaskStatus,
   type TaskLinkedResource,
 } from "@/api/adapters/tasks";
-import { joinWorkspaceRoom, subscribeRealtimeStatus } from "@/api/realtime/socket-client";
+import { subscribeRealtimeStatus } from "@/api/realtime/socket-client";
+import { useWorkspaceRealtime } from "@/hooks/use-workspace-realtime";
 import { prepareDocumentCollabBootstrap } from "@/features/documents/collab/collab-bootstrap";
 
 type SidebarTab = "outline" | "readiness" | "properties" | "comments";
@@ -428,6 +429,20 @@ const DocumentEditorPage = () => {
     };
   }, [workspaceId]);
 
+  const membersById = useMemo(
+    () => new Map(workspaceMembers.map((member) => [member.id, member])),
+    [workspaceMembers],
+  );
+
+  const commentCurrentUser = useMemo(
+    () => ({
+      id: effectiveUserId,
+      fullName: account?.fullName ?? "You",
+      avatarUrl: account?.avatarUrl ?? null,
+    }),
+    [effectiveUserId, account?.fullName, account?.avatarUrl],
+  );
+
   const [state, setState] = useState<DocumentEditorState>({
     status: "loading",
     doc: null,
@@ -719,7 +734,7 @@ const DocumentEditorPage = () => {
   } = useDocumentComments({
     workspaceId,
     documentId: mergedDoc?.id ?? "",
-    currentUserId: effectiveUserId,
+    currentUser: commentCurrentUser,
   });
   const { activeThreadId, focusThread, flashAnchorId, flashAnchor } =
     useDocumentThreadFocus();
@@ -733,15 +748,14 @@ const DocumentEditorPage = () => {
 
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("reconnecting");
 
+  useWorkspaceRealtime(workspaceId);
+
   useEffect(() => {
     if (!workspaceId || !documentId) return;
     let cancelled = false;
     const unsubscribe = subscribeRealtimeStatus((status) => {
       if (cancelled) return;
       setConnectionStatus(status === "unavailable" ? "offline" : status);
-    });
-    joinWorkspaceRoom(workspaceId).catch(() => {
-      if (!cancelled) setConnectionStatus("offline");
     });
     prepareDocumentCollabBootstrap({ workspaceId, documentId }).then((result) => {
       if (!cancelled) {
@@ -1374,6 +1388,8 @@ const DocumentEditorPage = () => {
               activeThreadId,
               canComment,
               canResolve: canResolveThreads,
+              members: workspaceMembers,
+              membersById,
               onFilterChange: setFilter,
               onCreate: handleCreateGeneralComment,
               onReply: handleReply,
@@ -1419,6 +1435,8 @@ const DocumentEditorPage = () => {
                 activeThreadId,
                 canComment,
                 canResolve: canResolveThreads,
+                members: workspaceMembers,
+                membersById,
                 onFilterChange: setFilter,
                 onCreate: handleCreateGeneralComment,
                 onReply: handleReply,
@@ -1451,6 +1469,7 @@ const DocumentEditorPage = () => {
                 placeholder="Add your comment… use @ to mention"
                 submitLabel="Add comment"
                 autoFocus
+                members={workspaceMembers}
                 onSubmit={handleSubmitAnchoredComment}
                 onCancel={() => setPendingAnchor(null)}
               />

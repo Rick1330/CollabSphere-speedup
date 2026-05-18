@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { lastValueFrom, of } from "rxjs";
+import { TransformInterceptor } from "../../apps/api/src/common/nest/transform.interceptor.js";
 
 import {
   createActionResponseEnvelope,
@@ -12,6 +14,37 @@ import {
   createSingleResourcePayload,
   wrapSuccessResponse,
 } from "../../apps/api/src/common/interceptors/response-envelope.interceptor.js";
+
+test("transform interceptor wraps bare payloads and preserves existing envelopes", async () => {
+  const interceptor = new TransformInterceptor();
+  const context = {
+    switchToHttp: () => ({
+      getRequest: () => ({ requestId: "req_transform" }),
+    }),
+  } as never;
+
+  const bare = await lastValueFrom(
+    interceptor.intercept(context, { handle: () => of({ id: "task_123" }) }),
+  );
+  assert.deepEqual(bare, {
+    data: { id: "task_123" },
+    meta: { requestId: "req_transform" },
+  });
+
+  const enveloped = await lastValueFrom(
+    interceptor.intercept(context, {
+      handle: () =>
+        of({
+          data: { resource: { id: "task_123" } },
+          meta: { requestId: "req_transform" },
+        }),
+    }),
+  );
+  assert.deepEqual(enveloped, {
+    data: { resource: { id: "task_123" } },
+    meta: { requestId: "req_transform" },
+  });
+});
 
 test("single-resource envelopes use the canonical data.resource shape", () => {
   assert.deepEqual(

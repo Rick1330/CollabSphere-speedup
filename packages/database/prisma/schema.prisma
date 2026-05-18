@@ -158,6 +158,9 @@ model User {
   documentVersionsCreated      DocumentVersion[]        @relation("DocumentVersionCreatedByUser")
   documentSubmissionsSubmitted DocumentSubmission[]     @relation("DocumentSubmissionSubmittedBy")
   documentSubmissionsDecided   DocumentSubmission[]     @relation("DocumentSubmissionDecidedBy")
+  documentsSubmitted           Document[]               @relation("DocumentSubmittedByUser")
+  documentsReviewed            Document[]               @relation("DocumentReviewedByUser")
+  taskLabelsCreated            TaskLabel[]              @relation("TaskLabelCreatedByUser")
   taskAssignments              Task[]                   @relation("TaskAssignee")
   taskReports                  Task[]                   @relation("TaskReporter")
   taskDocumentLinksCreated     TaskDocumentLink[]       @relation("TaskDocumentLinkCreatedBy")
@@ -248,7 +251,9 @@ model Workspace {
   documentVersions    DocumentVersion[]
   documentSubmissions DocumentSubmission[]
   taskColumns         TaskColumn[]
+  taskLabels          TaskLabel[]
   documentUpdates     DocumentUpdate[]
+  documentRegionVariables DocumentRegionVariable[]
   tasks               Task[]
   taskDocumentLinks   TaskDocumentLink[]
   commentThreads      CommentThread[]
@@ -281,6 +286,7 @@ model WorkspaceMember {
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   user      User      @relation(fields: [userId], references: [id], onDelete: Restrict)
 
+  @@index([userId, workspaceId], map: "idx_workspace_members_user_workspace")
   @@map("workspace_members")
 }
 
@@ -314,6 +320,7 @@ model Invitation {
   invitedByUser  User      @relation("InvitationInvitedByUser", fields: [invitedByUserId], references: [id], onDelete: Restrict)
   acceptedByUser User?     @relation("InvitationAcceptedByUser", fields: [acceptedByUserId], references: [id], onDelete: SetNull)
 
+  @@index([invitedEmail, status, expiresAt], map: "idx_invitations_email_status")
   @@map("invitations")
 }
 
@@ -334,6 +341,7 @@ model Folder {
   createdBy User       @relation("FolderCreatedByUser", fields: [createdById], references: [id], onDelete: Restrict)
   documents Document[]
 
+  @@index([workspaceId, parentId, position], map: "idx_folders_workspace_parent_pos")
   @@map("folders")
 }
 
@@ -355,6 +363,11 @@ model Document {
   templateVersion  Int?                     @map("template_version")
   templateSchemaVersion Int?                @map("template_schema_version")
   regionOrder      Json?                    @map("region_order") @db.JsonB
+  submittedAt      DateTime?                @map("submitted_at") @db.Timestamptz(6)
+  submittedById    String?                  @map("submitted_by_id") @db.Uuid
+  reviewedAt       DateTime?                @map("reviewed_at") @db.Timestamptz(6)
+  reviewedById     String?                  @map("reviewed_by_id") @db.Uuid
+  reviewNote       String?                  @map("review_note") @db.Text
   createdById      String                   @map("created_by") @db.Uuid
   updatedById      String?                  @map("updated_by") @db.Uuid
   createdAt        DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -366,27 +379,35 @@ model Document {
   lockedByUser User?                @relation("DocumentLockedByUser", fields: [lockedByUserId], references: [id], onDelete: SetNull)
   createdBy    User                 @relation("DocumentCreatedByUser", fields: [createdById], references: [id], onDelete: Restrict)
   updatedBy    User?                @relation("DocumentUpdatedByUser", fields: [updatedById], references: [id], onDelete: SetNull)
+  submittedBy  User?                @relation("DocumentSubmittedByUser", fields: [submittedById], references: [id], onDelete: SetNull)
+  reviewedBy   User?                @relation("DocumentReviewedByUser", fields: [reviewedById], references: [id], onDelete: SetNull)
   versions     DocumentVersion[]
   submissions  DocumentSubmission[]
   updates         DocumentUpdate[]
   taskLinks       TaskDocumentLink[]
   regionVariables DocumentRegionVariable[]
 
+  @@index([workspaceId, folderId, position], map: "idx_documents_workspace_folder_pos")
+  @@index([submittedById], map: "idx_documents_submitted_by")
+  @@index([reviewedById], map: "idx_documents_reviewed_by")
   @@map("documents")
 }
 
 model DocumentRegionVariable {
   id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
   documentId  String   @map("document_id") @db.Uuid
   variableKey String   @map("variable_key") @db.VarChar(120)
   value       String?  @db.Text
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  document  Document  @relation(fields: [documentId], references: [id], onDelete: Cascade)
 
   @@unique([documentId, variableKey], map: "uq_document_region_variables_doc_key")
   @@index([documentId], map: "idx_document_region_variables_document")
+  @@index([workspaceId], map: "idx_document_region_variables_workspace")
   @@map("document_region_variables")
 }
 model DocumentUpdate {
@@ -463,7 +484,27 @@ model TaskColumn {
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
 
+  @@index([workspaceId, position], map: "idx_task_columns_workspace_position")
   @@map("task_columns")
+}
+
+model TaskLabel {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String    @map("workspace_id") @db.Uuid
+  name        String    @db.VarChar(50)
+  color       String    @db.VarChar(7)
+  description String?   @db.VarChar(200)
+  createdById String    @map("created_by") @db.Uuid
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  createdBy User      @relation("TaskLabelCreatedByUser", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@unique([workspaceId, name], map: "uq_task_labels_workspace_name")
+  @@index([workspaceId], map: "idx_task_labels_workspace")
+  @@map("task_labels")
 }
 
 model Task {
@@ -592,6 +633,7 @@ model Notification {
   workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   actor     User?      @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
 
+  @@index([recipientId, createdAt(sort: Desc)], map: "idx_notifications_recipient_created")
   @@map("notifications")
 }
 
@@ -671,6 +713,10 @@ model Template {
   contentFormat   String?  @map("content_format") @db.VarChar(20)
   content         Json     @db.JsonB
   isEnabled       Boolean  @default(true) @map("is_enabled")
+  thumbnailUrl    String?  @map("thumbnail_url") @db.VarChar(500)
+  pageCount       Int?     @map("page_count")
+  sectionCount    Int?     @map("section_count")
+  tags            String[] @default([])
   createdByUserId String?  @map("created_by_user_id") @db.Uuid
   workspaceId     String?  @map("workspace_id") @db.Uuid
   createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -719,6 +765,7 @@ model ExportJob {
   errorMessage     String?   @map("error_message") @db.Text
   outputFileId     String?   @map("output_file_id") @db.Uuid
   outputStorageKey String?   @map("output_storage_key") @db.VarChar(500)
+  fileUrl          String?   @map("file_url") @db.VarChar(500)
   createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt        DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   completedAt      DateTime? @map("completed_at") @db.Timestamptz(6)
@@ -728,6 +775,7 @@ model ExportJob {
   requestedBy User      @relation("ExportJobRequestedBy", fields: [requestedById], references: [id], onDelete: Restrict)
   outputFile  File?     @relation("ExportJobOutputFile", fields: [outputFileId], references: [id], onDelete: SetNull)
 
+  @@index([requestedById, createdAt(sort: Desc)], map: "idx_export_jobs_requester_created")
   @@map("export_jobs")
 }
 

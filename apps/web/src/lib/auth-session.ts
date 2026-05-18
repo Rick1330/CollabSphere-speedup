@@ -9,6 +9,29 @@ import { useSyncExternalStore } from "react";
 import type { WorkspaceRoleKey, WorkspaceType } from "@/lib/persona-scenario";
 
 const STORAGE_KEY = "cs-auth-session";
+const CSRF_COOKIE_NAME = "csrf_token";
+
+/** Read double-submit CSRF cookie (visible on same origin, e.g. Vite proxy). */
+export function readCsrfTokenFromDocumentCookie(): string | null {
+  if (typeof document === "undefined") return null;
+  const parts = document.cookie.split(";").map((p) => p.trim());
+  for (const part of parts) {
+    if (part.startsWith(`${CSRF_COOKIE_NAME}=`)) {
+      const value = decodeURIComponent(part.slice(CSRF_COOKIE_NAME.length + 1));
+      return value.length > 0 ? value : null;
+    }
+  }
+  return null;
+}
+
+/** Merge `csrf_token` cookie into the in-memory session when localStorage omitted it (stale sessions). */
+export function hydrateCsrfTokenFromCookie(): void {
+  if (!current?.accessToken || current.csrfToken) return;
+  const fromCookie = readCsrfTokenFromDocumentCookie();
+  if (!fromCookie) return;
+  current = { ...current, csrfToken: fromCookie };
+  writeSession(current);
+}
 
 export interface SessionAccount {
   id: string;
@@ -55,6 +78,10 @@ function readSession(): AuthSession | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as AuthSession;
     if (!parsed?.accountId || !parsed?.accessToken) return null;
+    if (!parsed.csrfToken) {
+      const fromCookie = readCsrfTokenFromDocumentCookie();
+      if (fromCookie) parsed.csrfToken = fromCookie;
+    }
     return parsed;
   } catch {
     return null;
@@ -68,6 +95,7 @@ function writeSession(s: AuthSession | null) {
 }
 
 let current: AuthSession | null = readSession();
+hydrateCsrfTokenFromCookie();
 /** Suppresses `onAuthFailure` while `/login#oauth=` is being applied (avoids double sign-in). */
 let oauthBootstrapping = false;
 const listeners = new Set<() => void>();
@@ -79,6 +107,13 @@ export function isOAuthHashPresent(): boolean {
 
 export function isAuthFailureSuppressed(): boolean {
   return oauthBootstrapping || isOAuthHashPresent();
+}
+
+/** Remove `#oauth=...` from the URL without navigation (safe on sign-out and after OAuth bootstrap). */
+export function clearOAuthHashFromUrl(): void {
+  if (typeof window === "undefined") return;
+  if (!window.location.hash.startsWith("#oauth=")) return;
+  window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
 }
 
 function buildResolvedAccountSnapshot(): SessionAccount | null {
@@ -122,6 +157,7 @@ export const authSession = {
     return current;
   },
   getCsrfToken(): string | null {
+    hydrateCsrfTokenFromCookie();
     const t = current?.csrfToken;
     return typeof t === "string" && t.length > 0 ? t : null;
   },
@@ -159,6 +195,7 @@ export const authSession = {
   },
   signOut() {
     oauthBootstrapping = false;
+    clearOAuthHashFromUrl();
     current = null;
     writeSession(null);
     emit();

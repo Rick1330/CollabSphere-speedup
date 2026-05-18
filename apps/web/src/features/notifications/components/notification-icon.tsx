@@ -24,6 +24,7 @@ const NOTIFICATION_ICON_MAP: Record<
   "document.submitted": { icon: Send, iconColor: "text-sky-600", bgColor: "bg-sky-50" },
   "document.approved": { icon: CheckCircle2, iconColor: "text-sky-600", bgColor: "bg-sky-50" },
   "comment.reply": { icon: MessageSquare, iconColor: "text-stone-500", bgColor: "bg-stone-100" },
+  "comment.mention": { icon: AtSign, iconColor: "text-stone-600", bgColor: "bg-stone-100" },
   "workspace.member_joined": { icon: UserPlus, iconColor: "text-emerald-600", bgColor: "bg-emerald-50" },
   "workspace.invitation": { icon: Mail, iconColor: "text-emerald-600", bgColor: "bg-emerald-50" },
   "deadline.reminder": { icon: Clock, iconColor: "text-amber-600", bgColor: "bg-amber-50" },

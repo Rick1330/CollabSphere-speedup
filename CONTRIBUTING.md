@@ -134,6 +134,11 @@ Use these steps when you need to verify outbound email behavior locally without 
 - Stale Docker state: stop services, remove stale containers or volumes if appropriate, then restart.
 - Dependency drift: run `pnpm install` again after pulling new changes.
 - Cache confusion: if package state looks stale, start with a clean install and rerun the failing command before attempting advanced troubleshooting.
+- **`PORT 3001 is already in use` when running `pnpm dev`**: another API is already running. Either use `http://127.0.0.1:8080` without starting dev again, or `taskkill /PID <pid> /F` (message includes the PID) and run a **single** `pnpm dev --skip-compose`. See `docs/agent-ref/ops/local-dev.md` → **Authentication**.
+- **Google OAuth `chrome-error://` or “Unsafe attempt to load URL” on callback**: the browser could not reach `http://127.0.0.1:3001` (API down or crashed). Confirm `curl http://127.0.0.1:3001/api/v1/health` returns 200. Start OAuth from **Continue with Google** on `/login`, not by reopening an old callback URL.
+- **Google OAuth 404 on `http://127.0.0.1:8080/api/v1/auth/google`**: wrong URL — OAuth **starts** on the API origin: `http://127.0.0.1:3001/api/v1/auth/google`. Register callback `http://127.0.0.1:3001/api/v1/auth/google/callback` in Google Cloud Console.
+- **Login `500` on `POST /api/v1/auth/login`**: usually the API is not running on 3001 (stale or second `pnpm dev`). Restart one clean dev stack; see `docs/agent-ref/ops/local-dev.md`.
+- **Seeded email/password login fails (`INVALID_CREDENTIALS`)**: run `pnpm prisma migrate deploy` then `pnpm demo:seed-runtime` from the repo root. Demo users: `elshaday@collabsphere.app` / `Demo1234!` and `kidist@collabsphere.app` / `Demo1234!` (see `.env.example`).
 
 ## Branching Model
 
@@ -200,7 +205,7 @@ Use the echoed `x-request-id` header value when debugging request logs, CI failu
 ## Workspace Scoping
 
 - Workspace-owned persistence tables must carry `workspace_id` and must be queried with explicit workspace scope.
-- The current workspace-owned table set is `workspace_members`, `workspace_settings`, `invitations`, `folders`, `documents`, `document_versions`, `document_submissions`, `task_columns`, `tasks`, `task_document_links`, `comment_threads`, `comments`, `comment_mentions`, `activity_events`, `export_jobs`, `files`, and `attachments`.
+- The current workspace-owned table set is `workspace_members`, `workspace_settings`, `invitations`, `folders`, `documents`, `document_region_variables`, `document_updates`, `document_versions`, `document_submissions`, `task_columns`, `task_labels`, `tasks`, `task_document_links`, `comment_threads`, `comments`, `comment_mentions`, `activity_events`, `export_jobs`, `files`, and `attachments`.
 - `notifications` is a mixed-scope table: workspace-owned notifications carry `workspace_id`, while global user notifications may use `workspace_id = null`.
 - In the API layer, use `withWorkspaceScope(prisma, workspaceId)` from `apps/api/src/common/prisma/prisma.service.ts` for workspace-scoped Prisma access, including notification queries that are explicitly workspace-owned.
 - `withWorkspaceScope(...)` rejects missing `workspaceId`, injects `workspaceId` into workspace-scoped create payloads, preserves `$withDeleted()` / `$withHardDeletes()` chaining, and rejects unsafe unique `update` / `delete` / `upsert` flows that Prisma cannot scope atomically.

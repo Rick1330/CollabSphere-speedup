@@ -2,6 +2,7 @@ import { Module, RequestMethod, type MiddlewareConsumer, type NestModule } from 
 import { ConfigModule } from "@nestjs/config";
 import { ThrottlerModule } from "@nestjs/throttler";
 import { APP_GUARD } from "@nestjs/core";
+import { CollabThrottlerGuard } from "./common/guards/collab-throttler.guard.js";
 import { configValidationSchema } from "./config/config.schema.js";
 import { NestRequestIdMiddleware } from "./common/nest/nest-request-id.middleware.js";
 import { PrismaModule } from "./common/prisma/prisma.module.js";
@@ -39,12 +40,29 @@ import { HttpObservabilityMiddleware } from "./common/observability/http-observa
         stripUnknown: false,
       },
     }),
-    ThrottlerModule.forRoot([
-      {
-        ttl: 60000,
-        limit: 100,
+    ThrottlerModule.forRoot({
+      throttlers: [
+        { name: "read", ttl: 60_000, limit: 120 },
+        { name: "write", ttl: 60_000, limit: 30 },
+        {
+          name: "auth",
+          ttl: 900_000,
+          limit: (process.env.NODE_ENV ?? "development") === "production" ? 5 : 50,
+        },
+      ],
+      skipIf: (context) => {
+        const request = context.switchToHttp().getRequest<{
+          method?: string;
+          path?: string;
+          url?: string;
+        }>();
+        if (request.method === "OPTIONS") {
+          return true;
+        }
+        const path = request.path ?? request.url ?? "";
+        return path.includes("/health") || path.includes("/dev/");
       },
-    ]),
+    }),
     PrismaModule,
     GuardsNestModule,
     HealthNestModule,
@@ -69,6 +87,10 @@ import { HttpObservabilityMiddleware } from "./common/observability/http-observa
   providers: [
     NestRequestIdMiddleware,
     HttpObservabilityMiddleware,
+    {
+      provide: APP_GUARD,
+      useClass: CollabThrottlerGuard,
+    },
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard,

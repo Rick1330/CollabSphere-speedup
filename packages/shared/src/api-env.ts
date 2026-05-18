@@ -19,14 +19,19 @@ export const apiEnvKeys = Object.freeze([
   "BCRYPT_COST",
   "REFRESH_TOKEN_TTL_DAYS",
   "CORS_ORIGINS",
+  "COLLAB_JWT_SECRET",
   "EMAIL_PROVIDER_API_KEY",
   "EMAIL_SMTP_HOST",
   "EMAIL_SMTP_PORT",
   "API_BASE_URL",
   "BASE_URL",
+  "GOOGLE_CLIENT_ID",
+  "GOOGLE_CLIENT_SECRET",
 ] as const);
 
 export type ApiEnvKey = (typeof apiEnvKeys)[number];
+
+const minSecretLength = 32;
 
 const apiBaseShape = {
   DATABASE_URL: true,
@@ -45,9 +50,19 @@ const baseApiEnvSchema = sharedEnvSchema
     BCRYPT_COST: createPositiveInteger("BCRYPT_COST").refine((value) => value >= 12 && value <= 15, {
       message: "BCRYPT_COST must be between 12 and 15.",
     }),
+    COLLAB_JWT_SECRET: createRequiredString("COLLAB_JWT_SECRET").min(
+      minSecretLength,
+      `COLLAB_JWT_SECRET must be at least ${minSecretLength} characters.`,
+    ),
+    JWT_ACCESS_SECRET: createRequiredString("JWT_ACCESS_SECRET").min(
+      minSecretLength,
+      `JWT_ACCESS_SECRET must be at least ${minSecretLength} characters.`,
+    ),
     EMAIL_PROVIDER_API_KEY: createRequiredString("EMAIL_PROVIDER_API_KEY").optional(),
     EMAIL_SMTP_HOST: createRequiredString("EMAIL_SMTP_HOST").optional(),
     EMAIL_SMTP_PORT: createPositiveInteger("EMAIL_SMTP_PORT").optional(),
+    GOOGLE_CLIENT_ID: createRequiredString("GOOGLE_CLIENT_ID").optional(),
+    GOOGLE_CLIENT_SECRET: createRequiredString("GOOGLE_CLIENT_SECRET").optional(),
   })
   .strict();
 
@@ -65,6 +80,8 @@ const missingSmtpPairMessage =
   "EMAIL_SMTP_HOST and EMAIL_SMTP_PORT must be set together for local SMTP.";
 const missingProviderMessage =
   "EMAIL_PROVIDER_API_KEY is required when local SMTP is not configured.";
+const missingGooglePairMessage =
+  "GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set together.";
 
 const createMissingPairError = (hasSmtpHost: boolean) =>
   createApiEnvError(
@@ -74,6 +91,12 @@ const createMissingPairError = (hasSmtpHost: boolean) =>
 
 const createMissingProviderError = () =>
   createApiEnvError("EMAIL_PROVIDER_API_KEY", missingProviderMessage);
+
+const createMissingGooglePairError = (hasGoogleId: boolean) =>
+  createApiEnvError(
+    hasGoogleId ? "GOOGLE_CLIENT_SECRET" : "GOOGLE_CLIENT_ID",
+    missingGooglePairMessage,
+  );
 
 const selectApiEnv = (input: Record<string, string | undefined>) =>
   Object.fromEntries(apiEnvKeys.map((key) => [key, input[key]])) as Record<
@@ -95,6 +118,8 @@ const normalizeOptionalEmailFields = (selected: Record<ApiEnvKey, string | undef
   EMAIL_PROVIDER_API_KEY: normalizeOptionalEnvValue(selected.EMAIL_PROVIDER_API_KEY),
   EMAIL_SMTP_HOST: normalizeOptionalEnvValue(selected.EMAIL_SMTP_HOST),
   EMAIL_SMTP_PORT: normalizeOptionalEnvValue(selected.EMAIL_SMTP_PORT),
+  GOOGLE_CLIENT_ID: normalizeOptionalEnvValue(selected.GOOGLE_CLIENT_ID),
+  GOOGLE_CLIENT_SECRET: normalizeOptionalEnvValue(selected.GOOGLE_CLIENT_SECRET),
 });
 
 export const parseApiRuntimeEnv = (input: Record<string, string | undefined>): ApiRuntimeEnv => {
@@ -102,6 +127,8 @@ export const parseApiRuntimeEnv = (input: Record<string, string | undefined>): A
   const hasSmtpHost = hasConfiguredValue(selected.EMAIL_SMTP_HOST);
   const hasSmtpPort = hasConfiguredValue(selected.EMAIL_SMTP_PORT);
   const hasProvider = hasConfiguredValue(selected.EMAIL_PROVIDER_API_KEY);
+  const hasGoogleId = hasConfiguredValue(selected.GOOGLE_CLIENT_ID);
+  const hasGoogleSecret = hasConfiguredValue(selected.GOOGLE_CLIENT_SECRET);
 
   if (hasSmtpHost !== hasSmtpPort) {
     throw createMissingPairError(hasSmtpHost);
@@ -109,6 +136,10 @@ export const parseApiRuntimeEnv = (input: Record<string, string | undefined>): A
 
   if (!hasSmtpHost && !hasProvider) {
     throw createMissingProviderError();
+  }
+
+  if (hasGoogleId !== hasGoogleSecret) {
+    throw createMissingGooglePairError(hasGoogleId);
   }
 
   const parsed = apiEnvSchema.safeParse(selected);

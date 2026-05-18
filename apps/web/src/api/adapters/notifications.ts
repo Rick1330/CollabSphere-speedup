@@ -8,6 +8,7 @@ export type NotificationType =
   | "document.submitted"
   | "document.approved"
   | "comment.reply"
+  | "comment.mention"
   | "workspace.member_joined"
   | "workspace.invitation"
   | "deadline.reminder";
@@ -22,6 +23,7 @@ export const NOTIFICATION_CATEGORY: Record<NotificationType, NotificationCategor
   "document.submitted": "documents",
   "document.approved": "documents",
   "comment.reply": "comments",
+  "comment.mention": "comments",
   "workspace.member_joined": "workspace",
   "workspace.invitation": "workspace",
   "deadline.reminder": "deadlines",
@@ -38,9 +40,22 @@ export const NOTIFICATION_CATEGORY_META: Record<
   deadlines: { label: "Deadlines", tone: "amber" },
 };
 
+/** Maps API notification type strings to UI categories (includes unknown future types). */
+export function resolveNotificationCategory(type: string): NotificationCategory {
+  if (type in NOTIFICATION_CATEGORY) {
+    return NOTIFICATION_CATEGORY[type as NotificationType];
+  }
+  if (type.startsWith("task.")) return "tasks";
+  if (type.startsWith("document.")) return "documents";
+  if (type.startsWith("comment.")) return "comments";
+  if (type.startsWith("workspace.")) return "workspace";
+  if (type.startsWith("deadline.")) return "deadlines";
+  return "comments";
+}
+
 export interface Notification {
   id: string;
-  type: NotificationType;
+  type: NotificationType | string;
   title: string;
   body: string | null;
   workspaceId: string;
@@ -129,7 +144,7 @@ export async function fetchNotificationCategoryCounts(unreadOnly: boolean): Prom
     deadlines: 0,
   };
   for (const item of page.data.items) {
-    byCategory[NOTIFICATION_CATEGORY[item.type]] += 1;
+    byCategory[resolveNotificationCategory(item.type)] += 1;
   }
   return { data: { all: page.meta.pagination.totalItems, byCategory } };
 }

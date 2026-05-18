@@ -1,4 +1,5 @@
 import { inspect } from "node:util";
+import { Prisma } from "@prisma/client";
 import {
   getDefaultErrorMessage,
   sanitizeErrorEnvelopePayload,
@@ -76,6 +77,7 @@ const notFoundErrorCodes = [
 ] as const;
 
 const conflictErrorCodes = [
+  "CONFLICT",
   "EMAIL_ALREADY_EXISTS",
   "ACCOUNT_EXISTS_LOCAL",
   "ACCOUNT_EXISTS_OAUTH",
@@ -193,6 +195,7 @@ const errorStatusByCode: Record<CanonicalErrorCode, number> = {
   EXPORT_JOB_NOT_FOUND: 404,
   LINK_NOT_FOUND: 404,
   TARGET_NOT_FOUND: 404,
+  CONFLICT: 409,
   EMAIL_ALREADY_EXISTS: 409,
   ACCOUNT_EXISTS_LOCAL: 409,
   ACCOUNT_EXISTS_OAUTH: 409,
@@ -359,7 +362,41 @@ const sanitizeResponseHeaders = ({
   return Object.keys(sanitized).length > 0 ? sanitized : undefined;
 };
 
+const normalizePrismaKnownRequestError = (error: Prisma.PrismaClientKnownRequestError): NormalizedAppError => {
+  if (error.code === "P2002") {
+    return {
+      code: "CONFLICT",
+      message: getDefaultErrorMessage("CONFLICT"),
+      statusCode: errorStatusByCode.CONFLICT,
+      headers: undefined,
+      originalError: error,
+    };
+  }
+
+  if (error.code === "P2025") {
+    return {
+      code: "NOT_FOUND",
+      message: getDefaultErrorMessage("NOT_FOUND"),
+      statusCode: errorStatusByCode.NOT_FOUND,
+      headers: undefined,
+      originalError: error,
+    };
+  }
+
+  return {
+    code: "DATABASE_ERROR",
+    message: getDefaultErrorMessage("DATABASE_ERROR"),
+    statusCode: errorStatusByCode.DATABASE_ERROR,
+    headers: undefined,
+    originalError: error,
+  };
+};
+
 const normalizeAppError = (error: unknown): NormalizedAppError => {
+  if (error instanceof Prisma.PrismaClientKnownRequestError) {
+    return normalizePrismaKnownRequestError(error);
+  }
+
   if (error instanceof AppError) {
     return {
       code: error.code,

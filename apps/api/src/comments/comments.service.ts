@@ -119,6 +119,16 @@ export class CommentsService {
       resourceTitleSnapshot: this.toPlaintext(normalized).slice(0, 255),
       metadata: { threadId: thread.id, targetType: input.targetType, targetId: input.targetId },
     });
+    await this.createMentionNotifications({
+      actorUserId: input.actorUserId,
+      actorName: author.fullName,
+      workspaceId: input.workspaceId,
+      targetType: input.targetType,
+      targetId: input.targetId,
+      threadId: thread.id,
+      mentionUserIds,
+      bodyPlaintext: this.toPlaintext(normalized),
+    });
     return thread;
   }
 
@@ -167,6 +177,16 @@ export class CommentsService {
       resourceId: thread.id,
       resourceTitleSnapshot: this.toPlaintext(normalized).slice(0, 255),
       metadata: { threadId: thread.id, commentId: reply.id, targetType: thread.targetType, targetId: thread.targetId },
+    });
+    await this.createMentionNotifications({
+      actorUserId: input.actorUserId,
+      actorName: author.fullName,
+      workspaceId: input.workspaceId,
+      targetType: thread.targetType,
+      targetId: thread.targetId,
+      threadId: thread.id,
+      mentionUserIds,
+      bodyPlaintext: this.toPlaintext(normalized),
     });
     return reply;
   }
@@ -345,6 +365,68 @@ export class CommentsService {
       userId: null,
     });
     this.realtimeEvents.emitActivityFromRecord(activity);
+  }
+
+  private buildMentionNotificationUrl(input: {
+    workspaceId: string;
+    targetType: CommentTargetType;
+    targetId: string;
+    threadId: string;
+  }): string {
+    if (input.targetType === "document") {
+      return `/w/${input.workspaceId}/documents/${input.targetId}?tab=comments&thread=${input.threadId}`;
+    }
+    return `/w/${input.workspaceId}/tasks/${input.targetId}?thread=${input.threadId}`;
+  }
+
+  private async createMentionNotifications(input: {
+    actorUserId: string;
+    actorName: string;
+    workspaceId: string;
+    targetType: CommentTargetType;
+    targetId: string;
+    threadId: string;
+    mentionUserIds: string[];
+    bodyPlaintext: string;
+  }): Promise<void> {
+    const recipients = input.mentionUserIds.filter((userId) => userId !== input.actorUserId);
+    if (recipients.length === 0) {
+      return;
+    }
+    const url = this.buildMentionNotificationUrl({
+      workspaceId: input.workspaceId,
+      targetType: input.targetType,
+      targetId: input.targetId,
+      threadId: input.threadId,
+    });
+    const bodySnippet = input.bodyPlaintext.trim().slice(0, 280);
+    const resourceType = input.targetType === "document" ? "document" : "task";
+
+    for (const recipientId of recipients) {
+      const notification = await this.prisma.notification.create({
+        data: {
+          recipientId,
+          workspaceId: input.workspaceId,
+          actorId: input.actorUserId,
+          type: "comment.mention",
+          title: `${input.actorName} mentioned you`,
+          body: bodySnippet || null,
+          resourceType,
+          resourceId: input.targetId,
+          url,
+          metadata: {
+            threadId: input.threadId,
+            targetType: input.targetType,
+            targetId: input.targetId,
+          } as never,
+        },
+      });
+      this.realtimeEvents.emitNotification("notification:created", {
+        workspaceId: input.workspaceId,
+        userId: recipientId,
+        data: { id: notification.id },
+      });
+    }
   }
 
   private normalizeContent(content: CommentContentNode[]): CommentContentNode[] {

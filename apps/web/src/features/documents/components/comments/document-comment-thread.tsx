@@ -1,8 +1,10 @@
 import { useState } from "react";
-import { Check, CornerDownRight, MessageSquare, MoreHorizontal, RotateCcw } from "lucide-react";
+import { Check, CornerDownRight, MessageSquare, RotateCcw } from "lucide-react";
+import type { TaskAssignee } from "@/api/adapters/tasks";
 import { getInitials, relativeTime } from "@/lib/format";
-import { findMember, type CommentThread } from "@/lib/mock-comments";
+import type { CommentThread } from "@/lib/mock-comments";
 import { cn } from "@/lib/utils";
+import { resolveCommentAuthor, resolveMemberDisplay } from "@/features/documents/lib/comment-author";
 import { DocumentCommentBody } from "./document-comment-body";
 import { DocumentCommentComposer } from "./document-comment-composer";
 import type { CommentNode } from "@/lib/mock-comments";
@@ -12,6 +14,8 @@ interface DocumentCommentThreadProps {
   isActive: boolean;
   canResolve: boolean;
   canReply: boolean;
+  members: TaskAssignee[];
+  membersById: Map<string, TaskAssignee>;
   onSelect: () => void;
   onJumpToAnchor?: () => void;
   onReply: (body: CommentNode[]) => void;
@@ -23,14 +27,16 @@ export const DocumentCommentThreadCard = ({
   isActive,
   canResolve,
   canReply,
+  members,
+  membersById,
   onSelect,
   onJumpToAnchor,
   onReply,
   onToggleResolve,
 }: DocumentCommentThreadProps) => {
   const [replyOpen, setReplyOpen] = useState(false);
-  const author = findMember(thread.authorId);
-  const resolver = thread.resolvedBy ? findMember(thread.resolvedBy) : null;
+  const author = resolveCommentAuthor(thread.author, membersById);
+  const resolver = thread.resolvedBy ? resolveMemberDisplay(thread.resolvedBy, membersById) : null;
   const replyCount = thread.replies.length;
 
   return (
@@ -44,7 +50,6 @@ export const DocumentCommentThreadCard = ({
       )}
       aria-current={isActive ? "true" : undefined}
     >
-      {/* Anchor strip */}
       {thread.anchor && (
         <div className="flex items-start gap-2 px-3 pt-2.5 pb-1.5">
           <div
@@ -80,19 +85,16 @@ export const DocumentCommentThreadCard = ({
         </p>
       )}
 
-      {/* Author row */}
       <div className="flex items-start gap-2.5 px-3 pt-2 pb-1">
         <div
           className="h-6 w-6 rounded-full flex items-center justify-center text-[9px] font-bold text-white flex-shrink-0"
-          style={{ backgroundColor: author?.color ?? "#A8A29E" }}
+          style={{ backgroundColor: author.avatarColor }}
         >
-          {getInitials(author?.fullName ?? "?", 2)}
+          {getInitials(author.fullName, 2)}
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline justify-between gap-2">
-            <span className="text-[13px] font-semibold text-stone-900 truncate">
-              {author?.fullName ?? "Unknown"}
-            </span>
+            <span className="text-[13px] font-semibold text-stone-900 truncate">{author.fullName}</span>
             <span className="text-[10px] font-mono tracking-wider uppercase text-stone-400 flex-shrink-0">
               {relativeTime(thread.createdAt)}
             </span>
@@ -103,24 +105,21 @@ export const DocumentCommentThreadCard = ({
         </div>
       </div>
 
-      {/* Replies */}
       {replyCount > 0 && (
         <ul className="pl-10 pr-3 pb-1 space-y-2">
           {thread.replies.map((reply) => {
-            const ra = findMember(reply.authorId);
+            const ra = resolveCommentAuthor(reply.author, membersById);
             return (
               <li key={reply.id} className="flex items-start gap-2">
                 <div
                   className="h-5 w-5 rounded-full flex items-center justify-center text-[8px] font-bold text-white flex-shrink-0 mt-px"
-                  style={{ backgroundColor: ra?.color ?? "#A8A29E" }}
+                  style={{ backgroundColor: ra.avatarColor }}
                 >
-                  {getInitials(ra?.fullName ?? "?", 2)}
+                  {getInitials(ra.fullName, 2)}
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline justify-between gap-2">
-                    <span className="text-xs font-semibold text-stone-800 truncate">
-                      {ra?.fullName ?? "Unknown"}
-                    </span>
+                    <span className="text-xs font-semibold text-stone-800 truncate">{ra.fullName}</span>
                     <span className="text-[10px] font-mono tracking-wider uppercase text-stone-400 flex-shrink-0">
                       {relativeTime(reply.createdAt)}
                     </span>
@@ -135,7 +134,6 @@ export const DocumentCommentThreadCard = ({
         </ul>
       )}
 
-      {/* Footer actions */}
       <div className="flex items-center justify-between gap-2 px-3 py-1.5 border-t border-stone-100">
         <div className="flex items-center gap-1 text-[10px] font-mono tracking-wider uppercase text-stone-400">
           <MessageSquare className="h-3 w-3" aria-hidden="true" />
@@ -199,6 +197,7 @@ export const DocumentCommentThreadCard = ({
             submitLabel="Reply"
             size="sm"
             autoFocus
+            members={members}
             onSubmit={(body) => {
               onReply(body);
               setReplyOpen(false);

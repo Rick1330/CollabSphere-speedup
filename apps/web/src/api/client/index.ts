@@ -71,7 +71,13 @@ function hostnameForDevApi(hostname: string): string {
  */
 export function getBrowserDevApiBaseUrl(): string | null {
   if (!import.meta.env.DEV || typeof window === "undefined") return null;
-  // Always target IPv4 loopback so API cookies and Nest listener match `.env` (`127.0.0.1`).
+
+  const fromEnv = trimEnvString(import.meta.env.VITE_API_BASE_URL);
+  if (fromEnv) {
+    return normalizeDevApiAbsoluteUrl(fromEnv.replace(/\/+$/, ""));
+  }
+
+  // Fallback when root `.env` does not set VITE_API_BASE_URL (canonical local API port).
   return "http://127.0.0.1:3001/api/v1";
 }
 
@@ -112,10 +118,12 @@ export function resolveConfiguredApiBaseUrl(): string {
   const fromEnv = trimEnvString(import.meta.env.VITE_API_BASE_URL);
   const devBrowser = import.meta.env.DEV && typeof window !== "undefined";
 
-  let candidate =
-    fromEnv ??
-    (devBrowser ? (readDevProxyFlag() ? "/api/v1" : getBrowserDevApiBaseUrl()) : undefined) ??
-    "/api/v1";
+  let candidate: string | undefined;
+  if (devBrowser && readDevProxyFlag()) {
+    candidate = "/api/v1";
+  } else {
+    candidate = fromEnv ?? (devBrowser ? getBrowserDevApiBaseUrl() : undefined) ?? "/api/v1";
+  }
 
   if (devBrowser && /^https?:\/\//i.test(candidate)) {
     candidate = normalizeDevApiAbsoluteUrl(candidate);
@@ -123,6 +131,39 @@ export function resolveConfiguredApiBaseUrl(): string {
 
   const trimmed = candidate.replace(/\/+$/, "");
   return trimmed.length > 0 ? trimmed : "/api/v1";
+}
+
+/**
+ * Nest API origin for full-page browser redirects (Google OAuth). Always targets the real API
+ * host (e.g. :3001), not the Vite proxy path, even when `VITE_USE_DEV_PROXY=true`.
+ */
+export function resolveApiOriginForBrowserRedirect(): string {
+  const proxyTarget = trimEnvString(import.meta.env.VITE_API_PROXY_TARGET);
+  if (proxyTarget) {
+    try {
+      return httpUrlOrigin(normalizeDevApiAbsoluteUrl(proxyTarget));
+    } catch {
+      /* fall through */
+    }
+  }
+
+  const apiBase = trimEnvString(import.meta.env.VITE_API_BASE_URL);
+  if (apiBase && /^https?:\/\//i.test(apiBase)) {
+    return httpUrlOrigin(normalizeDevApiAbsoluteUrl(apiBase));
+  }
+
+  const direct = getBrowserDevApiBaseUrl();
+  if (direct) {
+    return httpUrlOrigin(direct);
+  }
+
+  return "http://127.0.0.1:3001";
+}
+
+/** Absolute URL to start Google OAuth (`GET /api/v1/auth/google` on the API process). */
+export function resolveOAuthStartUrl(): string {
+  const origin = resolveApiOriginForBrowserRedirect().replace(/\/+$/, "");
+  return `${origin}/api/v1/auth/google`;
 }
 
 /**
@@ -243,17 +284,26 @@ export async function request<T>(path: string, opts: RequestOptions = {}): Promi
 
     if (opts.body !== undefined) headers["Content-Type"] = "application/json";
 
-    if (method === "POST" || method === "PUT" || method === "PATCH" || method === "DELETE") {
-      const csrf = authSession.getCsrfToken();
-      if (csrf) headers["X-CSRF-Token"] = csrf;
-    }
-
     let hadBearer = false;
     if (getAuthToken) {
       const token = await getAuthToken();
       if (token) {
         hadBearer = true;
         headers.Authorization = `Bearer ${token}`;
+      }
+    }
+
+    if (method === "POST" || method === "PUT" || method === "PATCH" || method === "DELETE") {
+      const csrf = authSession.getCsrfToken();
+      if (csrf) {
+        headers["X-CSRF-Token"] = csrf;
+      } else if (hadBearer) {
+        throw new ApiError(
+          403,
+          "Session is missing CSRF protection. Sign out and sign in again.",
+          undefined,
+          "CSRF_TOKEN_MISSING",
+        );
       }
     }
 

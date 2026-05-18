@@ -3,8 +3,8 @@ import { cn } from "@/lib/utils";
 import { fullDateTime, relativeTime } from "@/lib/format";
 import { NotificationIcon } from "./notification-icon";
 import {
-  NOTIFICATION_CATEGORY,
   NOTIFICATION_CATEGORY_META,
+  resolveNotificationCategory,
   type Notification,
 } from "@/api/adapters/notifications";
 
@@ -25,7 +25,7 @@ const TONE_CHIP: Record<
 };
 
 export const NotificationItem = ({ notification, onMarkRead }: NotificationItemProps) => {
-  const category = NOTIFICATION_CATEGORY[notification.type];
+  const category = resolveNotificationCategory(notification.type);
   const categoryMeta = NOTIFICATION_CATEGORY_META[category];
   const unread = !notification.isRead;
 

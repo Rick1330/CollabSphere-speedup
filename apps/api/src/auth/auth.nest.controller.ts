@@ -13,6 +13,7 @@ import {
   Req,
   Res,
 } from "@nestjs/common";
+import { SkipThrottle, Throttle } from "@nestjs/throttler";
 import type { Request, Response } from "express";
 import { Public } from "../common/decorators/public.decorator.js";
 import { CurrentUserId } from "../common/decorators/current-user.decorator.js";
@@ -70,6 +71,7 @@ const validateCsrfDoubleSubmit = (req: Request) => {
 };
 
 @Controller("auth")
+@SkipThrottle({ read: true, write: true })
 export class AuthNestController {
   constructor(
     @Inject(AuthAppService) private readonly authAppService: AuthAppService,
@@ -134,6 +136,7 @@ export class AuthNestController {
   }
 
   @Public()
+  @Throttle({ auth: { limit: 5, ttl: 900_000 } })
   @Post("login")
   async login(
     @ReqRequestId() requestId: string,
@@ -170,6 +173,7 @@ export class AuthNestController {
   }
 
   @Public()
+  @Throttle({ auth: { limit: 5, ttl: 900_000 } })
   @Post("refresh")
   async refresh(
     @ReqRequestId() requestId: string,
@@ -234,6 +238,7 @@ export class AuthNestController {
   }
 
   @Public()
+  @Throttle({ auth: { limit: 5, ttl: 900_000 } })
   @Post("resend-verification")
   async resendVerification(
     @ReqRequestId() requestId: string,
@@ -260,6 +265,7 @@ export class AuthNestController {
   }
 
   @Public()
+  @Throttle({ auth: { limit: 5, ttl: 900_000 } })
   @Post("forgot-password")
   async forgotPassword(@ReqRequestId() requestId: string, @Body() rawBody: unknown) {
     try {
@@ -277,6 +283,7 @@ export class AuthNestController {
   }
 
   @Public()
+  @Throttle({ auth: { limit: 5, ttl: 900_000 } })
   @Post("reset-password")
   async resetPassword(@ReqRequestId() requestId: string, @Body() rawBody: unknown) {
     try {
@@ -352,8 +359,33 @@ export class AuthNestController {
     @Req() req: Request,
     @Ip() ipAddress: string,
     @Headers("user-agent") userAgentHeader: string | undefined,
-    @Res({ passthrough: true }) res: Response,
+    @Res() res: Response,
   ) {
+    const spaOrigin = process.env.WEB_APP_URL?.trim() || process.env.BASE_URL?.trim();
+    const redirectToSpa = (pathAndQuery: string) => {
+      if (!spaOrigin) {
+        return false;
+      }
+      const dest = `${spaOrigin.replace(/\/+$/, "")}${pathAndQuery.startsWith("/") ? pathAndQuery : `/${pathAndQuery}`}`;
+      res.redirect(HttpStatus.FOUND, dest);
+      return true;
+    };
+    const sendOAuthError = (error: unknown) => {
+      if (error instanceof AppError) {
+        if (error.code === "ACCOUNT_DEACTIVATED" && redirectToSpa("/login?error=account_deactivated")) {
+          return;
+        }
+        if (redirectToSpa(`/login?error=${encodeURIComponent(error.code)}`)) {
+          return;
+        }
+        const mapped = createErrorResponse({ error, requestId });
+        res.status(mapped.statusCode).json(mapped.payload);
+        return;
+      }
+      const mapped = createErrorResponse({ error, requestId });
+      res.status(mapped.statusCode).json(mapped.payload);
+    };
+
     try {
       const expectedCookie = req.cookies?.[GOOGLE_OAUTH_STATE_COOKIE];
       res.clearCookie(GOOGLE_OAUTH_STATE_COOKIE, {
@@ -384,7 +416,6 @@ export class AuthNestController {
       const csrfToken = randomBytes(24).toString("base64url");
       setCsrfTokenCookie(res, csrfToken);
 
-      const spaOrigin = process.env.WEB_APP_URL?.trim() || process.env.BASE_URL?.trim();
       if (spaOrigin) {
         const oauthPayload = {
           accessToken: session.accessToken,
@@ -398,12 +429,11 @@ export class AuthNestController {
           },
         };
         const hash = `oauth=${encodeURIComponent(JSON.stringify(oauthPayload))}`;
-        const dest = `${spaOrigin.replace(/\/+$/, "")}/login#${hash}`;
-        res.redirect(HttpStatus.FOUND, dest);
+        res.redirect(HttpStatus.FOUND, `${spaOrigin.replace(/\/+$/, "")}/login#${hash}`);
         return;
       }
 
-      return wrapSuccessResponse({
+      const wrapped = wrapSuccessResponse({
         payload: createActionResponsePayload({
           message: "Signed in with Google.",
           extraData: {
@@ -414,14 +444,9 @@ export class AuthNestController {
         }),
         requestId,
       });
+      res.status(HttpStatus.OK).json(wrapped);
     } catch (error) {
-      const spaOrigin = process.env.WEB_APP_URL?.trim() || process.env.BASE_URL?.trim();
-      if (spaOrigin && error instanceof AppError && error.code === "ACCOUNT_DEACTIVATED") {
-        const dest = `${spaOrigin.replace(/\/+$/, "")}/login?error=account_deactivated`;
-        res.redirect(HttpStatus.FOUND, dest);
-        return;
-      }
-      mapToHttpException(error, requestId);
+      sendOAuthError(error);
     }
   }
 }

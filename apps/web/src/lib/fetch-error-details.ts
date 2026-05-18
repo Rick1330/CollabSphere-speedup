@@ -1,4 +1,23 @@
 import { ApiError } from "@/api/client";
+import { DEV_CORS_TROUBLESHOOTING } from "@/lib/dev-auth-troubleshooting";
+
+function devNetworkFetchHint(): string {
+  const parts: string[] = [];
+  if (typeof window !== "undefined" && window.location.origin === "http://127.0.0.1:8080") {
+    parts.push(
+      "If DevTools → Network shows a failed OPTIONS with no Access-Control-Allow-Origin, the API on port 3001 did not answer preflight correctly — check API logs for `[api] CORS_ORIGINS`, restart `pnpm dev` after .env changes, and run `pnpm verify:cors`.",
+    );
+    parts.push(
+      "Alternatively set `VITE_USE_DEV_PROXY=true` in `.env` and restart Vite so the browser uses same-origin `/api/v1` (no cross-origin CORS).",
+    );
+  } else {
+    parts.push(DEV_CORS_TROUBLESHOOTING);
+    parts.push(
+      "In dev the UI calls the API on port 3001 by default. Confirm `pnpm dev` is running the API and try `curl http://127.0.0.1:3001/api/v1/health`.",
+    );
+  }
+  return parts.join(" ");
+}
 
 /**
  * Human-readable details for failed adapter/client requests (React Query, etc.).
@@ -21,6 +40,18 @@ export function getFetchErrorDetails(error: unknown): {
         "Sign out and sign in again — your session may have expired, or the API secret changed (JWT_ACCESS_SECRET).";
     } else if (error.status === 403) {
       hint = "You may not have permission for this action.";
+    } else if (error.status === 404) {
+      const raw = error.body;
+      const flatNotFound =
+        raw &&
+        typeof raw === "object" &&
+        "code" in raw &&
+        (raw as { code?: string }).code === "NOT_FOUND" &&
+        !("error" in raw);
+      if (flatNotFound) {
+        hint =
+          "Port 3001 may be serving the collab service instead of the Nest API. Stop all pnpm dev processes, confirm COLLAB_PORT=3002 in .env, restart pnpm dev, and curl http://127.0.0.1:3001/api/v1/health (expect JSON with data.status, not {\"code\":\"NOT_FOUND\"}).";
+      }
     } else if (error.status === 0) {
       hint = "Request timed out or was cancelled.";
     }
@@ -30,8 +61,9 @@ export function getFetchErrorDetails(error: unknown): {
   if (error instanceof TypeError && /fetch|Failed to fetch|NetworkError/i.test(error.message)) {
     return {
       message: error.message,
-      hint:
-        "In dev the UI calls the API on port 3001 by default (Vite’s `/api/v1` proxy can hang on some Windows setups). Confirm `pnpm dev` is running the API and try `curl http://127.0.0.1:3001/api/v1/health`. Start Postgres/Redis (`docker compose up -d`) if the API exits on boot. Set `VITE_USE_DEV_PROXY=true` only if you intentionally want same-origin `/api/v1` through Vite on port 8080.",
+      hint: import.meta.env.DEV
+        ? devNetworkFetchHint()
+        : "Check your network connection and that the API is reachable.",
     };
   }
 

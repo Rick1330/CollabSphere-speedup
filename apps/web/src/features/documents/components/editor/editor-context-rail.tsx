@@ -26,6 +26,7 @@ import type {
   DocumentReadiness,
   TemplateContract,
 } from "@/features/documents/template-schema";
+import type { TaskAssignee } from "@/api/adapters/tasks";
 import type { CommentFilter } from "@/features/documents/hooks/use-document-comments";
 import type { CommentNode, CommentThread } from "@/lib/mock-comments";
 
@@ -46,6 +47,8 @@ interface EditorContextRailProps {
     activeThreadId: string | null;
     canComment: boolean;
     canResolve: boolean;
+    members: TaskAssignee[];
+    membersById: Map<string, TaskAssignee>;
     onFilterChange: (f: CommentFilter) => void;
     onCreate: (body: CommentNode[]) => void;
     onReply: (threadId: string, body: CommentNode[]) => void;
@@ -195,6 +198,8 @@ export const EditorContextRail = ({
                 activeThreadId={commentData.activeThreadId}
                 canComment={commentData.canComment}
                 canResolve={commentData.canResolve}
+                members={commentData.members}
+                membersById={commentData.membersById}
                 onFilterChange={commentData.onFilterChange}
                 onCreate={commentData.onCreate}
                 onReply={commentData.onReply}

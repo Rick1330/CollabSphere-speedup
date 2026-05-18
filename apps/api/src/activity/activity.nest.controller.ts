@@ -39,18 +39,20 @@ export class ActivityNestController {
     @ReqRequestId() requestId: string,
     @Query() query: ListActivityQueryDto,
   ) {
+    const page = Math.max(1, Math.floor(Number(query.page)) || 1);
+    const pageSize = Math.min(100, Math.max(1, Math.floor(Number(query.pageSize)) || 20));
     const result = await this.activityService.listWorkspaceActivity({
       actorUserId,
       workspaceId,
-      page: query.page,
-      pageSize: query.pageSize,
+      page,
+      pageSize,
     });
     return wrapSuccessResponse({
       payload: createListResponsePayload({
         items: result.items,
         total: result.total,
         pagination: {
-          ...paginationMeta(query.page, query.pageSize, result.total),
+          ...paginationMeta(page, pageSize, result.total),
         },
       }),
       requestId,

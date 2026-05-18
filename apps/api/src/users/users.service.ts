@@ -1,8 +1,8 @@
 import { Inject, Injectable } from "@nestjs/common";
-import bcrypt from "bcryptjs";
 import { AppError, ValidationAppError } from "../common/filters/app-error.filter.js";
 import { PrismaClientProvider } from "../common/prisma/prisma-client.provider.js";
 import { apiRuntimeEnv } from "../config/api-runtime.js";
+import { executePasswordChange } from "./change-password.logic.js";
 
 @Injectable()
 export class UsersService {
@@ -80,39 +80,32 @@ export class UsersService {
   }
 
   async changePassword(userId: string, input: { currentPassword: string; newPassword: string }) {
-    const user = await this.prisma.user.findFirst({
-      where: { id: userId, deletedAt: null },
-    });
-    if (!user?.passwordHash) {
-      throw new AppError({
-        code: "OAUTH_USER_NO_PASSWORD",
-        message: "Password change is not available for this account.",
-      });
-    }
-    const ok = await bcrypt.compare(input.currentPassword, user.passwordHash);
-    if (!ok) {
-      throw new AppError({ code: "INVALID_CREDENTIALS", message: "Current password is incorrect." });
-    }
-    if (input.newPassword.length < 8) {
-      throw new ValidationAppError({
-        message: "New password must be at least 8 characters.",
-        issues: [
-          { field: "newPassword", rule: "min", message: "New password must be at least 8 characters." },
-        ],
-      });
-    }
-    const passwordHash = await bcrypt.hash(input.newPassword, apiRuntimeEnv.BCRYPT_COST);
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: {
-        passwordHash,
-        passwordChangedAt: new Date(),
+    return executePasswordChange(
+      {
+        bcryptCost: apiRuntimeEnv.BCRYPT_COST,
+        findUser: async (id) =>
+          this.prisma.user.findFirst({
+            where: { id, deletedAt: null },
+            select: { passwordHash: true },
+          }),
+        updatePasswordHash: async (id, passwordHash) => {
+          await this.prisma.user.update({
+            where: { id },
+            data: {
+              passwordHash,
+              passwordChangedAt: new Date(),
+            },
+          });
+        },
+        revokeRefreshTokens: async (id) => {
+          await this.prisma.refreshToken.updateMany({
+            where: { userId: id, revokedAt: null },
+            data: { revokedAt: new Date() },
+          });
+        },
       },
-    });
-    await this.prisma.refreshToken.updateMany({
-      where: { userId, revokedAt: null },
-      data: { revokedAt: new Date() },
-    });
-    return { message: "Password updated. Please sign in again on other devices." };
+      userId,
+      input,
+    );
   }
 }

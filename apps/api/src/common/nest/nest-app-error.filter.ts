@@ -14,6 +14,7 @@ import {
   type ErrorEnvelope,
   logApiError,
 } from "../filters/app-error.filter.js";
+import { getDefaultErrorMessage } from "../errors/error-sanitizer.js";
 import { resolveRequestId } from "../middleware/request-id.middleware.js";
 
 const errorCodeFromHttpStatus = (status: number): CanonicalErrorCode => {
@@ -42,6 +43,20 @@ const isOurErrorEnvelope = (value: unknown): value is ErrorEnvelope =>
       "code" in (value as ErrorEnvelope).error,
   );
 
+const isStructuredHttpErrorBody = (
+  value: unknown,
+): value is {
+  code: CanonicalErrorCode;
+  message?: string;
+  details?: ErrorEnvelope["error"]["details"];
+} =>
+  Boolean(
+    value &&
+      typeof value === "object" &&
+      "code" in value &&
+      typeof (value as { code: unknown }).code === "string",
+  );
+
 @Catch()
 export class NestAppErrorFilter implements ExceptionFilter {
   catch(exception: unknown, host: ArgumentsHost) {
@@ -52,6 +67,10 @@ export class NestAppErrorFilter implements ExceptionFilter {
       typeof request.requestId === "string" && request.requestId.length > 0
         ? request.requestId
         : resolveRequestId(request.get("x-request-id"));
+
+    if (response.headersSent) {
+      return;
+    }
 
     if (exception instanceof AppError) {
       const mapped = createErrorResponse({ error: exception, requestId });
@@ -78,6 +97,21 @@ export class NestAppErrorFilter implements ExceptionFilter {
           },
         };
         response.status(status).json(envelope);
+        return;
+      }
+
+      if (isStructuredHttpErrorBody(body)) {
+        const mapped = createErrorResponse({
+          error: new AppError({
+            code: body.code,
+            message: body.message ?? getDefaultErrorMessage(body.code),
+            details: body.details,
+            statusCode: status,
+          }),
+          requestId,
+        });
+        logApiError({ requestId, normalizedError: mapped.normalizedError });
+        response.status(mapped.statusCode).json(mapped.payload);
         return;
       }
 
@@ -116,16 +150,19 @@ export class NestAppErrorFilter implements ExceptionFilter {
         return;
       }
 
+      const code = errorCodeFromHttpStatus(status);
       const message =
-        typeof body === "string"
-          ? body
-          : typeof body === "object" && body !== null && "message" in body
-            ? String((body as { message: unknown }).message)
-            : exception.message;
+        code === "NOT_FOUND"
+          ? getDefaultErrorMessage("NOT_FOUND")
+          : typeof body === "string"
+            ? body
+            : typeof body === "object" && body !== null && "message" in body
+              ? String((body as { message: unknown }).message)
+              : exception.message;
 
       const mapped = createErrorResponse({
         error: new AppError({
-          code: errorCodeFromHttpStatus(status),
+          code,
           message,
           statusCode: status,
         }),

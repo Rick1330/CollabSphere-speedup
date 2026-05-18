@@ -1,7 +1,9 @@
 import { Inject, Injectable } from "@nestjs/common";
+import type { Prisma } from "@prisma/client";
 import { AppError } from "../common/filters/app-error.filter.js";
 import { PrismaClientProvider } from "../common/prisma/prisma-client.provider.js";
 import { RealtimeEventsService } from "../realtime/realtime-events.service.js";
+import { categoryTypeFilter } from "./notifications-category.js";
 
 @Injectable()
 export class NotificationsService {
@@ -26,17 +28,14 @@ export class NotificationsService {
   }) {
     const page = Math.max(1, Number(input.page) || 1);
     const pageSize = Math.min(100, Math.max(1, Number(input.pageSize) || 20));
-    const where = {
+    const categoryFilter =
+      input.category && input.category !== "all" ? categoryTypeFilter(input.category) : null;
+
+    const where: Prisma.NotificationWhereInput = {
       recipientId: input.actorUserId,
       deletedAt: null,
       ...(input.unreadOnly ? { isRead: false } : {}),
-      ...(input.category && input.category !== "all"
-        ? {
-            type: {
-              startsWith: `${input.category}.`,
-            },
-          }
-        : {}),
+      ...(categoryFilter ?? {}),
     };
     const [total, rows] = await Promise.all([
       this.prisma.notification.count({ where }),

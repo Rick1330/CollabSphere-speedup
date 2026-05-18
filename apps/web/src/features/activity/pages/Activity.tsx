@@ -7,6 +7,7 @@ import { ActivityFeed } from "@/features/activity/components/activity-feed";
 import { useSidebar } from "@/hooks/use-sidebar";
 import { useCommandPalette } from "@/hooks/use-command-palette";
 import { useWorkspaceRouteContext } from "@/hooks/use-workspace-route-context";
+import { useWorkspaceRealtime } from "@/hooks/use-workspace-realtime";
 import { useCurrentAccount } from "@/lib/auth-session";
 
 const Activity = () => {
@@ -14,6 +15,7 @@ const Activity = () => {
   const palette = useCommandPalette();
   const account = useCurrentAccount();
   const { workspaceId, sidebar, isLoading, isError, refetch } = useWorkspaceRouteContext();
+  useWorkspaceRealtime(workspaceId);
 
   useEffect(() => {
     if (sidebar?.name) {

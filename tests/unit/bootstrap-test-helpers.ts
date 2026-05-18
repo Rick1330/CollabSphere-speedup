@@ -257,12 +257,22 @@ type SpawnBootstrapOptions = {
 export const spawnBootstrap = ({ entryPath, cwd, envOverrides }: SpawnBootstrapOptions) => {
   const useTsx = entryPath.endsWith(".ts");
   const command = process.execPath;
-  const args = useTsx ? [tsxCli, entryPath] : [entryPath];
+  const tsconfigPath =
+    entryPath.includes(`${path.sep}apps${path.sep}api${path.sep}`) ||
+    entryPath.includes("/apps/api/")
+      ? path.join(repoRoot, "apps", "api", "tsconfig.json")
+      : undefined;
+  const args = useTsx
+    ? tsconfigPath
+      ? [tsxCli, "--tsconfig", tsconfigPath, entryPath]
+      : [tsxCli, entryPath]
+    : [entryPath];
 
   return spawn(command, args, {
     cwd,
     env: {
       ...process.env,
+      SKIP_REDIS_IO_ADAPTER: "1",
       ...envOverrides,
     },
     stdio: ["ignore", "pipe", "pipe"],

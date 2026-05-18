@@ -6,7 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertCircle, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { SettingsSection } from "./settings-section";
-import { fetchCurrentUser, updateProfile } from "@/api/adapters/settings";
+import { applyUserProfileToSession, fetchCurrentUser, updateProfile } from "@/api/adapters/settings";
 import { getAvatarColor, getInitials } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -41,6 +41,7 @@ export const ProfileForm = () => {
     mutationFn: (values: ProfileValues) => updateProfile({ fullName: values.fullName.trim(), bio: values.bio?.trim() || undefined }),
     onSuccess: (next, values) => {
       queryClient.setQueryData(["user", "me"], next);
+      applyUserProfileToSession(next);
       toast.success("Profile updated");
       form.reset({ fullName: values.fullName, bio: values.bio ?? "" });
     },
@@ -48,6 +49,8 @@ export const ProfileForm = () => {
   });
 
   const bioValue = form.watch("bio") ?? "";
+  const watchedFullName = form.watch("fullName");
+  const displayName = (watchedFullName?.trim() || user?.fullName) ?? "";
   const avatarBg = useMemo(() => (user ? getAvatarColor(user.id) : "#0D9488"), [user]);
 
   return (
@@ -74,10 +77,10 @@ export const ProfileForm = () => {
               style={{ background: avatarBg }}
               aria-hidden="true"
             >
-              {getInitials(user.fullName, 2)}
+              {getInitials(displayName, 2)}
             </div>
             <div className="min-w-0">
-              <p className="text-sm font-semibold text-stone-900 truncate">{user.fullName}</p>
+              <p className="text-sm font-semibold text-stone-900 truncate">{displayName}</p>
               <p className="font-mono text-[10px] text-stone-400 tracking-wider mt-0.5">
                 AVATAR UPLOAD COMING IN A FUTURE UPDATE
               </p>

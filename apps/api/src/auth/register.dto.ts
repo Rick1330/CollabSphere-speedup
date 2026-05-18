@@ -1,4 +1,5 @@
-import { AppError, ValidationAppError } from "../common/filters/app-error.filter.js";
+import { assertPasswordStrength } from "../common/auth/password-policy.js";
+import { ValidationAppError } from "../common/filters/app-error.filter.js";
 
 export type RegisterInput = {
   fullName: string;
@@ -11,9 +12,6 @@ type ValidationIssue = {
   message: string;
   rule: string;
 };
-
-const minPasswordLength = 8;
-const maxPasswordLength = 72;
 
 export const normalizeEmail = (email: string) => email.trim().toLowerCase();
 
@@ -44,24 +42,6 @@ const isValidEmailShape = (email: string) => {
   if (!hasValidEmailLength(email)) return false;
   const parts = splitEmail(email);
   return parts !== null && hasValidDomainShape(parts.domain);
-};
-
-const assertPasswordStrength = (password: string) => {
-  const passwordByteLength = Buffer.byteLength(password, "utf8");
-  const hasUpper = /[A-Z]/.test(password);
-  const hasLower = /[a-z]/.test(password);
-  const hasDigit = /[0-9]/.test(password);
-  const hasSpecial = /[^A-Za-z0-9]/.test(password);
-  const isPasswordLengthValid =
-    password.length >= minPasswordLength && passwordByteLength <= maxPasswordLength;
-  const hasRequiredCharacterSets = hasUpper && hasLower && hasDigit && hasSpecial;
-
-  if (!isPasswordLengthValid || !hasRequiredCharacterSets) {
-    throw new AppError({
-      code: "PASSWORD_TOO_WEAK",
-      message: "Password does not meet complexity requirements",
-    });
-  }
 };
 
 const validateFullName = (fullName: string): ValidationIssue | null => {

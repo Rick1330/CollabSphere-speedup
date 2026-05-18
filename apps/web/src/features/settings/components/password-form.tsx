@@ -8,18 +8,13 @@ import { toast } from "sonner";
 import { SettingsSection } from "./settings-section";
 import { changePassword, fetchCurrentUser } from "@/api/adapters/settings";
 import { getPasswordStrength, PasswordStrength } from "@/features/auth/components/password-strength";
+import { newPasswordZodSchema } from "@/lib/auth-password-policy";
 import { cn } from "@/lib/utils";
 
 const passwordSchema = z
   .object({
     currentPassword: z.string().min(1, "Current password is required"),
-    newPassword: z
-      .string()
-      .min(8, "At least 8 characters")
-      .regex(/[a-z]/, "Needs lowercase")
-      .regex(/[A-Z]/, "Needs uppercase")
-      .regex(/\d/, "Needs a number")
-      .regex(/[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/, "Needs special character"),
+    newPassword: newPasswordZodSchema,
     confirmPassword: z.string().min(1, "Confirm your password"),
   })
   .refine((d) => d.newPassword === d.confirmPassword, {
@@ -53,8 +48,11 @@ export const PasswordForm = () => {
   const mutation = useMutation({
     mutationFn: (v: PasswordValues) =>
       changePassword({ currentPassword: v.currentPassword, newPassword: v.newPassword }),
-    onSuccess: () => {
-      toast.success("Password updated");
+    onSuccess: (message) => {
+      toast.success(
+        message ||
+          "Password updated. Other devices will need to sign in again with your new password.",
+      );
       form.reset();
       setServerError(null);
     },
@@ -62,9 +60,27 @@ export const PasswordForm = () => {
       const code = (err as { code?: string })?.code;
       if (code === "INVALID_CREDENTIALS") {
         setServerError("Current password is incorrect.");
-      } else {
-        setServerError("Failed to update password.");
+        return;
       }
+      if (code === "OAUTH_USER_NO_PASSWORD") {
+        setServerError("Your account uses Google sign-in. Change your password in Google.");
+        return;
+      }
+      if (code === "PASSWORD_SAME_AS_CURRENT") {
+        form.setError("newPassword", {
+          message: "New password must differ from your current password.",
+        });
+        setServerError(null);
+        return;
+      }
+      if (code === "VALIDATION_ERROR" || code === "PASSWORD_TOO_WEAK") {
+        form.setError("newPassword", {
+          message: "Password does not meet complexity requirements.",
+        });
+        setServerError(null);
+        return;
+      }
+      setServerError("Failed to update password.");
     },
   });
 
@@ -102,7 +118,6 @@ export const PasswordForm = () => {
             </div>
           )}
 
-          {/* Current */}
           <PasswordField
             id="currentPassword"
             label="Current password"
@@ -111,7 +126,6 @@ export const PasswordForm = () => {
             error={form.formState.errors.currentPassword?.message}
           />
 
-          {/* New */}
           <div>
             <PasswordField
               id="newPassword"
@@ -120,14 +134,17 @@ export const PasswordForm = () => {
               register={form.register("newPassword")}
               error={form.formState.errors.newPassword?.message}
             />
-            {watchedNew.length > 0 && (
+            {watchedNew.length > 0 ? (
               <div className="-mt-1">
                 <PasswordStrength password={watchedNew} />
               </div>
+            ) : (
+              <p className="mt-1.5 text-[12px] text-stone-400">
+                At least 8 characters with uppercase, lowercase, a number, and a special character.
+              </p>
             )}
           </div>
 
-          {/* Confirm */}
           <PasswordField
             id="confirmPassword"
             label="Confirm new password"

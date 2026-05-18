@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { MessageSquarePlus, X } from "lucide-react";
+import type { TaskAssignee } from "@/api/adapters/tasks";
 import { cn } from "@/lib/utils";
 import type { CommentNode, CommentThread } from "@/lib/mock-comments";
 import type { CommentFilter } from "@/features/documents/hooks/use-document-comments";
@@ -22,6 +23,8 @@ interface DocumentCommentsRailProps {
   onSelectThread: (threadId: string | null) => void;
   onJumpToAnchor: (threadId: string) => void;
   onClose?: () => void;
+  members: TaskAssignee[];
+  membersById: Map<string, TaskAssignee>;
 }
 
 export const DocumentCommentsRail = ({
@@ -39,6 +42,8 @@ export const DocumentCommentsRail = ({
   onSelectThread,
   onJumpToAnchor,
   onClose,
+  members,
+  membersById,
 }: DocumentCommentsRailProps) => {
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -93,6 +98,7 @@ export const DocumentCommentsRail = ({
           <DocumentCommentComposer
             placeholder="Start a general document discussion…"
             submitLabel="Post"
+            members={members}
             onSubmit={onCreate}
           />
         </div>
@@ -110,6 +116,8 @@ export const DocumentCommentsRail = ({
                 isActive={t.id === activeThreadId}
                 canResolve={canResolve}
                 canReply={canComment}
+                members={members}
+                membersById={membersById}
                 onSelect={() => onSelectThread(t.id === activeThreadId ? null : t.id)}
                 onJumpToAnchor={t.anchor ? () => onJumpToAnchor(t.id) : undefined}
                 onReply={(body) => onReply(t.id, body)}

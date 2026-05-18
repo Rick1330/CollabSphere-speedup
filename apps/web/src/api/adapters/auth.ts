@@ -214,13 +214,19 @@ export async function getCollabToken(input: {
   }
 }
 
-export async function logout(): Promise<void> {
+/** Best-effort server logout (clears refresh cookie on the API origin). */
+export async function logoutApi(): Promise<void> {
   try {
     await request<unknown>("/auth/logout", {
       method: "POST",
     });
   } catch {
-    // Sign out locally even if server logout fails.
+    // Ignore — local teardown still proceeds.
   }
+}
+
+/** @deprecated Prefer `teardownAuthSession(queryClient)` from `@/lib/auth-teardown`. */
+export async function logout(): Promise<void> {
+  await logoutApi();
   authSession.signOut();
 }

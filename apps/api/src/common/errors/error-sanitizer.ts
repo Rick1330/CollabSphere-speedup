@@ -80,6 +80,7 @@ const defaultErrorMessages: Record<CanonicalErrorCode, string> = {
   EXPORT_JOB_NOT_FOUND: "Export job not found",
   LINK_NOT_FOUND: "Link not found",
   TARGET_NOT_FOUND: "Target not found",
+  CONFLICT: "Resource already exists",
   EMAIL_ALREADY_EXISTS: "Email already exists",
   ACCOUNT_EXISTS_LOCAL: "Account exists with local auth",
   ACCOUNT_EXISTS_OAUTH: "Account exists with OAuth provider",

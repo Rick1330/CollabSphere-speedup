@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Send } from "lucide-react";
+import type { TaskAssignee } from "@/api/adapters/tasks";
 import { cn } from "@/lib/utils";
 import type { CommentNode } from "@/lib/mock-comments";
 import { DocumentMentionAutocomplete } from "./document-mention-autocomplete";
@@ -10,6 +11,7 @@ interface DocumentCommentComposerProps {
   autoFocus?: boolean;
   disabled?: boolean;
   size?: "sm" | "md";
+  members?: TaskAssignee[];
   onSubmit: (body: CommentNode[]) => void;
   onCancel?: () => void;
 }
@@ -30,6 +32,7 @@ export const DocumentCommentComposer = ({
   autoFocus,
   disabled,
   size = "md",
+  members = [],
   onSubmit,
   onCancel,
 }: DocumentCommentComposerProps) => {
@@ -80,7 +83,7 @@ export const DocumentCommentComposer = ({
   }, [updateEmpty, detectMentionTrigger]);
 
   const insertMention = useCallback(
-    (member: { id: string; fullName: string; color: string }) => {
+    (member: TaskAssignee) => {
       const sel = globalThis.getSelection();
       if (!sel || sel.rangeCount === 0 || !editableRef.current) return;
       const range = sel.getRangeAt(0);
@@ -267,9 +270,10 @@ export const DocumentCommentComposer = ({
         </div>
       </div>
 
-      {mentionQuery !== null && (
+      {mentionQuery !== null && members.length > 0 && (
         <DocumentMentionAutocomplete
           query={mentionQuery}
+          members={members}
           anchorRect={mentionRect}
           onSelect={insertMention}
           onClose={() => setMentionQuery(null)}

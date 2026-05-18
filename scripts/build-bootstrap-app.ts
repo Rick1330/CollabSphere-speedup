@@ -345,6 +345,30 @@ const collectSharedRuntimeEntryPoints = ({
   return entryPoints;
 };
 
+const toSharedSourceEntryPoint = (importSubpath: string) =>
+  path.join(repoRoot, "packages", "shared", "src", importSubpath.replace(/\.js$/, ".ts"));
+
+const collectMonorepoSharedSourceEntryPoints = async ({
+  directory,
+}: {
+  directory: string;
+}): Promise<string[]> => {
+  const javaScriptFiles = await collectDistJavaScriptFiles({ directory });
+  const entryPoints = new Set<string>();
+
+  for (const filePath of javaScriptFiles) {
+    const sourceCode = await readFile(filePath, "utf8");
+    for (const match of sourceCode.matchAll(monorepoSharedImportPattern)) {
+      const sourceTsPath = toSharedSourceEntryPoint(match[2]);
+      if (await fileExists({ filePath: sourceTsPath })) {
+        entryPoints.add(sourceTsPath);
+      }
+    }
+  }
+
+  return [...entryPoints];
+};
+
 const collectDistJavaScriptFiles = async ({
   directory,
 }: {
@@ -511,12 +535,24 @@ const main = async () => {
       needsSharedEnv,
       needsSharedBootstrap,
     });
-    if (needsSharedEnv || needsSharedBootstrap) {
+    const discoveredSharedEntryPoints = await collectMonorepoSharedSourceEntryPoints({
+      directory: distDir,
+    });
+
+    if (
+      needsSharedEnv ||
+      needsSharedBootstrap ||
+      discoveredSharedEntryPoints.length > 0
+    ) {
       const sharedDistDir = path.join(distDir, "_shared");
       const distNodeModulesDir = path.join(distDir, "node_modules");
       await mkdir(sharedDistDir, { recursive: true });
       const mergedSharedEntryPoints = Array.from(
-        new Set([...sharedRuntimeEntryPoints, ...knownSharedEntryPoints]),
+        new Set([
+          ...sharedRuntimeEntryPoints,
+          ...knownSharedEntryPoints,
+          ...discoveredSharedEntryPoints,
+        ]),
       );
 
       await stageSharedRuntimeArtifacts({

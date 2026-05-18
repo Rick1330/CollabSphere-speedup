@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { Prisma } from "@prisma/client";
 import {
   AppError,
   createErrorResponse,
@@ -149,6 +150,36 @@ test("unknown unexpected errors fall back to INTERNAL_ERROR", () => {
       timestamp: "2026-04-24T00:00:00.000Z",
     },
   });
+});
+
+test("prisma unique constraint violations map to CONFLICT", () => {
+  const { statusCode, payload } = createErrorResponse({
+    error: new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
+      code: "P2002",
+      clientVersion: "6.7.0",
+    }),
+    requestId: "req_conflict",
+    timestamp: "2026-04-24T00:00:00.000Z",
+  });
+
+  assert.equal(statusCode, 409);
+  assert.equal(payload.error.code, "CONFLICT");
+  assert.equal(payload.error.message, "Resource already exists");
+});
+
+test("prisma record-not-found errors map to NOT_FOUND", () => {
+  const { statusCode, payload } = createErrorResponse({
+    error: new Prisma.PrismaClientKnownRequestError("Record not found", {
+      code: "P2025",
+      clientVersion: "6.7.0",
+    }),
+    requestId: "req_prisma_not_found",
+    timestamp: "2026-04-24T00:00:00.000Z",
+  });
+
+  assert.equal(statusCode, 404);
+  assert.equal(payload.error.code, "NOT_FOUND");
+  assert.equal(payload.error.message, "Resource not found");
 });
 
 test("error response headers are allowlisted to Retry-After and WWW-Authenticate", () => {

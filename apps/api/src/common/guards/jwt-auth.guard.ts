@@ -17,6 +17,11 @@ export class JwtAuthGuard implements CanActivate {
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
+    const request = context.switchToHttp().getRequest<Request>();
+    if (request.method === "OPTIONS") {
+      return true;
+    }
+
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
       context.getHandler(),
       context.getClass(),
@@ -24,8 +29,6 @@ export class JwtAuthGuard implements CanActivate {
     if (isPublic) {
       return true;
     }
-
-    const request = context.switchToHttp().getRequest<Request>();
 
     if (legacyHeaderEnv()) {
       const legacy = request.headers["x-user-id"];

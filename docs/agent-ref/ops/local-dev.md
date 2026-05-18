@@ -111,7 +111,18 @@ If the browser shows **404** on `POST http://127.0.0.1:3001/api/v1/workspaces` b
 3. Check which process owns the port: `netstat -ano | findstr :3001` (Windows) and restart from repo root: `pnpm dev`.
 4. Open the SPA at **`http://127.0.0.1:8080`** (not `localhost`) so cookies match `.env` (`API_BASE_URL`, `WEB_APP_URL`).
 
-Activity feed **500** on `GET .../activity` usually means migrations are missing — run `pnpm prisma migrate deploy` from repo root.
+### Dashboard activity **500** or **503** on `GET .../workspaces/:id/activity`
+
+The dashboard loads recent activity from the first few workspaces.
+
+**Missing table:** If `activity_events` is missing, the API returns **503** with a message to run migrations (older builds returned **500**).
+
+**`PrismaClientValidationError` on `take` (string):** Query params arrive as strings when the global `ValidationPipe` is not enabled. The activity controller/service coerce `page` / `pageSize` to numbers before calling Prisma. If you still see this after pulling latest, restart `pnpm dev`.
+
+1. Ensure Postgres is up: `docker compose up -d`
+2. Apply migrations: `pnpm prisma migrate deploy` (from repo root; creates `activity_events` via `20260515130000_add_activity_events`)
+3. Optional demo rows: `pnpm demo:seed-runtime` (includes sample `activity_events` for Project Alpha / Thesis Lab)
+4. Restart `pnpm dev` and reload `/dashboard` — Network tab should show **200** on `/activity` requests (empty list is OK before seeding)
 
 ## Validation or Testing Notes
 - Verify API and collab services can connect to Postgres and Redis before running tests.
@@ -121,6 +132,63 @@ Activity feed **500** on `GET .../activity` usually means migrations are missing
 ### Demo logins (database-backed)
 
 Seeded users are **not** created automatically. After Postgres is up and migrations have been applied, run **`pnpm demo:seed-runtime`** from the repo root. Then sign in with **`elshaday@collabsphere.app` / `Demo1234!`** (global admin) or **`kidist@collabsphere.app` / `Demo1234!`**. Optional Phase 2 fixtures: **`pnpm phase2:seed-runtime`** → **`phase2.tester@collabsphere.local` / `Phase2!Test123`**, **`phase2.admin@collabsphere.local` / `Phase2!Admin123`**. See `.env.example` footer for the same list.
+
+## Authentication (email + Google OAuth)
+
+### Port layout (do not merge these)
+
+| Port | Service | Notes |
+| --- | --- | --- |
+| **8080** | Vite (`apps/web`) | Open the UI here: `http://127.0.0.1:8080` |
+| **3001** | Nest API | REST + OAuth callback + Socket.IO |
+| **3002** | Collab (Hocuspocus) | Set via **`COLLAB_PORT`** — never bind collab to root **`PORT`** (3001) |
+
+`scripts/dev.ts` starts **API first**, waits for **`GET /api/v1/health`**, then web/collab/worker. Vite uses **`strictPort: true`** so it fails instead of silently moving to **8081** when **8080** is taken.
+
+### One `pnpm dev` only
+
+If `pnpm dev` prints **`PORT 3001 is already in use. Stop it with: taskkill /PID …`**:
+
+- An API is **already running** (often from another terminal). Either use **`http://127.0.0.1:8080`** without starting dev again, or kill the PID and run **one** `pnpm dev --skip-compose`.
+- Never run two `pnpm dev` sessions — the second can pass a port check then crash with **`EADDRINUSE`**, leaving Vite up while the API is dead (login **500**, OAuth **`chrome-error://`**).
+
+### Email / password login
+
+1. Seed: `pnpm demo:seed-runtime` (after `pnpm prisma migrate deploy`).
+2. Open **`http://127.0.0.1:8080/login`**.
+3. Use demo credentials (also shown on the login form in dev).
+4. Default REST base: direct **`http://127.0.0.1:3001/api/v1`** unless **`VITE_USE_DEV_PROXY=true`** (then same-origin **`/api/v1`** on 8080).
+
+### Google OAuth flow
+
+1. **Start URL** (browser navigates here): **`http://127.0.0.1:3001/api/v1/auth/google`** — implemented in `resolveOAuthStartUrl()` / `oauth-button.tsx` (not the Vite proxy path).
+2. **Redirect URI** (Google Cloud Console must match exactly): **`http://127.0.0.1:3001/api/v1/auth/google/callback`** — logged at API startup when `GOOGLE_CLIENT_ID` is set.
+3. After Google, the API redirects to **`WEB_APP_URL`** (default `http://127.0.0.1:8080`) with tokens in **`/login#oauth=...`**. The SPA reads the hash in `Login.tsx` and calls **`GET /users/me`** to verify the API is reachable.
+4. **Do not** bookmark or refresh a long `.../google/callback?code=...` URL in the address bar; if the API was down you get **`chrome-error://chromewebdata/`** and a misleading “Unsafe attempt to load URL” console message.
+
+### OAuth / login failure quick checks
+
+| Symptom | Likely cause | Fix |
+| --- | --- | --- |
+| `chrome-error://` on callback | API not listening on **3001** | Restart single `pnpm dev`; `curl http://127.0.0.1:3001/api/v1/health` |
+| Login **500** on `POST …/auth/login` | API crashed or proxy to dead process | Same as above |
+| `PORT 3001 is already in use` | Stale `node` on 3001 | `taskkill /PID <pid> /F` or use existing stack |
+| Vite on **8081** | **8080** busy | Free **8080**; do not use **8081** if `WEB_APP_URL` is **8080** |
+| `INVALID_CREDENTIALS` | DB not seeded | `pnpm demo:seed-runtime` |
+| `?error=OAUTH_STATE_MISMATCH` on `/login` | Stale OAuth attempt | Click **Continue with Google** again from `/login` |
+
+### Key implementation files
+
+| Area | File |
+| --- | --- |
+| OAuth callback (no double response) | `apps/api/src/auth/auth.nest.controller.ts` |
+| OAuth start URL | `apps/web/src/api/client/index.ts`, `oauth-button.tsx` |
+| Login page / hash handling | `apps/web/src/features/auth/pages/Login.tsx` |
+| Dev API health banner | `apps/web/src/lib/dev-auth-troubleshooting.ts` |
+| Collab port | `apps/collab/src/dev.ts` (`COLLAB_PORT` only) |
+| Dev orchestration | `scripts/dev.ts` |
+| CSRF cookie hydration | `apps/web/src/lib/auth-session.ts` |
+| `authSession` in API client | `apps/web/src/app/providers/app-providers.tsx` |
 
 ## Related Files / Domains
 - `docs/agent-ref/ops/env-vars.md`

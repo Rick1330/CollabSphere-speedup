@@ -49,7 +49,7 @@ export class FoldersService {
     let depth = 1;
     let cursor: string | null = folderId;
     while (cursor) {
-      const row = await this.prisma.folder.findFirst({
+      const row: { parentId: string | null } | null = await this.prisma.folder.findFirst({
         where: { id: cursor, workspaceId, deletedAt: null },
         select: { parentId: true },
       });
@@ -135,7 +135,7 @@ export class FoldersService {
       }
       if (seen.has(cursor)) break;
       seen.add(cursor);
-      const row = await this.prisma.folder.findFirst({
+      const row: { parentId: string | null } | null = await this.prisma.folder.findFirst({
         where: { id: cursor, workspaceId, deletedAt: null },
         select: { parentId: true },
       });

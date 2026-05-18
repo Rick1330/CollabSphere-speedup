@@ -58,9 +58,9 @@ function groupEventsByDate(events: ActivityEvent[]): Map<string, ActivityEvent[]
 
 export function ActivityFeed({ workspaceId }: ActivityFeedProps) {
   const [page, setPage] = useState(1);
-  const [category, setCategory] = useState<"all" | "tasks" | "documents" | "members">(
-    "all",
-  );
+  const [category, setCategory] = useState<
+    "all" | "tasks" | "documents" | "comments" | "members"
+  >("all");
   const [query, setQuery] = useState("");
 
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
@@ -88,6 +88,7 @@ export function ActivityFeed({ workspaceId }: ActivityFeedProps) {
         category === "all" ||
         (category === "tasks" && event.eventKey.startsWith("task.")) ||
         (category === "documents" && event.eventKey.startsWith("document.")) ||
+        (category === "comments" && event.eventKey.startsWith("comment.")) ||
         (category === "members" && event.eventKey.includes("member"));
       if (!inCategory) return false;
       if (!normalizedQuery) return true;
@@ -135,6 +136,7 @@ export function ActivityFeed({ workspaceId }: ActivityFeedProps) {
             ["all", "All"],
             ["tasks", "Tasks"],
             ["documents", "Documents"],
+            ["comments", "Comments"],
             ["members", "Members"],
           ].map(([value, label]) => (
             <button

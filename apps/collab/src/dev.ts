@@ -10,8 +10,10 @@ const runtimeEnv = validateServiceEnv({
 });
 
 const host = process.env.HOST ?? "127.0.0.1";
+/** Never use root `PORT` (API 3001) — collab must stay on `COLLAB_PORT` / default 3002. */
 const port = parseServicePort({
   service: "collab",
+  value: process.env.COLLAB_PORT,
   fallback: 3002,
 });
 

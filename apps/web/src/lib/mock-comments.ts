@@ -21,9 +21,16 @@ export interface CommentTextNode {
 }
 export type CommentNode = CommentMentionNode | CommentTextNode;
 
+export interface CommentAuthor {
+  id: string | null;
+  fullName: string;
+  avatarUrl: string | null;
+}
+
 export interface CommentReply {
   id: string;
-  authorId: string;
+  authorId: string | null;
+  author: CommentAuthor;
   body: CommentNode[];
   createdAt: string;
 }
@@ -33,7 +40,8 @@ export interface CommentThread {
   documentId: string;
   // null = general document discussion (not anchored to a text range)
   anchor: { snippet: string; status: "ok" | "changed" } | null;
-  authorId: string;
+  authorId: string | null;
+  author: CommentAuthor;
   body: CommentNode[];
   createdAt: string;
   resolved: boolean;
@@ -54,12 +62,43 @@ export const WORKSPACE_MEMBERS: WorkspaceMember[] = [
 export const findMember = (id: string): WorkspaceMember | undefined =>
   WORKSPACE_MEMBERS.find((m) => m.id === id);
 
+/** Build author for mock seed threads only. */
+export const mockAuthorFromId = (id: string): CommentAuthor => {
+  const member = findMember(id);
+  return {
+    id,
+    fullName: member?.fullName ?? "Unknown user",
+    avatarUrl: null,
+  };
+};
+
+type SeedReply = {
+  id: string;
+  authorId: string;
+  body: CommentNode[];
+  createdAt: string;
+};
+
+type SeedThread = Omit<CommentThread, "author" | "replies"> & {
+  authorId: string;
+  replies: SeedReply[];
+};
+
+const enrichSeedThread = (thread: SeedThread): CommentThread => ({
+  ...thread,
+  author: mockAuthorFromId(thread.authorId),
+  replies: thread.replies.map((reply) => ({
+    ...reply,
+    author: mockAuthorFromId(reply.authorId),
+  })),
+});
+
 const minsAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
 const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString();
 const daysAgo = (d: number) => new Date(Date.now() - d * 86_400_000).toISOString();
 
 // Per-document seed threads. Documents not listed start with no threads.
-export const SEED_THREADS_BY_DOCUMENT: Record<string, CommentThread[]> = {
+const RAW_SEED_THREADS_BY_DOCUMENT: Record<string, SeedThread[]> = {
   "d-roadmap": [
     {
       id: "t-1",
@@ -151,3 +190,10 @@ export const SEED_THREADS_BY_DOCUMENT: Record<string, CommentThread[]> = {
     },
   ],
 };
+
+export const SEED_THREADS_BY_DOCUMENT: Record<string, CommentThread[]> = Object.fromEntries(
+  Object.entries(RAW_SEED_THREADS_BY_DOCUMENT).map(([documentId, threads]) => [
+    documentId,
+    threads.map(enrichSeedThread),
+  ]),
+);

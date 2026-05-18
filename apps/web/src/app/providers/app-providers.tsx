@@ -18,6 +18,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { useThemePreference } from "@/hooks/use-theme-preference";
 import { configureApiClient, resolveConfiguredApiBaseUrl } from "@/api/client";
 import { authSession, isAuthFailureSuppressed } from "@/lib/auth-session";
+import { teardownAuthSession } from "@/lib/auth-teardown";
+import { logDevSessionContext } from "@/lib/dev-auth-troubleshooting";
 
 /** Mount-only component so the theme hook runs once at the root. */
 function ThemeListener() {
@@ -31,6 +33,7 @@ function ApiClientAuthBridge({ queryClient }: { queryClient: QueryClient }) {
   useLayoutEffect(() => {
     // Dev note: if OAuth "works on second try", align the web app URL host with the API
     // (e.g. both `127.0.0.1` or both `localhost`) so refresh/session cookies stay on one origin.
+    logDevSessionContext();
     configureApiClient({
       baseUrl: resolveConfiguredApiBaseUrl(),
       getAuthToken: () => authSession.getAccessToken(),
@@ -46,12 +49,13 @@ function ApiClientAuthBridge({ queryClient }: { queryClient: QueryClient }) {
             return;
           }
         }
-        authSession.signOut();
-        queryClient.clear();
-        if (typeof window === "undefined") return;
-        const path = window.location.pathname;
-        const next = encodeURIComponent(window.location.pathname + window.location.search);
-        void navigate(`/login?next=${next}`, { replace: true });
+        void (async () => {
+          await teardownAuthSession(queryClient, { callApiLogout: true });
+          if (typeof window === "undefined") return;
+          const next = encodeURIComponent(window.location.pathname + window.location.search);
+          void navigate(`/login?next=${next}`, { replace: true });
+        })();
+        return;
       },
     });
   }, [navigate, queryClient]);

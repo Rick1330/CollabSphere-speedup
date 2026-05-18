@@ -10,7 +10,9 @@ import { AuthErrorBanner } from "./auth-error-banner";
 import { AuthDivider } from "./auth-divider";
 import { OAuthButton } from "./oauth-button";
 import { login, AuthError } from "@/api/adapters/auth";
-import { listMineWorkspaceRows } from "@/api/adapters/workspaces";
+import { ApiError } from "@/api/client";
+import { DEV_API_DOWN_MESSAGE, DEV_DEMO_LOGIN_HINT } from "@/lib/dev-auth-troubleshooting";
+import { resetAuthQueryCache, teardownAuthSession } from "@/lib/auth-teardown";
 
 const loginSchema = z.object({
   email: z.string().min(1, "Email is required").email("Invalid email"),
@@ -27,19 +29,9 @@ interface ServerError {
   message: string;
 }
 
-/** First workspace from API, else dashboard (IDs are DB UUIDs — not mock slugs). */
-export async function postLoginPath(): Promise<string> {
-  try {
-    const rows = await listMineWorkspaceRows();
-    const first = rows[0]?.workspace?.id;
-    if (first) return `/w/${first}`;
-  } catch {
-    /* fall through */
-  }
-  return "/dashboard";
-}
+import { postLoginPath } from "@/features/auth/post-login-path";
 
-export const LoginForm = () => {
+export const LoginForm = ({ apiDown = false }: { apiDown?: boolean }) => {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const queryClient = useQueryClient();
@@ -60,7 +52,25 @@ export const LoginForm = () => {
   const form = useForm<LoginValues>({
     resolver: zodResolver(loginSchema),
     defaultValues: { email: "", password: "" },
+    mode: "onTouched",
   });
+
+  /** Browser autofill does not update react-hook-form state; sync on mount. */
+  useEffect(() => {
+    const syncAutofill = () => {
+      const emailEl = document.getElementById("email") as HTMLInputElement | null;
+      const passwordEl = document.getElementById("password") as HTMLInputElement | null;
+      if (emailEl?.value) {
+        form.setValue("email", emailEl.value, { shouldValidate: true, shouldDirty: true });
+      }
+      if (passwordEl?.value) {
+        form.setValue("password", passwordEl.value, { shouldValidate: true, shouldDirty: true });
+      }
+    };
+    syncAutofill();
+    const timer = window.setTimeout(syncAutofill, 150);
+    return () => window.clearTimeout(timer);
+  }, [form]);
 
   const watchedEmail = form.watch("email");
   const watchedPassword = form.watch("password");
@@ -75,15 +85,18 @@ export const LoginForm = () => {
   const onSubmit = async (values: LoginValues) => {
     setServerError(null);
     try {
-      const session = await login({ email: values.email, password: values.password });
-      // Invalidate any cached "current user" queries so guards/profile re-resolve.
-      queryClient.invalidateQueries({ queryKey: ["current-user"] });
-      queryClient.invalidateQueries({ queryKey: ["user", "me"] });
+      await teardownAuthSession(queryClient, { callApiLogout: false });
+      await login({ email: values.email, password: values.password });
+      await resetAuthQueryCache(queryClient);
 
       const next = params.get("next");
       const destination = next ? decodeURIComponent(next) : await postLoginPath();
       navigate(destination, { replace: true });
     } catch (err) {
+      if (err instanceof ApiError && (err.status === 0 || err.status >= 500)) {
+        setServerError({ type: "error", message: DEV_API_DOWN_MESSAGE });
+        return;
+      }
       if (err instanceof AuthError) {
         if (err.code === "EMAIL_NOT_VERIFIED") {
           setServerError({ type: "warning", message: err.message });
@@ -113,6 +126,11 @@ export const LoginForm = () => {
     <div>
       <h1 className="text-xl font-bold tracking-tight" style={{ color: "var(--cs-text-headline)" }}>Sign in</h1>
       <p className="text-sm mt-1.5" style={{ color: "var(--cs-text-muted)" }}>Enter your credentials to access your workspace</p>
+      {import.meta.env.DEV ? (
+        <p className="text-xs mt-2" style={{ color: "var(--cs-text-faint)" }}>
+          {DEV_DEMO_LOGIN_HINT}
+        </p>
+      ) : null}
 
       <AnimatePresence>
         {serverError && (

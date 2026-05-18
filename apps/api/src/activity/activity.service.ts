@@ -15,6 +15,9 @@ export class ActivityService {
     page: number;
     pageSize: number;
   }) {
+    const page = Math.max(1, Math.floor(Number(input.page)) || 1);
+    const pageSize = Math.min(100, Math.max(1, Math.floor(Number(input.pageSize)) || 20));
+
     if (!isDatabaseUuidParam(input.workspaceId)) {
       throw new ValidationAppError({
         issues: [
@@ -61,17 +64,18 @@ export class ActivityService {
         this.prisma.activityEvent.findMany({
           where: { workspaceId: input.workspaceId },
           orderBy: { createdAt: "desc" },
-          skip: (input.page - 1) * input.pageSize,
-          take: input.pageSize,
+          skip: (page - 1) * pageSize,
+          take: pageSize,
         }),
       ]);
       return { items: items.map(toActivityEventListItem), total };
     } catch (err) {
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2021") {
         throw new AppError({
-          code: "INTERNAL_ERROR",
+          code: "SERVICE_UNAVAILABLE",
+          statusCode: 503,
           message:
-            "Activity history is unavailable until database migrations are applied (missing activity_events table). Run `pnpm exec prisma migrate deploy` for the target database.",
+            "Activity history is unavailable until database migrations are applied (missing activity_events table). Run `pnpm prisma migrate deploy` from the repo root.",
         });
       }
       throw err;

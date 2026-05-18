@@ -14,6 +14,7 @@ import {
   DOCUMENT_STATUSES,
   DocumentStatusEnum,
   ERROR_CODES,
+  ErrorCodes,
   EXTERNAL_DEPENDENCY_ERROR_CODES,
   FILE_STATUSES,
   FileStatusEnum,
@@ -22,11 +23,14 @@ import {
   INTERNAL_ERROR_CODES,
   INVITATION_STATUSES,
   InvitationStatusEnum,
+  JobTypes,
   NOT_FOUND_ERROR_CODES,
+  Queues,
   RATE_LIMIT_ERROR_CODES,
   RESOURCE_TYPES,
   ResourceTypeEnum,
   ROLE_LEVELS,
+  ServerEvents,
   STORAGE_PROVIDERS,
   StorageProviderEnum,
   TASK_PRIORITIES,
@@ -41,6 +45,7 @@ import {
   WorkspaceRoleEnum,
   WorkspaceStatusEnum,
   WorkspaceTypeEnum,
+  type ApiResponse,
 } from "../../packages/shared/src/index.ts";
 
 test("shared canonical enums stay aligned with the Prisma mirror arrays", () => {
@@ -211,4 +216,17 @@ test("shared aggregate error-code export stays aligned with the category catalog
   );
 
   assert.deepEqual(ERROR_CODES, expected);
+});
+
+test("shared cross-service contract exports are available from the package root", () => {
+  assert.equal(ErrorCodes.DOCUMENT_SUBMITTED, "DOCUMENT_SUBMITTED");
+  assert.equal(ServerEvents.ACTIVITY_CREATED, "activity:created");
+  assert.equal(Queues.EXPORT, "export");
+  assert.equal(JobTypes.EXPORT_PDF, "export.document.pdf");
+
+  const _response: ApiResponse<unknown> = {
+    data: null,
+    meta: { requestId: "req_test" },
+  };
+  assert.equal(_response.meta.requestId, "req_test");
 });

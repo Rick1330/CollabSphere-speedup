@@ -17,6 +17,15 @@ export type { ApiRuntimeEnv } from "./api-env.js";
 export { apiEnvKeys, apiEnvSchema, parseApiRuntimeEnv } from "./api-env.js";
 export { parseRuntimeEnv } from "./runtime-env.js";
 export { EnvValidationError, formatEnvValidationIssues } from "./env-core.js";
+export {
+  assertDevPortContract,
+  DEV_API_PORT,
+  DEV_COLLAB_PORT,
+  DEV_WEB_PORT,
+  validateDevPortContract,
+  type DevPortContractInput,
+  type DevPortContractIssue,
+} from "./dev-port-contract.js";
 
 export interface EnvValidationIssue {
   key: string;

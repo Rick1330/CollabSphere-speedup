@@ -55,6 +55,7 @@ const errorCodeList = [
   "EXPORT_JOB_NOT_FOUND",
   "LINK_NOT_FOUND",
   "TARGET_NOT_FOUND",
+  "CONFLICT",
   "EMAIL_ALREADY_EXISTS",
   "ACCOUNT_EXISTS_LOCAL",
   "ACCOUNT_EXISTS_OAUTH",
@@ -175,6 +176,7 @@ export const NOT_FOUND_ERROR_CODES = [
 ] as const;
 
 export const CONFLICT_ERROR_CODES = [
+  "CONFLICT",
   "EMAIL_ALREADY_EXISTS",
   "ACCOUNT_EXISTS_LOCAL",
   "ACCOUNT_EXISTS_OAUTH",
@@ -229,4 +231,4 @@ export const INTERNAL_ERROR_CODES = [
 
 export const ERROR_CODES = Object.freeze(uniqueErrorCodeList) as readonly (typeof errorCodeList)[number][];
 
-export type ErrorCode = (typeof errorCodeList)[number];
+export type { ErrorCode } from "./error-codes.js";

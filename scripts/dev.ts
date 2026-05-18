@@ -1,8 +1,20 @@
-import { spawn } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
+import net from "node:net";
 import { basename, dirname, join } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { assertDevPortContract } from "../packages/shared/src/dev-port-contract.ts";
+
+type EnvMap = Record<string, string>;
+
+const getErrorCode = (error: unknown): string | undefined => {
+  if (error && typeof error === "object" && "code" in error) {
+    const code = error.code;
+    return typeof code === "string" ? code : undefined;
+  }
+  return undefined;
+};
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const rootDir = join(scriptDir, "..");
@@ -38,16 +50,17 @@ const urlEnvKeys = new Set([
   "S3_ENDPOINT"
 ]);
 
+/** API first so port 3001 is bound before collab; web/collab/worker follow. */
 const appSurfaces = [
-  {
-    label: "web",
-    filter: "@collabsphere/web",
-    packageJsonPath: join(rootDir, "apps", "web", "package.json")
-  },
   {
     label: "api",
     filter: "@collabsphere/api",
     packageJsonPath: join(rootDir, "apps", "api", "package.json")
+  },
+  {
+    label: "web",
+    filter: "@collabsphere/web",
+    packageJsonPath: join(rootDir, "apps", "web", "package.json")
   },
   {
     label: "collab",
@@ -158,9 +171,9 @@ const parseEnvAssignment = (rawLine, lineNumber, label) => {
   return [key, unquoteEnvValue(value)];
 };
 
-const parseEnvFile = (filePath, label) => {
+const parseEnvFile = (filePath: string, label: string): EnvMap => {
   const content = readFileSync(filePath, "utf8");
-  const values = {};
+  const values: EnvMap = {};
   const lines = content.split(/\r?\n/);
 
   for (const [index, rawLine] of lines.entries()) {
@@ -245,7 +258,7 @@ const ensureRequiredEnvFiles = () => {
 const loadEnvSources = () => ({
   exampleValues: parseEnvFile(envExamplePath, ".env.example"),
   envValues: parseEnvFile(envPath, ".env"),
-  envLocalValues: existsSync(envLocalPath) ? parseEnvFile(envLocalPath, ".env.local") : {}
+  envLocalValues: existsSync(envLocalPath) ? parseEnvFile(envLocalPath, ".env.local") : ({} as EnvMap)
 });
 
 const validateRequiredKeys = (exampleValues, localValues) => {
@@ -283,8 +296,8 @@ const validateKnownEnvValues = (values) => {
   }
 };
 
-const createLocalEmailEnv = (values) => {
-  const env = {};
+const createLocalEmailEnv = (values: EnvMap): EnvMap => {
+  const env: EnvMap = {};
   const host = hasValue(values.EMAIL_SMTP_HOST) ? values.EMAIL_SMTP_HOST : "127.0.0.1";
 
   if (hasValue(values.EMAIL_SMTP_PORT)) {
@@ -304,6 +317,74 @@ const createLocalEmailEnv = (values) => {
   return env;
 };
 
+const findListeningPid = (port) => {
+  try {
+    if (process.platform === "win32") {
+      const output = execSync(`netstat -ano | findstr ":${port}"`, {
+        encoding: "utf8",
+        windowsHide: true
+      });
+      for (const line of output.split(/\r?\n/)) {
+        if (!line.includes("LISTENING")) {
+          continue;
+        }
+        const parts = line.trim().split(/\s+/);
+        const pid = Number.parseInt(parts[parts.length - 1] ?? "", 10);
+        if (Number.isFinite(pid) && pid > 0) {
+          return pid;
+        }
+      }
+      return null;
+    }
+
+    const output = execSync(`lsof -nP -iTCP:${port} -sTCP:LISTEN`, {
+      encoding: "utf8"
+    });
+    const match = output.match(/\n(\d+)\s/);
+    return match ? Number.parseInt(match[1], 10) : null;
+  } catch {
+    return null;
+  }
+};
+
+const formatPortInUseHelp = (port, label = "PORT") => {
+  const pid = findListeningPid(port);
+  const killHint =
+    process.platform === "win32"
+      ? pid
+        ? ` Stop it with: taskkill /PID ${pid} /F`
+        : " Run: netstat -ano | findstr :" +
+          port +
+          " then taskkill /PID <pid> /F"
+      : pid
+        ? ` Stop it with: kill ${pid}`
+        : ` Run: lsof -nP -iTCP:${port} -sTCP:LISTEN`;
+  return `${label} ${port} is already in use.${killHint}`;
+};
+
+const assertListenPortAvailable = (port, label = "PORT") =>
+  new Promise<void>((resolve, reject) => {
+    const probe = net.createServer();
+    probe.once("error", (error) => {
+      const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
+      if (code === "EADDRINUSE") {
+        reject(new Error(formatPortInUseHelp(port, label)));
+        return;
+      }
+      reject(error);
+    });
+    probe.once("listening", () => {
+      probe.close((closeError) => {
+        if (closeError) {
+          reject(closeError);
+          return;
+        }
+        resolve();
+      });
+    });
+    probe.listen(port, "0.0.0.0");
+  });
+
 const loadValidatedEnv = () => {
   ensureRequiredEnvFiles();
   const { exampleValues, envValues, envLocalValues } = loadEnvSources();
@@ -316,7 +397,19 @@ const loadValidatedEnv = () => {
   validateKnownEnvValues(envValues);
   validateKnownEnvValues(appLocalValues);
 
+  const apiPort = Number.parseInt(appLocalValues.PORT ?? "3001", 10) || 3001;
+
+  assertDevPortContract({
+    PORT: appLocalValues.PORT,
+    API_BASE_URL: appLocalValues.API_BASE_URL,
+    BASE_URL: appLocalValues.BASE_URL,
+    WEB_APP_URL: appLocalValues.WEB_APP_URL,
+    CORS_ORIGINS: appLocalValues.CORS_ORIGINS,
+    COLLAB_WS_URL: appLocalValues.COLLAB_WS_URL,
+  });
+
   return {
+    apiPort,
     // Compose follows repo-local .env, while app children can layer runtime-only .env.local overrides.
     composeEnv: {
       ...process.env,
@@ -374,7 +467,7 @@ const resolvePnpmRunner = () => {
 };
 
 const terminateChild = (child, label) =>
-  new Promise((resolve) => {
+  new Promise<void>((resolve) => {
     if (child?.exitCode !== null || child?.signalCode !== null) {
       resolve();
       return;
@@ -413,8 +506,61 @@ const terminateChild = (child, label) =>
     });
   });
 
+const assertApiPortNotAlreadyServing = async (apiPort) => {
+  const healthUrl = `http://127.0.0.1:${apiPort}/api/v1/health`;
+  try {
+    const res = await fetch(healthUrl, { method: "GET" });
+    if (!res.ok) {
+      return;
+    }
+
+    const pid = findListeningPid(apiPort);
+    throw new Error(
+      `Port ${apiPort} already serves the API (${healthUrl} → ${res.status}) before this dev session started.` +
+        " Only one API may run on that port." +
+        (pid
+          ? ` Listening PID: ${pid}.${process.platform === "win32" ? ` Stop it: taskkill /PID ${pid} /F` : ` Stop it: kill ${pid}`}`
+          : ""),
+    );
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("before this dev session")) {
+      throw error;
+    }
+    /* connection refused / not ready — expected */
+  }
+};
+
+const waitForHttpOk = async (url, timeoutMs = 90_000) => {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    try {
+      const res = await fetch(url, { method: "GET" });
+      if (res.ok) {
+        return;
+      }
+    } catch {
+      /* API still starting */
+    }
+    await new Promise((resolve) => {
+      setTimeout(resolve, 500);
+    });
+  }
+  throw new Error(`Timed out waiting for ${url}`);
+};
+
+const envForSurface = (surface, appEnv) => {
+  if (surface.label !== "collab") {
+    return appEnv;
+  }
+  const { PORT: _apiPort, ...rest } = appEnv;
+  return {
+    ...rest,
+    COLLAB_PORT: appEnv.COLLAB_PORT ?? "3002",
+  };
+};
+
 const runCommand = (command, args, options) =>
-  new Promise((resolve, reject) => {
+  new Promise<void>((resolve, reject) => {
     const child = spawn(command, args, {
       ...options,
       stdio: "inherit",
@@ -422,7 +568,7 @@ const runCommand = (command, args, options) =>
     });
 
     child.once("error", (error) => {
-      if (error.code === "ENOENT") {
+      if (getErrorCode(error) === "ENOENT") {
         reject(new Error(`Unable to find "${command}" on PATH.`));
         return;
       }
@@ -455,7 +601,8 @@ const main = async () => {
 
   logInfo("validating local environment against .env.example");
   ensureAppSurfaces();
-  const { composeEnv, appEnv } = loadValidatedEnv();
+  const { composeEnv, appEnv, apiPort } = loadValidatedEnv();
+  await assertListenPortAvailable(apiPort);
   const pnpmRunner = resolvePnpmRunner();
   const children = new Map();
   let shuttingDown = false;
@@ -502,7 +649,34 @@ const main = async () => {
     logInfo("docker compose services are ready");
   }
 
+  const collabPort = Number.parseInt(appEnv.COLLAB_PORT ?? "3002", 10) || 3002;
+  const webDevPort = (() => {
+    const webAppUrl = appEnv.WEB_APP_URL?.trim();
+    if (webAppUrl) {
+      try {
+        const parsed = Number.parseInt(new URL(webAppUrl).port, 10);
+        if (Number.isFinite(parsed) && parsed > 0) {
+          return parsed;
+        }
+      } catch {
+        /* fall through */
+      }
+    }
+    return 8080;
+  })();
+
   for (const surface of appSurfaces) {
+    if (surface.label === "api") {
+      await assertListenPortAvailable(apiPort, "PORT");
+      await assertApiPortNotAlreadyServing(apiPort);
+    }
+    if (surface.label === "web") {
+      await assertListenPortAvailable(webDevPort, "Vite dev port");
+    }
+    if (surface.label === "collab") {
+      await assertListenPortAvailable(collabPort, "COLLAB_PORT");
+    }
+
     logInfo(`starting ${surface.label} via pnpm --filter ${surface.filter} run dev`);
 
     const child = spawn(
@@ -510,7 +684,7 @@ const main = async () => {
       [...pnpmRunner.baseArgs, "--filter", surface.filter, "run", "dev"],
       {
         cwd: rootDir,
-        env: appEnv,
+        env: envForSurface(surface, appEnv),
         stdio: "inherit",
         windowsHide: false
       }
@@ -518,15 +692,40 @@ const main = async () => {
 
     children.set(surface.label, child);
 
+    if (surface.label === "api") {
+      const healthUrl = `http://127.0.0.1:${apiPort}/api/v1/health`;
+      logInfo(`waiting for API health at ${healthUrl}`);
+      try {
+        await waitForHttpOk(healthUrl);
+      } catch (error) {
+        const pid = findListeningPid(apiPort);
+        const detail =
+          error instanceof Error ? error.message : "API health check failed";
+        throw new Error(
+          pid
+            ? `${detail} (port ${apiPort} is held by PID ${pid}; stop that process and retry).`
+            : detail,
+        );
+      }
+      if (child.exitCode !== null) {
+        const pid = findListeningPid(apiPort);
+        throw new Error(
+          `API process exited before startup finished` +
+            (pid ? ` (port ${apiPort} may still be held by PID ${pid}).` : "."),
+        );
+      }
+      logInfo("API is healthy");
+    }
+
     child.once("error", (error) => {
       if (shuttingDown) {
         return;
       }
 
       const detail =
-        error.code === "ENOENT"
+        getErrorCode(error) === "ENOENT"
           ? "pnpm could not be found. Install pnpm 9.x and rerun `pnpm dev`."
-          : `${surface.label} failed to start: ${error.message}`;
+          : `${surface.label} failed to start: ${error instanceof Error ? error.message : String(error)}`;
 
       void shutdown(detail, 1);
     });

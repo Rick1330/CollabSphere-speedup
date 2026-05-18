@@ -1,72 +1,68 @@
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { io, type Socket } from "socket.io-client";
-import { authSession } from "@/lib/auth-session";
-import { resolveRealtimeSocketOrigin } from "@/api/client";
-import { documentTreeQueryKey } from "@/features/documents/hooks/use-document-tree";
+import {
+  ensureRealtimeConnected,
+  joinWorkspaceRoom,
+  onRealtimeReconnect,
+  subscribeActivityEvents,
+  subscribeNotificationEvents,
+} from "@/api/realtime/socket-client";
+import { useCurrentAccount } from "@/lib/auth-session";
+import { isDatabaseWorkspaceId } from "@/lib/workspace-id";
 
-let sharedSocket: Socket | null = null;
-
-function getRealtimeSocket(): Socket | null {
-  if (typeof window === "undefined") return null;
-  const token = authSession.getAccessToken();
-  if (!token) return null;
-
-  if (!sharedSocket) {
-    sharedSocket = io(`${resolveRealtimeSocketOrigin()}/realtime`, {
-      transports: ["websocket"],
-      auth: { token },
-      withCredentials: true,
-    });
-  }
-  return sharedSocket;
-}
+type ActivityCreatedPayload = {
+  workspaceId?: string;
+  id?: string;
+};
 
 /**
- * Subscribes to workspace Socket.IO events and invalidates React Query caches.
+ * Joins the workspace Socket.IO room and invalidates notification/activity queries
+ * when matching realtime events arrive.
  */
 export function useWorkspaceRealtime(workspaceId: string | undefined) {
   const queryClient = useQueryClient();
+  const account = useCurrentAccount();
 
   useEffect(() => {
-    if (!workspaceId) return;
-    const socket = getRealtimeSocket();
-    if (!socket) return;
+    if (!workspaceId || !isDatabaseWorkspaceId(workspaceId) || !account?.id) {
+      return;
+    }
 
-    const join = () => {
-      socket.emit("room:join:workspace", { workspaceId });
+    let cancelled = false;
+
+    const joinRoom = () => {
+      if (cancelled) return;
+      void joinWorkspaceRoom(workspaceId).catch(() => {
+        /* connection status handled by page-level subscribeRealtimeStatus */
+      });
     };
 
-    const onRoleChanged = () => {
-      void queryClient.invalidateQueries({ queryKey: ["workspace", workspaceId, "shell"] });
-      void queryClient.invalidateQueries({ queryKey: ["workspace", workspaceId, "members"] });
-      void queryClient.invalidateQueries({ queryKey: ["workspaces", "mine"] });
-    };
+    void ensureRealtimeConnected().then(() => {
+      if (!cancelled) joinRoom();
+    });
 
-    const onTreeChanged = () => {
-      void queryClient.invalidateQueries({ queryKey: documentTreeQueryKey(workspaceId) });
-    };
+    const offReconnect = onRealtimeReconnect(() => {
+      joinRoom();
+    });
 
-    if (socket.connected) join();
-    socket.on("connect", join);
-    socket.on("workspace:member_role_changed", onRoleChanged);
-    socket.on("workspace:folder_created", onTreeChanged);
-    socket.on("workspace:folder_updated", onTreeChanged);
-    socket.on("workspace:folder_deleted", onTreeChanged);
-    socket.on("workspace:document_created", onTreeChanged);
-    socket.on("workspace:document_updated", onTreeChanged);
-    socket.on("workspace:document_deleted", onTreeChanged);
+    const offNotifications = subscribeNotificationEvents((_event, payload) => {
+      void queryClient.invalidateQueries({ queryKey: ["notifications"] });
+    });
+
+    const offActivity = subscribeActivityEvents((_event, payload) => {
+      const data = payload as ActivityCreatedPayload;
+      if (data?.workspaceId && data.workspaceId !== workspaceId) {
+        return;
+      }
+      void queryClient.invalidateQueries({ queryKey: ["workspace", workspaceId, "activity"] });
+      void queryClient.invalidateQueries({ queryKey: ["dashboard", "activity"] });
+    });
 
     return () => {
-      socket.off("connect", join);
-      socket.off("workspace:member_role_changed", onRoleChanged);
-      socket.off("workspace:folder_created", onTreeChanged);
-      socket.off("workspace:folder_updated", onTreeChanged);
-      socket.off("workspace:folder_deleted", onTreeChanged);
-      socket.off("workspace:document_created", onTreeChanged);
-      socket.off("workspace:document_updated", onTreeChanged);
-      socket.off("workspace:document_deleted", onTreeChanged);
-      socket.emit("room:leave:workspace", { workspaceId });
+      cancelled = true;
+      offReconnect();
+      offNotifications();
+      offActivity();
     };
-  }, [workspaceId, queryClient]);
+  }, [workspaceId, account?.id, queryClient]);
 }
