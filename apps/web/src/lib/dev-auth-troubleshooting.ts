@@ -9,9 +9,6 @@ import { authSession } from "@/lib/auth-session";
 export const DEV_API_DOWN_MESSAGE =
   "The API on port 3001 is not reachable. Stop all pnpm dev terminals, free ports 3001 and 8080 (taskkill on Windows), then run a single pnpm dev --skip-compose and wait for [dev] API is healthy.";
 
-export const DEV_DEMO_LOGIN_HINT =
-  "Demo login (run pnpm demo:seed-runtime if needed): elshaday@collabsphere.app / Demo1234!";
-
 /** Health probe using the same API base URL as the configured REST client. */
 export async function checkDevApiReachable(): Promise<boolean> {
   if (!import.meta.env.DEV) {

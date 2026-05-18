@@ -14,6 +14,9 @@ declare global {
           id: string;
           status: string;
         };
+        user?: {
+          fullName: string | null;
+        };
       };
       user?: {
         sub: string;

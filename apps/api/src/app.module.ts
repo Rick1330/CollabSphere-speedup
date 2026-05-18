@@ -23,7 +23,8 @@ import { NotificationsNestModule } from "./notifications/notifications.nest.modu
 import { ActivityNestModule } from "./activity/activity.nest.module.js";
 import { SearchNestModule } from "./search/search.nest.module.js";
 import { AdminNestModule } from "./admin/admin.nest.module.js";
-import { AdminOnlyGuard } from "./common/guards/admin-only.guard.js";
+import { WorkspaceMembershipGuard } from "./common/guards/workspace-membership.guard.js";
+import { GlobalRolesGuard } from "./common/guards/global-roles.guard.js";
 import { CsrfGuard } from "./common/guards/csrf.guard.js";
 import { ExportsNestModule } from "./exports/exports.nest.module.js";
 import { TestingNestModule } from "./testing/testing.nest.module.js";
@@ -97,7 +98,11 @@ import { HttpObservabilityMiddleware } from "./common/observability/http-observa
     },
     {
       provide: APP_GUARD,
-      useClass: AdminOnlyGuard,
+      useClass: WorkspaceMembershipGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: GlobalRolesGuard,
     },
     {
       provide: APP_GUARD,

@@ -11,7 +11,7 @@ import { AuthDivider } from "./auth-divider";
 import { OAuthButton } from "./oauth-button";
 import { login, AuthError } from "@/api/adapters/auth";
 import { ApiError } from "@/api/client";
-import { DEV_API_DOWN_MESSAGE, DEV_DEMO_LOGIN_HINT } from "@/lib/dev-auth-troubleshooting";
+import { DEV_API_DOWN_MESSAGE } from "@/lib/dev-auth-troubleshooting";
 import { resetAuthQueryCache, teardownAuthSession } from "@/lib/auth-teardown";
 
 const loginSchema = z.object({
@@ -126,11 +126,6 @@ export const LoginForm = ({ apiDown = false }: { apiDown?: boolean }) => {
     <div>
       <h1 className="text-xl font-bold tracking-tight" style={{ color: "var(--cs-text-headline)" }}>Sign in</h1>
       <p className="text-sm mt-1.5" style={{ color: "var(--cs-text-muted)" }}>Enter your credentials to access your workspace</p>
-      {import.meta.env.DEV ? (
-        <p className="text-xs mt-2" style={{ color: "var(--cs-text-faint)" }}>
-          {DEV_DEMO_LOGIN_HINT}
-        </p>
-      ) : null}
 
       <AnimatePresence>
         {serverError && (
