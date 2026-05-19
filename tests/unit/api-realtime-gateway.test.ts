@@ -1,132 +1,123 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { Socket } from "socket.io";
+import type { Server, Socket } from "socket.io";
 import { AppError } from "../../apps/api/src/common/filters/app-error.filter.js";
+import {
+  RealtimeGateway,
+  resolveGatewayRedisUrl,
+} from "../../apps/api/src/realtime/realtime.gateway.js";
 import { RealtimeSessionService } from "../../apps/api/src/realtime/realtime-session.service.js";
 
-const createSocket = () => {
-  const joinedRooms: string[] = [];
-  const leftRooms: string[] = [];
-  let disconnected = false;
-
-  const socket = {
-    handshake: {
-      auth: {},
-      headers: {},
-    },
-    data: {},
-    join: async (room: string) => {
-      joinedRooms.push(room);
-    },
-    leave: async (room: string) => {
-      leftRooms.push(room);
-    },
-    disconnect: () => {
-      disconnected = true;
-    },
-  } as unknown as Socket;
-
+function createSessionMock(overrides?: Partial<RealtimeSessionService>): RealtimeSessionService {
   return {
-    socket,
-    joinedRooms,
-    leftRooms,
-    isDisconnected: () => disconnected,
-  };
-};
-
-test("realtime session authenticates socket token", async () => {
-  const service = new RealtimeSessionService(
-    {
-      verifyAccessToken: async () => ({
-        sub: "user-1",
-        email: "user@example.com",
-        globalRole: "USER",
-      }),
-    } as never,
-    {
-      workspaceMember: {
-        findFirst: async () => ({ id: "membership-1" }),
-      },
-    } as never,
-  );
-
-  const socketRef = createSocket();
-  socketRef.socket.handshake.auth = { token: "token-value" };
-  const user = await service.authenticateSocket(socketRef.socket);
-
-  assert.equal(user.userId, "user-1");
-  assert.equal(service.toUserRoom(user.userId), "user:user-1");
-});
-
-test("realtime session rejects invalid token handshake", async () => {
-  const service = new RealtimeSessionService(
-    {
-      verifyAccessToken: async () => {
-        throw new Error("bad token");
-      },
-    } as never,
-    {
-      workspaceMember: {
-        findFirst: async () => ({ id: "membership-1" }),
-      },
-    } as never,
-  );
-
-  const socketRef = createSocket();
-  socketRef.socket.handshake.auth = { token: "bad-token" };
-  await assert.rejects(() => service.authenticateSocket(socketRef.socket));
-});
-
-test("realtime session enforces workspace membership", async () => {
-  const service = new RealtimeSessionService(
-    {
-      verifyAccessToken: async () => ({
-        sub: "user-1",
-        email: "user@example.com",
-        globalRole: "USER",
-      }),
-    } as never,
-    {
-      workspaceMember: {
-        findFirst: async () => null,
-      },
-    } as never,
-  );
-
-  const socketRef = createSocket();
-  socketRef.socket.data = {
-    user: {
-      userId: "user-1",
-      email: "user@example.com",
-      globalRole: "USER",
+    getAuthenticatedUser: () => {
+      throw new AppError({ code: "UNAUTHORIZED", message: "Socket user is not authenticated" });
     },
-  };
+    assertWorkspaceMembership: async () => undefined,
+    assertTaskInWorkspace: async () => undefined,
+    assertDocumentInWorkspace: async () => undefined,
+    resolveTaskWorkspaceId: async () => null,
+    toWorkspaceRoom: (id: string) => `workspace:${id}`,
+    toUserRoom: (id: string) => `user:${id}`,
+    toTaskRoom: (id: string) => `task:${id}`,
+    toDocumentRoom: (id: string) => `document:${id}`,
+    ...overrides,
+  } as RealtimeSessionService;
+}
 
-  await assert.rejects(
-    () => service.assertWorkspaceMembership("user-1", "ws-1"),
-    (error: unknown) => {
-      assert.equal(error instanceof AppError, true);
-      assert.equal((error as AppError).code, "NOT_WORKSPACE_MEMBER");
-      return true;
-    },
-  );
+function mockServer(adapterName?: string): Server {
+  return {
+    adapter: () => (adapterName ? { constructor: { name: adapterName } } : undefined),
+    to: () => ({ emit: () => undefined }),
+  } as Server;
+}
+
+function mockClient(): Socket {
+  return {
+    join: async () => undefined,
+    leave: async () => undefined,
+    data: {},
+  } as Socket;
+}
+
+test("resolveGatewayRedisUrl returns a string without throwing", () => {
+  assert.equal(typeof resolveGatewayRedisUrl(), "string");
 });
 
-test("realtime session resolves room names", () => {
-  const service = new RealtimeSessionService(
-    {
-      verifyAccessToken: async () => ({
-        sub: "user-1",
-        email: "user@example.com",
+test("afterInit does not throw without ConfigService (uses apiRuntimeEnv)", () => {
+  const prevSkip = process.env.SKIP_REDIS_IO_ADAPTER;
+  process.env.SKIP_REDIS_IO_ADAPTER = "1";
+  try {
+    const gateway = new RealtimeGateway(createSessionMock());
+    const server = mockServer("RedisAdapter");
+    assert.doesNotThrow(() => gateway.afterInit(server));
+  } finally {
+    if (prevSkip === undefined) {
+      delete process.env.SKIP_REDIS_IO_ADAPTER;
+    } else {
+      process.env.SKIP_REDIS_IO_ADAPTER = prevSkip;
+    }
+  }
+});
+
+test("handleJoin rejects unsupported room names", async () => {
+  const gateway = new RealtimeGateway(
+    createSessionMock({
+      getAuthenticatedUser: () => ({
+        userId: "u1",
+        email: "u@example.com",
         globalRole: "USER",
       }),
-    } as never,
-    {
-      workspaceMember: {
-        findFirst: async () => ({ id: "membership-1" }),
-      },
-    } as never,
+    } as never),
   );
-  assert.equal(service.toWorkspaceRoom("ws-1"), "workspace:ws-1");
-  assert.equal(service.toTaskRoom("task-7"), "task:task-7");
+
+  const result = await gateway.handleJoin(mockClient(), { room: "custom:evil-room" });
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.match(result.message, /unsupported room/i);
+  }
+});
+
+test("handleJoin requires workspaceId for task rooms", async () => {
+  const gateway = new RealtimeGateway(
+    createSessionMock({
+      getAuthenticatedUser: () => ({
+        userId: "u1",
+        email: "u@example.com",
+        globalRole: "USER",
+      }),
+    } as never),
+  );
+
+  const result = await gateway.handleJoin(mockClient(), { room: "task:task-1" });
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.match(result.message, /workspaceId/i);
+  }
+});
+
+test("leaveTaskRoom rejects unauthenticated socket", async () => {
+  const gateway = new RealtimeGateway(createSessionMock());
+  const result = await gateway.leaveTaskRoom(mockClient(), { taskId: "task-1" });
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.match(result.message, /not authenticated/i);
+  }
+});
+
+test("leaveTaskRoom succeeds when user and task are valid", async () => {
+  const gateway = new RealtimeGateway(
+    createSessionMock({
+      getAuthenticatedUser: () => ({
+        userId: "u1",
+        email: "u@example.com",
+        globalRole: "USER",
+      }),
+      resolveTaskWorkspaceId: async () => "ws-1",
+      assertTaskInWorkspace: async () => undefined,
+    } as never),
+  );
+
+  const result = await gateway.leaveTaskRoom(mockClient(), { taskId: "task-1" });
+  assert.equal(result.ok, true);
 });

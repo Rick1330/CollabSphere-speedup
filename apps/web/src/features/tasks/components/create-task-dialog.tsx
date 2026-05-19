@@ -8,12 +8,15 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  createTask,
   STATUS_LABELS,
   type TaskAssignee,
+  type TaskDetail,
   type TaskLinkedResource,
   type TaskPriority,
   type TaskStatus,
 } from "@/api/adapters/tasks";
+import { ApiError } from "@/api/client";
 import { LabelPicker } from "./label-picker";
 
 export interface SourceDocumentLink {
@@ -33,16 +36,7 @@ interface CreateTaskDialogProps {
   currentUserId: string;
   sourceLink?: SourceDocumentLink | null;
   onClose: () => void;
-  onCreated: (task: {
-    title: string;
-    description?: string;
-    status: TaskStatus;
-    priority: TaskPriority;
-    dueDate?: string;
-    assigneeId?: string;
-    labels?: string[];
-    sourceLink?: TaskLinkedResource;
-  }) => void;
+  onCreated: (task: TaskDetail, sourceLink?: TaskLinkedResource) => void;
 }
 
 export const CreateTaskDialog = ({
@@ -108,7 +102,15 @@ export const CreateTaskDialog = ({
     }
     setIsSubmitting(true);
     try {
-      await new Promise((r) => setTimeout(r, 250));
+      const created = await createTask(workspaceId, {
+        title: trimmed,
+        description: description.trim() || undefined,
+        status,
+        priority,
+        dueDate: dueDate || undefined,
+        assigneeId: assigneeId || undefined,
+        labels: labels.length > 0 ? labels : undefined,
+      });
       const link: TaskLinkedResource | undefined = sourceLink
         ? {
             id: `link-${Date.now()}`,
@@ -119,18 +121,36 @@ export const CreateTaskDialog = ({
             createdAt: new Date().toISOString(),
           }
         : undefined;
-      onCreated({
-        title: trimmed,
-        description: description.trim() || undefined,
-        status,
-        priority,
-        dueDate: dueDate || undefined,
-        assigneeId: assigneeId || undefined,
-        labels: labels.length > 0 ? labels : undefined,
-        sourceLink: link,
-      });
-    } catch {
-      setServerError("Failed to create task. Please try again.");
+      onCreated(created, link);
+      onClose();
+    } catch (error) {
+      // #region agent log
+      fetch("http://127.0.0.1:7352/ingest/38fbd051-1833-4296-ab67-281907013a27", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Debug-Session-Id": "833b60",
+        },
+        body: JSON.stringify({
+          sessionId: "833b60",
+          runId: "pre-fix",
+          hypothesisId: "D",
+          location: "create-task-dialog.tsx:handleSubmit",
+          message: "createTask client error",
+          data: {
+            code: error instanceof ApiError ? error.code : "unknown",
+            status: error instanceof ApiError ? error.status : null,
+            apiMessage: error instanceof ApiError ? error.message : String(error),
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => undefined);
+      // #endregion
+      const message =
+        error instanceof ApiError
+          ? error.message
+          : "Failed to create task. Please try again.";
+      setServerError(message);
     } finally {
       setIsSubmitting(false);
     }

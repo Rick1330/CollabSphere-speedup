@@ -18,9 +18,16 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { useThemePreference } from "@/hooks/use-theme-preference";
 import { configureApiClient, resolveConfiguredApiBaseUrl } from "@/api/client";
 import { applyUserProfileToSession, fetchCurrentUser } from "@/api/adapters/settings";
+import {
+  bindAuthTokenSync,
+  disconnectSocket,
+  initSocket,
+  syncSocketAuthFromSession,
+} from "@/api/realtime/socket-client";
 import { authSession, isAuthFailureSuppressed, useAuthSession } from "@/lib/auth-session";
 import { teardownAuthSession } from "@/lib/auth-teardown";
 import { logDevSessionContext } from "@/lib/dev-auth-troubleshooting";
+import { useNotificationRealtime } from "@/hooks/use-notification-realtime";
 
 /** Mount-only component so the theme hook runs once at the root. */
 function ThemeListener() {
@@ -39,6 +46,7 @@ function ApiClientAuthBridge({ queryClient }: { queryClient: QueryClient }) {
       baseUrl: resolveConfiguredApiBaseUrl(),
       getAuthToken: () => authSession.getAccessToken(),
       onAccessTokenRefreshed: () => {
+        syncSocketAuthFromSession();
         void queryClient.invalidateQueries({ queryKey: ["current-user"] });
       },
       onAuthFailure: () => {
@@ -67,6 +75,22 @@ function ApiClientAuthBridge({ queryClient }: { queryClient: QueryClient }) {
   return null;
 }
 
+/** Connect the singleton Socket.IO client after auth is available; tear down on sign-out. */
+function RealtimeSocketBridge() {
+  const session = useAuthSession();
+
+  useEffect(() => {
+    if (session?.accessToken) {
+      bindAuthTokenSync();
+      initSocket();
+    } else {
+      disconnectSocket();
+    }
+  }, [session?.accessToken]);
+
+  return null;
+}
+
 /** Sync globalRole and profile fields from GET /users/me on boot and after token refresh. */
 function SessionSyncBridge() {
   const session = useAuthSession();
@@ -88,12 +112,20 @@ function SessionSyncBridge() {
   return null;
 }
 
+/** Subscribes to user-scoped notification events on every authenticated page. */
+function NotificationRealtimeBridge() {
+  useNotificationRealtime();
+  return null;
+}
+
 export function AppProviders({ children }: { children: ReactNode }) {
   const [queryClient] = useState(() => new QueryClient());
 
   return (
     <QueryClientProvider client={queryClient}>
       <ApiClientAuthBridge queryClient={queryClient} />
+      <RealtimeSocketBridge />
+      <NotificationRealtimeBridge />
       <SessionSyncBridge />
       <TooltipProvider>
         <ThemeListener />

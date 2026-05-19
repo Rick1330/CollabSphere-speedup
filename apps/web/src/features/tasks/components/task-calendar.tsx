@@ -158,38 +158,11 @@ export const TaskCalendar = ({
           assignableMembers={members}
           currentUserId="user-jane"
           onClose={() => setIsCreateOpen(false)}
-          onCreated={(task) => {
-            const id = `task-${Date.now()}`;
-            const assignee = task.assigneeId
-              ? members.find((m) => m.id === task.assigneeId) ?? null
-              : null;
-            const now = new Date().toISOString();
-            setTasksMap((prev) => ({
-              ...prev,
-              [id]: {
-                id,
-                title: task.title,
-                status: task.status,
-                priority: task.priority,
-                assignee,
-                dueDate: task.dueDate ? new Date(task.dueDate).toISOString() : null,
-                labels: task.labels ?? [],
-                commentCount: 0,
-                position: Object.keys(prev).length + 1,
-                description: task.description ?? null,
-                descriptionRich: task.description ? [{ type: "text", text: task.description }] : null,
-                reporterId: "user-jane",
-                reporterName: "Elshaday Tesfaye",
-                createdAt: now,
-                updatedAt: now,
-                linkedResources: task.sourceLink ? [task.sourceLink] : [],
-                comments: [],
-                parentTaskId: null,
-                subtaskIds: [],
-                blockedByTaskIds: [],
-                blockingTaskIds: [],
-              },
-            }));
+          onCreated={(task, sourceLink) => {
+            const taskWithLink = sourceLink
+              ? { ...task, linkedResources: [sourceLink, ...task.linkedResources] }
+              : task;
+            setTasksMap((prev) => ({ ...prev, [taskWithLink.id]: taskWithLink }));
             setIsCreateOpen(false);
           }}
         />

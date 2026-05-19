@@ -75,12 +75,11 @@ import {
 import {
   STATUS_LABELS,
   type TaskAssignee,
+  type TaskDetail,
   type TaskPriority,
   type TaskStatus,
-  type TaskLinkedResource,
 } from "@/api/adapters/tasks";
 import { subscribeRealtimeStatus } from "@/api/realtime/socket-client";
-import { useWorkspaceRealtime } from "@/hooks/use-workspace-realtime";
 import { prepareDocumentCollabBootstrap } from "@/features/documents/collab/collab-bootstrap";
 
 type SidebarTab = "outline" | "readiness" | "properties" | "comments";
@@ -754,8 +753,6 @@ const DocumentEditorPage = () => {
 
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("reconnecting");
 
-  useWorkspaceRealtime(workspaceId);
-
   useEffect(() => {
     if (!workspaceId || !documentId) return;
     let cancelled = false;
@@ -1076,19 +1073,10 @@ const DocumentEditorPage = () => {
     }
   };
 
-  const handleCreateTaskFromSelection = (params: {
-    title: string;
-    description?: string;
-    status: TaskStatus;
-    priority: TaskPriority;
-    dueDate?: string;
-    assigneeId?: string;
-    labels?: string[];
-    sourceLink?: TaskLinkedResource;
-  }) => {
+  const handleCreateTaskFromSelection = (task: TaskDetail) => {
     setPendingTaskSnippet(null);
     toast.success("Task created from document", {
-      description: `"${params.title}" added to ${STATUS_LABELS[params.status]}.`,
+      description: `"${task.title}" added to ${STATUS_LABELS[task.status]}.`,
       action: {
         label: "View board",
         onClick: () => navigate(`/w/${workspaceId}/tasks`),

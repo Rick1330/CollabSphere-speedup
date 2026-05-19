@@ -246,6 +246,39 @@ export async function listAllTasks(workspaceId: string): Promise<TaskBoardItem[]
   return Object.values(map).map(toBoardItem);
 }
 
+export type CreateTaskInput = {
+  title: string;
+  description?: string | null;
+  status?: TaskDetail["status"];
+  priority?: TaskDetail["priority"];
+  assigneeId?: string | null;
+  dueDate?: string | null;
+  labels?: string[];
+};
+
+export async function createTask(
+  workspaceId: string,
+  input: CreateTaskInput,
+): Promise<TaskDetail> {
+  const payload = await request<unknown>(`/workspaces/${workspaceId}/tasks`, {
+    method: "POST",
+    body: {
+      title: input.title,
+      description: input.description ?? undefined,
+      status: input.status,
+      priority: input.priority,
+      assigneeId: input.assigneeId ?? undefined,
+      dueDate: input.dueDate ?? undefined,
+      labels: input.labels,
+    },
+  });
+  const resource = parseSingleEnvelope<{ task?: ApiTask }>(payload);
+  if (!resource.task) {
+    throw new Error("Invalid API task create envelope.");
+  }
+  return toTaskDetail(resource.task);
+}
+
 export async function listTasksMap(
   workspaceId: string,
 ): Promise<Record<string, TaskDetail>> {

@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { useEffect, useMemo, useState } from "react";
 import { useQueries } from "@tanstack/react-query";
+import { queryKeys } from "@/lib/query-keys";
 import { Loader2 } from "lucide-react";
 import {
   Archive,
@@ -109,19 +110,19 @@ export const WorkspaceHome = ({ workspace: initialWorkspace, templateName }: Wor
   const homeQueries = useQueries({
     queries: [
       {
-        queryKey: ["workspace-home", workspace.id, "tree"],
+        queryKey: queryKeys.workspaceHome.tree(workspace.id),
         queryFn: () => getDocumentTree(workspace.id),
         enabled: Boolean(workspace.id),
         staleTime: 15_000,
       },
       {
-        queryKey: ["workspace-home", workspace.id, "tasks"],
+        queryKey: queryKeys.workspaceHome.tasks(workspace.id),
         queryFn: () => listTasksMap(workspace.id),
         enabled: Boolean(workspace.id),
         staleTime: 15_000,
       },
       {
-        queryKey: ["workspace-home", workspace.id, "activity"],
+        queryKey: queryKeys.workspaceHome.activity(workspace.id),
         queryFn: () => fetchWorkspaceActivityPaginated(workspace.id, { page: 1, pageSize: 8 }),
         enabled: Boolean(workspace.id),
         staleTime: 15_000,

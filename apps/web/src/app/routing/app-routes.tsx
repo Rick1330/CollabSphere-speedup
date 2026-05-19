@@ -59,6 +59,7 @@ import AdminAudit from "@/features/admin/pages/AdminAudit";
 
 // Reviewer
 import ReviewQueue from "@/features/review/pages/ReviewQueue";
+import { WorkspaceRealtimeLayout } from "@/app/routing/workspace-realtime-layout";
 
 // Catch-all
 import NotFound from "@/pages/NotFound";
@@ -95,30 +96,26 @@ export function AppRoutes() {
         <Route path="/settings/notifications" element={protect(<SettingsNotifications />)} />
         <Route path="/settings/appearance" element={protect(<SettingsAppearance />)} />
 
-        {/* Workspace */}
-        <Route path="/w/:workspaceId" element={protect(<WorkspaceHome />)} />
-        <Route path="/w/:workspaceId/documents" element={protect(<Documents />)} />
-        <Route path="/w/:workspaceId/documents/new" element={protect(<NewDocument />)} />
-        <Route path="/w/:workspaceId/documents/:documentId" element={protect(<DocumentEditor />)} />
-        <Route
-          path="/w/:workspaceId/documents/:documentId/history"
-          element={protect(<DocumentHistory />)}
-        />
-        <Route path="/w/:workspaceId/tasks" element={protect(<Tasks />)} />
-        <Route path="/w/:workspaceId/tasks/list" element={protect(<TasksList />)} />
-        <Route path="/w/:workspaceId/tasks/:taskId" element={protect(<TaskDetail />)} />
-        <Route
-          path="/w/:workspaceId/tasks/new"
-          element={protect(<Tasks />)}
-        />
-        <Route path="/w/:workspaceId/members/user/:userId" element={protect(<WorkspaceMemberProfile />)} />
-        <Route path="/w/:workspaceId/members" element={protect(<Members />)} />
-        <Route path="/w/:workspaceId/activity" element={protect(<Activity />)} />
-        <Route path="/w/:workspaceId/files" element={protect(<Files />)} />
-        <Route path="/w/:workspaceId/analytics" element={protect(<Analytics />)} />
-        <Route path="/w/:workspaceId/templates" element={protect(<Templates />)} />
-        <Route path="/w/:workspaceId/settings" element={protect(<WorkspaceSettings />)} />
-        <Route path="/w/:workspaceId/settings/members" element={protect(<WorkspaceSettings />)} />
+        {/* Workspace — realtime layout joins workspace room for all child routes */}
+        <Route path="/w/:workspaceId" element={protect(<WorkspaceRealtimeLayout />)}>
+          <Route index element={<WorkspaceHome />} />
+          <Route path="documents" element={<Documents />} />
+          <Route path="documents/new" element={<NewDocument />} />
+          <Route path="documents/:documentId" element={<DocumentEditor />} />
+          <Route path="documents/:documentId/history" element={<DocumentHistory />} />
+          <Route path="tasks" element={<Tasks />} />
+          <Route path="tasks/list" element={<TasksList />} />
+          <Route path="tasks/new" element={<Tasks />} />
+          <Route path="tasks/:taskId" element={<TaskDetail />} />
+          <Route path="members/user/:userId" element={<WorkspaceMemberProfile />} />
+          <Route path="members" element={<Members />} />
+          <Route path="activity" element={<Activity />} />
+          <Route path="files" element={<Files />} />
+          <Route path="analytics" element={<Analytics />} />
+          <Route path="templates" element={<Templates />} />
+          <Route path="settings" element={<WorkspaceSettings />} />
+          <Route path="settings/members" element={<WorkspaceSettings />} />
+        </Route>
 
         {/* Admin (RequireAuth + AdminGuard inside each page) */}
         <Route path="/admin" element={protect(<AdminDashboard />)} />

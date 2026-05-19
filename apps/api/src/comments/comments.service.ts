@@ -1,5 +1,5 @@
-import { type CommentTargetType, type WorkspaceRole } from "@prisma/client";
-import { Inject, Injectable } from "@nestjs/common";
+import { ResourceType, type CommentTargetType, type WorkspaceRole } from "@prisma/client";
+import { Inject, Injectable, Logger } from "@nestjs/common";
 import { EventEmitter2 } from "@nestjs/event-emitter";
 import { isDatabaseUuidParam } from "../common/auth/request-user.js";
 import { AppError, ValidationAppError } from "../common/filters/app-error.filter.js";
@@ -28,6 +28,8 @@ const canModerateRoles = new Set<WorkspaceRole>(["OWNER", "ADMIN", "MANAGER"]);
 
 @Injectable()
 export class CommentsService {
+  private readonly logger = new Logger(CommentsService.name);
+
   constructor(
     @Inject(PrismaClientProvider) private readonly prisma: PrismaClientProvider,
     private readonly realtimeEvents: RealtimeEventsService,
@@ -111,31 +113,35 @@ export class CommentsService {
       });
       return { ...createdThread, comments: [createdComment] };
     });
-    await this.emitMutation({
-      workspaceId: input.workspaceId,
-      actorUserId: input.actorUserId,
-      event: "comment:thread_created",
-      actionKey: "comment.thread_created",
-      summary: "Comment thread created",
-      resourceId: thread.id,
-      resourceTitleSnapshot: this.toPlaintext(normalized).slice(0, 255),
-      metadata: {
-        threadId: thread.id,
-        commentId: thread.comments[0]?.id,
+    await this.safeSideEffect("comment thread activity", () =>
+      this.emitMutation({
+        workspaceId: input.workspaceId,
+        actorUserId: input.actorUserId,
+        event: "comment:thread_created",
+        actionKey: "comment.thread_created",
+        summary: "Comment thread created",
+        resourceId: thread.id,
+        resourceTitleSnapshot: this.toPlaintext(normalized).slice(0, 255),
+        metadata: {
+          threadId: thread.id,
+          commentId: thread.comments[0]?.id,
+          targetType: input.targetType,
+          targetId: input.targetId,
+        },
+      }),
+    );
+    await this.safeSideEffect("comment thread mention notifications", () =>
+      this.createMentionNotifications({
+        actorUserId: input.actorUserId,
+        actorName: author.fullName,
+        workspaceId: input.workspaceId,
         targetType: input.targetType,
         targetId: input.targetId,
-      },
-    });
-    await this.createMentionNotifications({
-      actorUserId: input.actorUserId,
-      actorName: author.fullName,
-      workspaceId: input.workspaceId,
-      targetType: input.targetType,
-      targetId: input.targetId,
-      threadId: thread.id,
-      mentionUserIds,
-      bodyPlaintext: this.toPlaintext(normalized),
-    });
+        threadId: thread.id,
+        mentionUserIds,
+        bodyPlaintext: this.toPlaintext(normalized),
+      }),
+    );
     return thread;
   }
 
@@ -175,26 +181,35 @@ export class CommentsService {
       },
       include: { mentions: true },
     });
-    await this.emitMutation({
-      workspaceId: input.workspaceId,
-      actorUserId: input.actorUserId,
-      event: "comment:reply_created",
-      actionKey: "comment.reply_created",
-      summary: "Comment reply added",
-      resourceId: thread.id,
-      resourceTitleSnapshot: this.toPlaintext(normalized).slice(0, 255),
-      metadata: { threadId: thread.id, commentId: reply.id, targetType: thread.targetType, targetId: thread.targetId },
-    });
-    await this.createMentionNotifications({
-      actorUserId: input.actorUserId,
-      actorName: author.fullName,
-      workspaceId: input.workspaceId,
-      targetType: thread.targetType,
-      targetId: thread.targetId,
-      threadId: thread.id,
-      mentionUserIds,
-      bodyPlaintext: this.toPlaintext(normalized),
-    });
+    await this.safeSideEffect("comment reply activity", () =>
+      this.emitMutation({
+        workspaceId: input.workspaceId,
+        actorUserId: input.actorUserId,
+        event: "comment:reply_created",
+        actionKey: "comment.reply_created",
+        summary: "Comment reply added",
+        resourceId: thread.id,
+        resourceTitleSnapshot: this.toPlaintext(normalized).slice(0, 255),
+        metadata: {
+          threadId: thread.id,
+          commentId: reply.id,
+          targetType: thread.targetType,
+          targetId: thread.targetId,
+        },
+      }),
+    );
+    await this.safeSideEffect("comment reply mention notifications", () =>
+      this.createMentionNotifications({
+        actorUserId: input.actorUserId,
+        actorName: author.fullName,
+        workspaceId: input.workspaceId,
+        targetType: thread.targetType,
+        targetId: thread.targetId,
+        threadId: thread.id,
+        mentionUserIds,
+        bodyPlaintext: this.toPlaintext(normalized),
+      }),
+    );
     return reply;
   }
 
@@ -327,6 +342,18 @@ export class CommentsService {
     return updated;
   }
 
+  private async safeSideEffect(context: string, fn: () => Promise<void>): Promise<void> {
+    try {
+      await fn();
+    } catch (error) {
+      this.logger.error(`${context} failed: ${this.toErrorMessage(error)}`);
+    }
+  }
+
+  private toErrorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+  }
+
   private async emitMutation(input: {
     workspaceId: string;
     actorUserId: string;
@@ -338,38 +365,57 @@ export class CommentsService {
     metadata: Record<string, unknown>;
   }) {
     const actor = await this.getAuthor(input.actorUserId);
-    const activity = await this.prisma.activityEvent.create({
-      data: {
-        workspaceId: input.workspaceId,
-        actorId: input.actorUserId,
-        actorNameSnapshot: actor.fullName,
-        actorAvatarSnapshot: actor.avatarUrl ?? null,
-        eventKey: input.actionKey,
-        summary: input.summary,
-        resourceType: "comment_thread",
-        resourceId: input.resourceId,
-        resourceTitleSnapshot: input.resourceTitleSnapshot,
-        metadata: input.metadata as never,
-      },
-    });
-    await this.prisma.auditLog.create({
-      data: {
-        severity: "info",
-        actionKey: input.actionKey,
-        actorId: input.actorUserId,
-        actorEmail: actor.email,
-        actorGlobalRole: actor.globalRole,
-        workspaceId: input.workspaceId,
-        targetType: "comment_thread",
-        targetId: input.resourceId,
-        metadata: input.metadata as never,
-      },
-    });
-    this.eventEmitter.emit("activity.recorded", {
-      workspaceId: input.workspaceId,
-      activityEvent: activity as unknown as Record<string, unknown>,
-    });
 
+    try {
+      const activity = await this.prisma.activityEvent.create({
+        data: {
+          workspaceId: input.workspaceId,
+          actorId: input.actorUserId,
+          actorNameSnapshot: actor.fullName,
+          actorAvatarSnapshot: actor.avatarUrl ?? null,
+          eventKey: input.actionKey,
+          summary: input.summary,
+          resourceType: ResourceType.comment_thread,
+          resourceId: input.resourceId,
+          resourceTitleSnapshot: input.resourceTitleSnapshot,
+          metadata: input.metadata as never,
+        },
+      });
+      await this.prisma.auditLog.create({
+        data: {
+          severity: "info",
+          actionKey: input.actionKey,
+          actorId: input.actorUserId,
+          actorEmail: actor.email,
+          actorGlobalRole: actor.globalRole != null ? String(actor.globalRole) : null,
+          workspaceId: input.workspaceId,
+          targetType: "comment_thread",
+          targetId: input.resourceId,
+          metadata: input.metadata as never,
+        },
+      });
+      try {
+        this.eventEmitter.emit("activity.recorded", {
+          workspaceId: input.workspaceId,
+          activityEvent: activity as unknown as Record<string, unknown>,
+        });
+      } catch (error) {
+        this.logger.warn(`activity.recorded emit failed: ${this.toErrorMessage(error)}`);
+      }
+    } catch (error) {
+      this.logger.warn(`comment activity/audit persistence failed: ${this.toErrorMessage(error)}`);
+    }
+
+    this.emitCommentDomainEvents(input);
+  }
+
+  private emitCommentDomainEvents(input: {
+    workspaceId: string;
+    actorUserId: string;
+    event: `comment:${string}`;
+    resourceId: string;
+    metadata: Record<string, unknown>;
+  }): void {
     const threadId =
       typeof input.metadata.threadId === "string" ? input.metadata.threadId : input.resourceId;
     const targetType =
@@ -379,33 +425,37 @@ export class CommentsService {
     const commentId =
       typeof input.metadata.commentId === "string" ? input.metadata.commentId : undefined;
 
-    if (input.event === "comment:thread_created" || input.event === "comment:reply_created") {
-      this.eventEmitter.emit("comment.created", {
-        workspaceId: input.workspaceId,
-        threadId,
-        commentId,
-        targetType,
-        targetId,
-        authorId: input.actorUserId,
-      });
-    } else if (input.event === "comment:updated" && commentId) {
-      this.eventEmitter.emit("comment.updated", {
-        workspaceId: input.workspaceId,
-        threadId,
-        commentId,
-      });
-    } else if (input.event === "comment:deleted" && commentId) {
-      this.eventEmitter.emit("comment.deleted", {
-        workspaceId: input.workspaceId,
-        threadId,
-        commentId,
-      });
-    } else if (input.event === "comment:resolved") {
-      this.eventEmitter.emit("comment.thread_resolved", {
-        workspaceId: input.workspaceId,
-        threadId,
-        resolvedById: input.actorUserId,
-      });
+    try {
+      if (input.event === "comment:thread_created" || input.event === "comment:reply_created") {
+        this.eventEmitter.emit("comment.created", {
+          workspaceId: input.workspaceId,
+          threadId,
+          commentId,
+          targetType,
+          targetId,
+          authorId: input.actorUserId,
+        });
+      } else if (input.event === "comment:updated" && commentId) {
+        this.eventEmitter.emit("comment.updated", {
+          workspaceId: input.workspaceId,
+          threadId,
+          commentId,
+        });
+      } else if (input.event === "comment:deleted" && commentId) {
+        this.eventEmitter.emit("comment.deleted", {
+          workspaceId: input.workspaceId,
+          threadId,
+          commentId,
+        });
+      } else if (input.event === "comment:resolved") {
+        this.eventEmitter.emit("comment.thread_resolved", {
+          workspaceId: input.workspaceId,
+          threadId,
+          resolvedById: input.actorUserId,
+        });
+      }
+    } catch (error) {
+      this.logger.warn(`comment domain event emit failed: ${this.toErrorMessage(error)}`);
     }
   }
 
@@ -442,7 +492,8 @@ export class CommentsService {
       threadId: input.threadId,
     });
     const bodySnippet = input.bodyPlaintext.trim().slice(0, 280);
-    const resourceType = input.targetType === "document" ? "document" : "task";
+    const resourceType =
+      input.targetType === "document" ? ResourceType.document : ResourceType.task;
 
     for (const recipientId of recipients) {
       const notification = await this.prisma.notification.create({

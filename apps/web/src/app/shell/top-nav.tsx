@@ -16,8 +16,8 @@ import { useCurrentAccount } from "@/lib/auth-session";
 import { getSessionRole } from "@/lib/session-role";
 import { teardownAuthSession } from "@/lib/auth-teardown";
 import { fetchUnreadCount } from "@/api/adapters/notifications";
-import { useNotificationRealtime } from "@/hooks/use-notification-realtime";
 import { emitOpenHelp } from "@/lib/shortcut-events";
+import { queryKeys } from "@/lib/query-keys";
 
 interface TopNavProps {
   /** Optional user override — when omitted, the signed-in account is used. */
@@ -31,9 +31,8 @@ export const TopNav = ({ user: userOverride, unreadCount: unreadCountOverride, o
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const account = useCurrentAccount();
-  useNotificationRealtime();
   const unreadQ = useQuery({
-    queryKey: ["notifications", "unread-count"],
+    queryKey: queryKeys.notifications.unreadCount(),
     queryFn: fetchUnreadCount,
     enabled: unreadCountOverride === undefined && !!account,
     staleTime: 30_000,

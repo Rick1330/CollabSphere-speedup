@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import {
-  joinWorkspaceRoom,
   subscribeRealtimeStatus,
   subscribeTaskEvents,
   type TaskRealtimeEvent,
@@ -24,11 +23,6 @@ export function useTaskRealtime(
     const unsubscribeTaskEvents = subscribeTaskEvents((event, payload) => {
       if (!cancelled && onTaskEvent) {
         onTaskEvent(event, payload);
-      }
-    });
-    joinWorkspaceRoom(workspaceId).catch(() => {
-      if (!cancelled) {
-        setStatus("unavailable");
       }
     });
     return () => {

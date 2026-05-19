@@ -32,14 +32,13 @@ import { TaskListCards } from "./task-list-cards";
 import { TaskListPagination } from "./task-list-pagination";
 import { useTaskListQueryState } from "@/features/tasks/hooks/use-task-list-query-state";
 import { useTaskRealtime } from "@/features/tasks/hooks/use-task-realtime";
+import { useCurrentAccount } from "@/lib/auth-session";
 
 interface TaskListProps {
   workspaceId: string;
   workspaceStatus: "active" | "archived";
   myRole: TaskRole;
 }
-
-const CURRENT_USER_ID = "user-jane";
 
 const STATUS_ORDER: Record<string, number> = {
   backlog: 0,
@@ -110,6 +109,8 @@ export const TaskList = ({
   workspaceStatus,
   myRole,
 }: TaskListProps) => {
+  const account = useCurrentAccount();
+  const currentUserId = account?.id ?? "";
   const [tasks, setTasks] = useState<Record<string, TaskDetail>>({});
   const [members, setMembers] = useState<TaskAssignee[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -278,49 +279,14 @@ export const TaskList = ({
   const selectedTask = selectedTaskId ? (tasks[selectedTaskId] ?? null) : null;
 
   // Mutations
-  const handleCreate = (params: {
-    title: string;
-    description?: string;
-    status: TaskStatus;
-    priority: TaskPriority;
-    dueDate?: string;
-    assigneeId?: string;
-    sourceLink?: TaskLinkedResource;
-  }) => {
-    const id = `task-${Date.now()}`;
-    const nowIso = new Date().toISOString();
-    const assignee = params.assigneeId
-      ? members.find((m) => m.id === params.assigneeId) ?? null
-      : null;
-    const newTask: TaskDetail = {
-      id,
-      title: params.title,
-      status: params.status,
-      priority: params.priority,
-      assignee,
-      dueDate: params.dueDate ? new Date(params.dueDate).toISOString() : null,
-      labels: [],
-      commentCount: 0,
-      position: Object.keys(tasks).length + 1,
-      description: params.description ?? null,
-      descriptionRich: params.description
-        ? [{ type: "text", text: params.description }]
-        : null,
-      reporterId: CURRENT_USER_ID,
-      reporterName: "Elshaday Tesfaye",
-      createdAt: nowIso,
-      updatedAt: nowIso,
-      linkedResources: params.sourceLink ? [params.sourceLink] : [],
-      comments: [],
-      parentTaskId: null,
-      subtaskIds: [],
-      blockedByTaskIds: [],
-      blockingTaskIds: [],
-    };
-    setTasks((prev) => ({ ...prev, [id]: newTask }));
+  const handleCreate = (newTask: TaskDetail, sourceLink?: TaskLinkedResource) => {
+    const taskWithLink: TaskDetail = sourceLink
+      ? { ...newTask, linkedResources: [sourceLink, ...newTask.linkedResources] }
+      : newTask;
+    setTasks((prev) => ({ ...prev, [taskWithLink.id]: taskWithLink }));
     setShowCreateDialog(false);
     toast.success("Task created", {
-      description: `"${params.title}" added to ${getStatusLabel(params.status, columns)}.`,
+      description: `"${taskWithLink.title}" added to ${getStatusLabel(taskWithLink.status, columns)}.`,
     });
   };
 
@@ -357,7 +323,7 @@ export const TaskList = ({
       if (!cur) return prev;
       const c: TaskComment = {
         id: `tc-${Date.now()}`,
-        authorId: CURRENT_USER_ID,
+        authorId: currentUserId,
         body,
         createdAt: new Date().toISOString(),
       };
@@ -598,9 +564,9 @@ export const TaskList = ({
           assignableMembers={
             ["OWNER", "ADMIN", "MANAGER"].includes(myRole)
               ? members
-              : members.filter((m) => m.id === CURRENT_USER_ID)
+              : members.filter((m) => m.id === currentUserId)
           }
-          currentUserId={CURRENT_USER_ID}
+          currentUserId={currentUserId}
           onClose={() => setShowCreateDialog(false)}
           onCreated={handleCreate}
         />
@@ -613,7 +579,7 @@ export const TaskList = ({
         isLoading={sheetLoading}
         isArchived={isArchived}
         myRole={myRole}
-        currentUserId={CURRENT_USER_ID}
+        currentUserId={currentUserId}
         members={members}
         onClose={() => setSelectedTaskId(null)}
         onDelete={handleDelete}

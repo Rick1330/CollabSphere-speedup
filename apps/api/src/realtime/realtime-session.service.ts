@@ -71,6 +71,40 @@ export class RealtimeSessionService {
     }
   }
 
+  async assertTaskInWorkspace(userId: string, workspaceId: string, taskId: string): Promise<void> {
+    await this.assertWorkspaceMembership(userId, workspaceId);
+    const task = await this.prisma.task.findFirst({
+      where: { id: taskId, workspaceId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!task) {
+      throw new AppError({ code: "NOT_FOUND", message: "Task not found in workspace" });
+    }
+  }
+
+  async assertDocumentInWorkspace(
+    userId: string,
+    workspaceId: string,
+    documentId: string,
+  ): Promise<void> {
+    await this.assertWorkspaceMembership(userId, workspaceId);
+    const document = await this.prisma.document.findFirst({
+      where: { id: documentId, workspaceId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!document) {
+      throw new AppError({ code: "NOT_FOUND", message: "Document not found in workspace" });
+    }
+  }
+
+  async resolveTaskWorkspaceId(taskId: string): Promise<string | null> {
+    const task = await this.prisma.task.findFirst({
+      where: { id: taskId, deletedAt: null },
+      select: { workspaceId: true },
+    });
+    return task?.workspaceId ?? null;
+  }
+
   toWorkspaceRoom(workspaceId: string): string {
     return `workspace:${workspaceId}`;
   }

@@ -5,8 +5,6 @@ import type { WorkspaceForSidebar } from "@/features/workspace/components/worksp
 import type { WorkspaceRole } from "@/api/adapters/members";
 import { isDatabaseWorkspaceId } from "@/lib/workspace-id";
 import { ApiError } from "@/api/client";
-import { useWorkspaceRealtime } from "@/hooks/use-workspace-realtime";
-
 export interface WorkspaceRouteContextValue {
   workspaceId: string;
   sidebar: WorkspaceForSidebar | undefined;
@@ -30,7 +28,6 @@ function isAccessDeniedError(error: unknown): boolean {
 export function useWorkspaceRouteContext(): WorkspaceRouteContextValue {
   const params = useParams<{ workspaceId: string }>();
   const workspaceId = params.workspaceId?.trim() ?? "";
-  useWorkspaceRealtime(isDatabaseWorkspaceId(workspaceId) ? workspaceId : undefined);
   const q = useQuery({
     queryKey: ["workspace", workspaceId, "shell"],
     queryFn: () => fetchWorkspaceSidebarContext(workspaceId),

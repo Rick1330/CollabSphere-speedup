@@ -1,6 +1,6 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Logger } from "@nestjs/common";
 import { EventEmitter2 } from "@nestjs/event-emitter";
-import { Prisma, type TaskPriority, type TaskStatus } from "@prisma/client";
+import { Prisma, ResourceType, type TaskPriority, type TaskStatus } from "@prisma/client";
 import { AppError, ValidationAppError } from "../common/filters/app-error.filter.js";
 import { PrismaClientProvider } from "../common/prisma/prisma-client.provider.js";
 
@@ -17,6 +17,8 @@ const TASK_STATUSES: readonly TaskStatus[] = ["backlog", "todo", "in_progress", 
 
 @Injectable()
 export class TasksService {
+  private readonly logger = new Logger(TasksService.name);
+
   constructor(
     @Inject(PrismaClientProvider) private readonly prisma: PrismaClientProvider,
     private readonly eventEmitter: EventEmitter2,
@@ -102,13 +104,17 @@ export class TasksService {
         reporter: { select: { id: true, fullName: true, avatarUrl: true } },
       },
     });
-    await this.emitTaskMutation({
-      task,
-      actorUserId: input.actorUserId,
-      event: "task:created",
-      actionKey: "task.created",
-      summary: `Task created: ${task.title}`,
-    });
+
+    await this.safeTaskSideEffect("task created activity", () =>
+      this.emitTaskMutation({
+          task,
+          actorUserId: input.actorUserId,
+          event: "task:created",
+          actionKey: "task.created",
+          summary: `Task created: ${task.title}`,
+        }),
+      );
+
     return task;
   }
 
@@ -345,6 +351,18 @@ export class TasksService {
     };
   }
 
+  private toErrorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+  }
+
+  private async safeTaskSideEffect(context: string, fn: () => Promise<void>): Promise<void> {
+    try {
+      await fn();
+    } catch (error) {
+      this.logger.error(`${context} failed: ${this.toErrorMessage(error)}`);
+    }
+  }
+
   private async emitTaskMutation(input: {
     task: {
       id: string;
@@ -364,72 +382,99 @@ export class TasksService {
       where: { id: input.actorUserId },
       select: { fullName: true, avatarUrl: true, email: true, globalRole: true },
     });
-    const activity = await this.prisma.activityEvent.create({
-      data: {
-        workspaceId: input.task.workspaceId,
-        actorId: input.actorUserId,
-        actorNameSnapshot: actor?.fullName ?? "Unknown User",
-        actorAvatarSnapshot: actor?.avatarUrl ?? null,
-        eventKey: input.actionKey,
-        summary: input.summary,
-        resourceType: "task",
-        resourceId: input.task.id,
-        resourceTitleSnapshot: input.task.title,
-        metadata: { taskId: input.task.id },
-      },
-    });
-    await this.prisma.auditLog.create({
-      data: {
-        severity: "info",
-        actionKey: input.actionKey,
-        actorId: input.actorUserId,
-        actorEmail: actor?.email ?? null,
-        actorGlobalRole: actor?.globalRole ?? null,
-        workspaceId: input.task.workspaceId,
-        targetType: "task",
-        targetId: input.task.id,
-        metadata: { taskId: input.task.id },
-      },
-    });
-    this.eventEmitter.emit("activity.recorded", {
-      workspaceId: input.task.workspaceId,
-      activityEvent: activity as unknown as Record<string, unknown>,
-    });
 
+    try {
+      const activity = await this.prisma.activityEvent.create({
+        data: {
+          workspaceId: input.task.workspaceId,
+          actorId: input.actorUserId,
+          actorNameSnapshot: actor?.fullName ?? "Unknown User",
+          actorAvatarSnapshot: actor?.avatarUrl ?? null,
+          eventKey: input.actionKey,
+          summary: input.summary,
+          resourceType: ResourceType.task,
+          resourceId: input.task.id,
+          resourceTitleSnapshot: input.task.title,
+          metadata: { taskId: input.task.id },
+        },
+      });
+      await this.prisma.auditLog.create({
+        data: {
+          severity: "info",
+          actionKey: input.actionKey,
+          actorId: input.actorUserId,
+          actorEmail: actor?.email ?? null,
+          actorGlobalRole: actor?.globalRole != null ? String(actor.globalRole) : null,
+          workspaceId: input.task.workspaceId,
+          targetType: "task",
+          targetId: input.task.id,
+          metadata: { taskId: input.task.id },
+        },
+      });
+      try {
+        this.eventEmitter.emit("activity.recorded", {
+          workspaceId: input.task.workspaceId,
+          activityEvent: activity as unknown as Record<string, unknown>,
+        });
+      } catch (error) {
+        this.logger.warn(`activity.recorded emit failed: ${this.toErrorMessage(error)}`);
+      }
+    } catch (error) {
+      this.logger.warn(`task activity/audit persistence failed: ${this.toErrorMessage(error)}`);
+    }
+
+    this.emitTaskDomainEvents(input);
+  }
+
+  private emitTaskDomainEvents(input: {
+    task: {
+      id: string;
+      workspaceId: string;
+      assigneeId: string | null;
+      status: TaskStatus;
+      position?: Prisma.Decimal | number;
+    };
+    event: `task:${string}`;
+    fromStatus?: TaskStatus;
+  }): void {
     const position =
       input.task.position !== undefined ? Number(input.task.position) : undefined;
 
-    if (input.event === "task:created") {
-      this.eventEmitter.emit("task.created", {
-        workspaceId: input.task.workspaceId,
-        taskId: input.task.id,
-        status: input.task.status,
-      });
-    } else if (input.event === "task:assigned") {
-      this.eventEmitter.emit("task.assigned", {
-        workspaceId: input.task.workspaceId,
-        taskId: input.task.id,
-        assigneeId: input.task.assigneeId,
-      });
-    } else if (input.event === "task:status_changed") {
-      this.eventEmitter.emit("task.status_changed", {
-        workspaceId: input.task.workspaceId,
-        taskId: input.task.id,
-        toStatus: input.task.status,
-        fromStatus: input.fromStatus,
-        position,
-      });
-      if (input.task.status === "done") {
-        this.eventEmitter.emit("task.completed", {
+    try {
+      if (input.event === "task:created") {
+        this.eventEmitter.emit("task.created", {
+          workspaceId: input.task.workspaceId,
+          taskId: input.task.id,
+          status: input.task.status,
+        });
+      } else if (input.event === "task:assigned") {
+        this.eventEmitter.emit("task.assigned", {
+          workspaceId: input.task.workspaceId,
+          taskId: input.task.id,
+          assigneeId: input.task.assigneeId,
+        });
+      } else if (input.event === "task:status_changed") {
+        this.eventEmitter.emit("task.status_changed", {
+          workspaceId: input.task.workspaceId,
+          taskId: input.task.id,
+          toStatus: input.task.status,
+          fromStatus: input.fromStatus,
+          position,
+        });
+        if (input.task.status === "done") {
+          this.eventEmitter.emit("task.completed", {
+            workspaceId: input.task.workspaceId,
+            taskId: input.task.id,
+          });
+        }
+      } else if (input.event === "task:deleted") {
+        this.eventEmitter.emit("task.deleted", {
           workspaceId: input.task.workspaceId,
           taskId: input.task.id,
         });
       }
-    } else if (input.event === "task:deleted") {
-      this.eventEmitter.emit("task.deleted", {
-        workspaceId: input.task.workspaceId,
-        taskId: input.task.id,
-      });
+    } catch (error) {
+      this.logger.warn(`task domain event emit failed: ${this.toErrorMessage(error)}`);
     }
   }
 

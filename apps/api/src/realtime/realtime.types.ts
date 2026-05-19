@@ -30,6 +30,7 @@ export type JoinTaskRoomPayload = {
 
 export type LeaveTaskRoomPayload = {
   taskId: string;
+  workspaceId?: string;
 };
 
 export type JoinDocumentRoomPayload = {

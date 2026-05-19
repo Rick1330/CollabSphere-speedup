@@ -1,4 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { ApiError } from "@/api/client";
 import type { CommentAuthor, CommentNode, CommentThread } from "@/lib/mock-comments";
 import {
   createDocumentReply,
@@ -6,6 +9,7 @@ import {
   listDocumentThreads,
   setDocumentThreadResolved,
 } from "@/api/adapters/comments";
+import { queryKeys } from "@/lib/query-keys";
 import { useDocumentCommentRealtime } from "./use-document-comment-realtime";
 
 export type CommentFilter = "open" | "resolved";
@@ -36,42 +40,37 @@ function toAuthor(user: DocumentCommentCurrentUser): CommentAuthor {
 }
 
 export function useDocumentComments({ workspaceId, documentId, currentUser }: UseDocumentCommentsArgs) {
-  const [threads, setThreads] = useState<CommentThread[]>([]);
+  const queryClient = useQueryClient();
   const [filter, setFilter] = useState<CommentFilter>("open");
 
-  const refetchThreads = useCallback(() => {
-    if (!workspaceId || !documentId) return Promise.resolve();
-    return listDocumentThreads(workspaceId, documentId)
-      .then(setThreads)
-      .catch(() => setThreads([]));
-  }, [workspaceId, documentId]);
+  const threadsQueryKey = queryKeys.comments.threads(workspaceId, "document", documentId);
 
-  useEffect(() => {
-    let cancelled = false;
-    if (!workspaceId || !documentId) {
-      setThreads([]);
-      return;
-    }
-    listDocumentThreads(workspaceId, documentId)
-      .then((items) => {
-        if (!cancelled) setThreads(items);
-      })
-      .catch(() => {
-        if (!cancelled) setThreads([]);
-      });
-    setFilter("open");
-    return () => {
-      cancelled = true;
-    };
-  }, [workspaceId, documentId]);
+  const threadsQuery = useQuery({
+    queryKey: threadsQueryKey,
+    queryFn: () => listDocumentThreads(workspaceId, documentId),
+    enabled: Boolean(workspaceId && documentId),
+  });
+
+  const threads = threadsQuery.data ?? [];
+
+  const patchThreads = useCallback(
+    (updater: (prev: CommentThread[]) => CommentThread[]) => {
+      queryClient.setQueryData<CommentThread[]>(threadsQueryKey, (prev) =>
+        updater(prev ?? []),
+      );
+    },
+    [queryClient, threadsQueryKey],
+  );
+
+  const refetchThreads = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: threadsQueryKey });
+  }, [queryClient, threadsQueryKey]);
 
   useDocumentCommentRealtime({
     workspaceId,
     documentId,
     currentUserId: currentUser.id,
-    onRefetch: () => {
-      void refetchThreads();
-    },
+    onRefetch: refetchThreads,
   });
 
   const openCount = useMemo(() => threads.filter((t) => !t.resolved).length, [threads]);
@@ -99,11 +98,40 @@ export function useDocumentComments({ workspaceId, documentId, currentUser }: Us
         resolved: false,
         replies: [],
       };
-      setThreads((prev) => [...prev, optimistic]);
-      void createDocumentThread(workspaceId, documentId, body, anchorSnippet).then(() => refetchThreads());
+      const previous = queryClient.getQueryData<CommentThread[]>(threadsQueryKey) ?? [];
+      patchThreads((prev) => [...prev, optimistic]);
+      void createDocumentThread(workspaceId, documentId, body, anchorSnippet)
+        .then(() => refetchThreads())
+        .catch((error: unknown) => {
+          // #region agent log
+          fetch("http://127.0.0.1:7352/ingest/38fbd051-1833-4296-ab67-281907013a27", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Debug-Session-Id": "833b60",
+            },
+            body: JSON.stringify({
+              sessionId: "833b60",
+              runId: "pre-fix",
+              hypothesisId: "H",
+              location: "use-document-comments.ts:createThread",
+              message: "createDocumentThread failed",
+              data: {
+                code: error instanceof ApiError ? error.code : "unknown",
+                apiMessage: error instanceof ApiError ? error.message : String(error),
+              },
+              timestamp: Date.now(),
+            }),
+          }).catch(() => undefined);
+          // #endregion
+          queryClient.setQueryData(threadsQueryKey, previous);
+          const message =
+            error instanceof ApiError ? error.message : "Could not post comment.";
+          toast.error(message);
+        });
       return optimistic;
     },
-    [workspaceId, documentId, currentUser, refetchThreads],
+    [workspaceId, documentId, currentUser, patchThreads, refetchThreads, queryClient, threadsQueryKey],
   );
 
   const replyToThread = useCallback(
@@ -116,7 +144,8 @@ export function useDocumentComments({ workspaceId, documentId, currentUser }: Us
         body,
         createdAt: new Date().toISOString(),
       };
-      setThreads((prev) =>
+      const previous = queryClient.getQueryData<CommentThread[]>(threadsQueryKey) ?? [];
+      patchThreads((prev) =>
         prev.map((t) =>
           t.id === threadId
             ? {
@@ -126,16 +155,24 @@ export function useDocumentComments({ workspaceId, documentId, currentUser }: Us
             : t,
         ),
       );
-      void createDocumentReply(workspaceId, threadId, body).then(() => refetchThreads());
+      void createDocumentReply(workspaceId, threadId, body)
+        .then(() => refetchThreads())
+        .catch((error: unknown) => {
+          queryClient.setQueryData(threadsQueryKey, previous);
+          const message =
+            error instanceof ApiError ? error.message : "Could not post reply.";
+          toast.error(message);
+        });
     },
-    [workspaceId, currentUser, refetchThreads],
+    [workspaceId, currentUser, patchThreads, refetchThreads, queryClient, threadsQueryKey],
   );
 
   const toggleResolve = useCallback(
     (threadId: string) => {
       const thread = threads.find((item) => item.id === threadId);
       const nextResolved = !thread?.resolved;
-      setThreads((prev) =>
+      const previous = queryClient.getQueryData<CommentThread[]>(threadsQueryKey) ?? [];
+      patchThreads((prev) =>
         prev.map((t) => {
           if (t.id !== threadId) return t;
           if (nextResolved === false) {
@@ -149,9 +186,18 @@ export function useDocumentComments({ workspaceId, documentId, currentUser }: Us
           };
         }),
       );
-      void setDocumentThreadResolved(workspaceId, threadId, nextResolved).then(() => refetchThreads());
+      void setDocumentThreadResolved(workspaceId, threadId, nextResolved)
+        .then(() => refetchThreads())
+        .catch((error: unknown) => {
+          queryClient.setQueryData(threadsQueryKey, previous);
+          const message =
+            error instanceof ApiError
+              ? error.message
+              : "Could not update thread status.";
+          toast.error(message);
+        });
     },
-    [threads, workspaceId, currentUser.id, refetchThreads],
+    [threads, workspaceId, currentUser.id, patchThreads, refetchThreads, queryClient, threadsQueryKey],
   );
 
   return {
@@ -164,5 +210,7 @@ export function useDocumentComments({ workspaceId, documentId, currentUser }: Us
     createThread,
     replyToThread,
     toggleResolve,
+    isLoading: threadsQuery.isLoading,
+    isError: threadsQuery.isError,
   };
 }

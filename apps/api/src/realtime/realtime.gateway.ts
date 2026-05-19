@@ -1,5 +1,4 @@
 import { Logger, type OnModuleDestroy } from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
 import {
   ConnectedSocket,
   MessageBody,
@@ -11,6 +10,7 @@ import type { OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit } from "@n
 import { createAdapter } from "@socket.io/redis-adapter";
 import { createClient, type RedisClientType } from "redis";
 import type { Server, Socket } from "socket.io";
+import { apiRuntimeEnv } from "../config/api-runtime.js";
 import type {
   DocumentPresencePayload,
   JoinDocumentRoomPayload,
@@ -29,11 +29,21 @@ type RoomAck = RoomAckSuccess | RoomAckFailure;
 type RoomsAckSuccess = { ok: true; rooms: string[] };
 type RoomsAck = RoomsAckSuccess | RoomAckFailure;
 
+type GenericRoomPayload = {
+  room: string;
+  workspaceId?: string;
+};
+
 type AwarenessBroadcast = {
   workspaceId: string;
   documentId: string;
   activeUsers?: unknown[];
 };
+
+/** Resolved Redis URL for gateway init (avoids ConfigService in WebSocket lifecycle). */
+export function resolveGatewayRedisUrl(): string {
+  return apiRuntimeEnv.REDIS_URL?.trim() ?? "";
+}
 
 @WebSocketGateway({
   namespace: "/realtime",
@@ -55,14 +65,11 @@ export class RealtimeGateway
   private namespaceRedisSub?: RedisClientType;
   private awarenessRedisSub?: RedisClientType;
 
-  constructor(
-    private readonly sessionService: RealtimeSessionService,
-    private readonly config: ConfigService,
-  ) {}
+  constructor(private readonly sessionService: RealtimeSessionService) {}
 
   afterInit(server: Server): void {
     this.server = server;
-    const redisUrl = this.config.get<string>("REDIS_URL")?.trim() ?? "";
+    const redisUrl = resolveGatewayRedisUrl();
     const skipRedis = process.env.SKIP_REDIS_IO_ADAPTER === "1";
 
     if (!redisUrl || skipRedis) {
@@ -155,7 +162,11 @@ export class RealtimeGateway
   ): Promise<RoomsAck> {
     try {
       const user = this.sessionService.getAuthenticatedUser(client);
-      await this.sessionService.assertWorkspaceMembership(user.userId, payload.workspaceId);
+      await this.sessionService.assertTaskInWorkspace(
+        user.userId,
+        payload.workspaceId,
+        payload.taskId,
+      );
       const workspaceRoom = this.sessionService.toWorkspaceRoom(payload.workspaceId);
       const taskRoom = this.sessionService.toTaskRoom(payload.taskId);
       await client.join(workspaceRoom);
@@ -173,7 +184,11 @@ export class RealtimeGateway
   ): Promise<RoomAck> {
     try {
       const user = this.sessionService.getAuthenticatedUser(client);
-      await this.sessionService.assertWorkspaceMembership(user.userId, payload.workspaceId);
+      await this.sessionService.assertDocumentInWorkspace(
+        user.userId,
+        payload.workspaceId,
+        payload.documentId,
+      );
       const room = this.sessionService.toDocumentRoom(payload.documentId);
       await client.join(room);
       const presence: DocumentPresencePayload = {
@@ -235,16 +250,28 @@ export class RealtimeGateway
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: LeaveTaskRoomPayload,
   ): Promise<RoomAck> {
-    const room = this.sessionService.toTaskRoom(payload.taskId);
-    await client.leave(room);
-    return { ok: true, room };
+    try {
+      const user = this.sessionService.getAuthenticatedUser(client);
+      const workspaceId =
+        payload.workspaceId?.trim() ||
+        (await this.sessionService.resolveTaskWorkspaceId(payload.taskId));
+      if (!workspaceId) {
+        return { ok: false, message: "Task not found" };
+      }
+      await this.sessionService.assertTaskInWorkspace(user.userId, workspaceId, payload.taskId);
+      const room = this.sessionService.toTaskRoom(payload.taskId);
+      await client.leave(room);
+      return { ok: true, room };
+    } catch (error) {
+      return { ok: false, message: this.toErrorMessage(error) };
+    }
   }
 
   /** Generic join — validates workspace membership for `workspace:*` rooms. */
   @SubscribeMessage("room:join")
   async handleJoin(
     @ConnectedSocket() client: Socket,
-    @MessageBody() payload: { room: string },
+    @MessageBody() payload: GenericRoomPayload,
   ): Promise<RoomAck> {
     const room = payload?.room?.trim() ?? "";
     if (!room) {
@@ -255,28 +282,71 @@ export class RealtimeGateway
       return this.joinWorkspaceRoomInternal(client, workspaceId);
     }
     if (room.startsWith("user:")) {
-      const user = this.sessionService.getAuthenticatedUser(client);
-      if (room !== this.sessionService.toUserRoom(user.userId)) {
-        return { ok: false, message: "Cannot join another user's room" };
+      try {
+        const user = this.sessionService.getAuthenticatedUser(client);
+        if (room !== this.sessionService.toUserRoom(user.userId)) {
+          return { ok: false, message: "Cannot join another user's room" };
+        }
+        await client.join(room);
+        return { ok: true, room };
+      } catch (error) {
+        return { ok: false, message: this.toErrorMessage(error) };
       }
-      await client.join(room);
-      return { ok: true, room };
     }
-    await client.join(room);
-    return { ok: true, room };
+    if (room.startsWith("task:")) {
+      const workspaceId = payload.workspaceId?.trim() ?? "";
+      const taskId = room.slice("task:".length);
+      if (!workspaceId) {
+        return { ok: false, message: "workspaceId is required for task rooms" };
+      }
+      try {
+        const user = this.sessionService.getAuthenticatedUser(client);
+        await this.sessionService.assertTaskInWorkspace(user.userId, workspaceId, taskId);
+        await client.join(this.sessionService.toWorkspaceRoom(workspaceId));
+        await client.join(room);
+        return { ok: true, room };
+      } catch (error) {
+        return { ok: false, message: this.toErrorMessage(error) };
+      }
+    }
+    if (room.startsWith("document:")) {
+      const workspaceId = payload.workspaceId?.trim() ?? "";
+      const documentId = room.slice("document:".length);
+      if (!workspaceId) {
+        return { ok: false, message: "workspaceId is required for document rooms" };
+      }
+      try {
+        const user = this.sessionService.getAuthenticatedUser(client);
+        await this.sessionService.assertDocumentInWorkspace(user.userId, workspaceId, documentId);
+        await client.join(room);
+        return { ok: true, room };
+      } catch (error) {
+        return { ok: false, message: this.toErrorMessage(error) };
+      }
+    }
+    return { ok: false, message: "Unsupported room" };
   }
 
   @SubscribeMessage("room:leave")
   async handleLeave(
     @ConnectedSocket() client: Socket,
-    @MessageBody() payload: { room: string },
+    @MessageBody() payload: GenericRoomPayload,
   ): Promise<RoomAck> {
     const room = payload?.room?.trim() ?? "";
     if (!room) {
       return { ok: false, message: "Room is required" };
     }
-    await client.leave(room);
-    return { ok: true, room };
+    try {
+      const user = this.sessionService.getAuthenticatedUser(client);
+      if (room.startsWith("workspace:")) {
+        const workspaceId = room.slice("workspace:".length);
+        await this.sessionService.assertWorkspaceMembership(user.userId, workspaceId);
+      }
+      await client.leave(room);
+      return { ok: true, room };
+    } catch (error) {
+      return { ok: false, message: this.toErrorMessage(error) };
+    }
   }
 
   emitToRoom(room: string, event: RealtimeEventName, payload: unknown): void {
@@ -308,11 +378,16 @@ export class RealtimeGateway
     }
   }
 
+  /**
+   * Root bootstrap attaches Redis via {@link RedisIoAdapter}; namespace only adds its own
+   * adapter when the root did not (e.g. SKIP_REDIS_IO_ADAPTER at bootstrap).
+   */
   private async attachNamespaceRedisAdapter(server: Server, redisUrl: string): Promise<void> {
     try {
-      const existing = server.adapter();
+      const existing =
+        typeof server.adapter === "function" ? server.adapter() : server.adapter;
       if (existing?.constructor?.name === "RedisAdapter") {
-        this.logger.log("Realtime namespace already using Redis adapter");
+        this.logger.log("Realtime namespace using root Redis adapter (no duplicate attach)");
         return;
       }
 
@@ -320,7 +395,7 @@ export class RealtimeGateway
       this.namespaceRedisSub = this.namespaceRedisPub.duplicate();
       await Promise.all([this.namespaceRedisPub.connect(), this.namespaceRedisSub.connect()]);
       server.adapter(createAdapter(this.namespaceRedisPub, this.namespaceRedisSub));
-      this.logger.log("Realtime namespace Redis adapter attached");
+      this.logger.log("Realtime namespace Redis adapter attached (bootstrap adapter was absent)");
     } catch (error) {
       this.logger.error(`Failed to attach namespace Redis adapter: ${this.toErrorMessage(error)}`);
     }

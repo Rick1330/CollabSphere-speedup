@@ -77,7 +77,9 @@ Symptoms: many pages show **Failed to fetch**, or section titles like **Couldn�
 3. **Postgres and Redis** are running (`docker compose up -d` at repo root). If the API exits during bootstrap, the UI hangs or errors on every page.
 4. **Hung tab / spinner:** remove **`VITE_USE_DEV_PROXY=true`** from `.env.local` unless you need it; keep the default **direct** API on **3001**.
 5. **`NODE_ENV` for the API**: In **development**, CORS uses a reflective `origin: true`. If you run the API with **`NODE_ENV=production`**, only `FRONTEND_URL` (or the default app URL) is allowed — the browser may block calls from **8080**. Prefer `development` for local API runs.
-6. **Socket.IO:** With the default direct REST base, realtime uses **`http://127.0.0.1:3001`**. With **`VITE_USE_DEV_PROXY=true`**, same-origin `/` + Vite **`/socket.io`** proxy applies (`vite.config.ts`). You can override with **`VITE_REALTIME_BASE_URL`**.
+6. **Socket.IO:** Client connects to namespace **`/realtime`** (websocket only, path **`/socket.io`**). With the default direct REST base, origin is **`http://127.0.0.1:3001`**. With **`VITE_USE_DEV_PROXY=true`**, same-origin `/` + Vite **`/socket.io`** proxy applies (`vite.config.ts`). Override origin with **`VITE_SOCKET_URL`** (alias) or **`VITE_REALTIME_BASE_URL`**.
+7. **API realtime stack:** `apps/api/src/nest-app-bootstrap.ts` attaches the root **`RedisIoAdapter`** (multi-instance fan-out). `apps/api/src/realtime/realtime.gateway.ts` adds the **awareness** bridge (`awareness:doc:*` → `document:awareness`) and does **not** duplicate the Redis adapter when the root already has one. Set **`SKIP_REDIS_IO_ADAPTER=1`** to disable root Redis adapter (single-instance mode).
+8. **Verify WebSocket:** Sign in → DevTools → **Network** → **WS** → one connection whose URL includes **`/realtime`** and **`transport=websocket`**. After a workspace role change via API, frames should include **`workspace:role_changed`**.
 
 ### Access tokens and `JWT_ACCESS_SECRET`
 
@@ -94,7 +96,8 @@ If many requests fail with **401** / **Invalid token** after the API was working
 | Client bootstrap | `apps/web/src/app/providers/app-providers.tsx` |
 | User-visible fetch hints | `apps/web/src/lib/fetch-error-details.ts` |
 | Vite HTTP + WS proxy | `apps/web/vite.config.ts` |
-| Socket.IO URL | `apps/web/src/api/realtime/socket-client.ts` |
+| Socket.IO client | `apps/web/src/api/realtime/socket-client.ts` (re-export: `apps/web/src/lib/socket.ts`) |
+| Realtime gateway + Redis bootstrap | `apps/api/src/realtime/realtime.gateway.ts`, `apps/api/src/nest-app-bootstrap.ts` |
 | API listen host/port, CORS | `apps/api/src/dev.ts` |
 | Joi default `PORT` (must match dev bootstrap) | `apps/api/src/config/config.schema.ts` |
 

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import {
   AlertCircle,
@@ -19,7 +20,6 @@ import {
   getStatusLabel,
   getWorkspaceWorkflowColumns,
   getAllLabels,
-  listTasksMap,
   listWorkspaceMembers,
   setWorkspaceWorkflowColumns,
   transitionReason,
@@ -39,7 +39,13 @@ import {
   EMPTY_FILTERS,
   type AdvancedFilterState,
 } from "./task-advanced-filters";
-import { useTaskRealtime } from "@/features/tasks/hooks/use-task-realtime";
+import { subscribeRealtimeStatus } from "@/api/realtime/socket-client";
+import { useCurrentAccount } from "@/lib/auth-session";
+import {
+  updateTasksBoardCache,
+  useTasksBoardQuery,
+} from "@/features/tasks/hooks/use-tasks-board-query";
+import type { RealtimeStatus } from "@/features/tasks/hooks/use-task-realtime";
 
 interface TaskBoardProps {
   workspaceId: string;
@@ -47,8 +53,6 @@ interface TaskBoardProps {
   workspaceStatus: "active" | "archived";
   myRole: TaskRole;
 }
-
-const CURRENT_USER_ID = "user-jane";
 
 const BoardSkeleton = () => (
   <div className="flex gap-4 px-4 py-4 overflow-x-auto h-full">
@@ -90,35 +94,46 @@ export const TaskBoard = ({
   workspaceStatus,
   myRole,
 }: TaskBoardProps) => {
-  const [tasks, setTasks] = useState<Record<string, TaskDetail>>({});
+  const account = useCurrentAccount();
+  const currentUserId = account?.id ?? "";
+  const queryClient = useQueryClient();
+  const tasksQuery = useTasksBoardQuery(workspaceId);
+  const tasks = tasksQuery.data ?? {};
   const [members, setMembers] = useState<TaskAssignee[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isError, setIsError] = useState(false);
-  const loadTaskData = useCallback(async () => {
-    setIsLoading(true);
-    setIsError(false);
-    const [data, m] = await Promise.all([listTasksMap(workspaceId), listWorkspaceMembers(workspaceId)]);
-    setTasks(data);
-    setMembers(m);
-    setIsLoading(false);
-  }, [workspaceId]);
-  const realtime = useTaskRealtime(workspaceId, () => {
-    void loadTaskData().catch(() => undefined);
-  });
+  const [realtime, setRealtime] = useState<RealtimeStatus>("reconnecting");
+  const isLoading = tasksQuery.isLoading;
+  const isError = tasksQuery.isError;
   const navigate = useNavigate();
+
+  const patchTasks = useCallback(
+    (updater: (prev: Record<string, TaskDetail>) => Record<string, TaskDetail>) => {
+      updateTasksBoardCache(queryClient, workspaceId, updater);
+    },
+    [queryClient, workspaceId],
+  );
 
   useEffect(() => {
     let cancelled = false;
-    loadTaskData()
-      .catch(() => {
-        if (cancelled) return;
-        setIsError(true);
-        setIsLoading(false);
-      });
+    const unsubscribe = subscribeRealtimeStatus((status) => {
+      if (!cancelled) setRealtime(status);
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    listWorkspaceMembers(workspaceId)
+      .then((m) => {
+        if (!cancelled) setMembers(m);
+      })
+      .catch(() => undefined);
     return () => {
       cancelled = true;
     };
-  }, [loadTaskData]);
+  }, [workspaceId]);
 
   const [search, setSearch] = useState("");
   const [filters, setFilters] = useState<AdvancedFilterState>(EMPTY_FILTERS);
@@ -216,56 +231,19 @@ export const TaskBoard = ({
   useHotkey("v l", () => navigate(`/w/${workspaceId}/tasks/list`));
 
   // Mutations
-  const handleCreate = (params: {
-    title: string;
-    description?: string;
-    status: TaskStatus;
-    priority: TaskPriority;
-    dueDate?: string;
-    assigneeId?: string;
-    labels?: string[];
-    sourceLink?: TaskLinkedResource;
-  }) => {
-    const id = `task-${Date.now()}`;
-    const nowIso = new Date().toISOString();
-    const assignee =
-      params.assigneeId
-        ? members.find((m) => m.id === params.assigneeId) ?? null
-        : null;
-    const newTask: TaskDetail = {
-      id,
-      title: params.title,
-      status: params.status,
-      priority: params.priority,
-      assignee,
-      dueDate: params.dueDate ? new Date(params.dueDate).toISOString() : null,
-      labels: params.labels ?? [],
-      commentCount: 0,
-      position: Object.keys(tasks).length + 1,
-      description: params.description ?? null,
-      descriptionRich: params.description
-        ? [{ type: "text", text: params.description }]
-        : null,
-      reporterId: CURRENT_USER_ID,
-      reporterName: "Elshaday Tesfaye",
-      createdAt: nowIso,
-      updatedAt: nowIso,
-      linkedResources: params.sourceLink ? [params.sourceLink] : [],
-      comments: [],
-      parentTaskId: null,
-      subtaskIds: [],
-      blockedByTaskIds: [],
-      blockingTaskIds: [],
-    };
-    setTasks((prev) => ({ ...prev, [id]: newTask }));
+  const handleCreate = (newTask: TaskDetail, sourceLink?: TaskLinkedResource) => {
+    const taskWithLink: TaskDetail = sourceLink
+      ? { ...newTask, linkedResources: [sourceLink, ...newTask.linkedResources] }
+      : newTask;
+    patchTasks((prev) => ({ ...prev, [taskWithLink.id]: taskWithLink }));
     setCreateDialogStatus(null);
     toast.success("Task created", {
-      description: `"${params.title}" added to ${getStatusLabel(params.status, columns)}.`,
+      description: `"${taskWithLink.title}" added to ${getStatusLabel(taskWithLink.status, columns)}.`,
     });
   };
 
   const handleDelete = (taskId: string) => {
-    setTasks((prev) => {
+    patchTasks((prev) => {
       const next = { ...prev };
       delete next[taskId];
       return next;
@@ -275,7 +253,7 @@ export const TaskBoard = ({
   };
 
   const handleUpdate = (taskId: string, patch: Partial<TaskDetail>) => {
-    setTasks((prev) => {
+    patchTasks((prev) => {
       const cur = prev[taskId];
       if (!cur) return prev;
       // Enforce status transition rules at the data layer too
@@ -293,12 +271,12 @@ export const TaskBoard = ({
   };
 
   const handleAddComment = (taskId: string, body: CommentNode[]) => {
-    setTasks((prev) => {
+    patchTasks((prev) => {
       const cur = prev[taskId];
       if (!cur) return prev;
       const c: TaskComment = {
         id: `tc-${Date.now()}`,
-        authorId: CURRENT_USER_ID,
+        authorId: currentUserId,
         body,
         createdAt: new Date().toISOString(),
       };
@@ -323,7 +301,7 @@ export const TaskBoard = ({
     commentId: string,
     body: CommentNode[],
   ) => {
-    setTasks((prev) => {
+    patchTasks((prev) => {
       const cur = prev[taskId];
       if (!cur) return prev;
       return {
@@ -341,7 +319,7 @@ export const TaskBoard = ({
   };
 
   const handleDeleteComment = (taskId: string, commentId: string) => {
-    setTasks((prev) => {
+    patchTasks((prev) => {
       const cur = prev[taskId];
       if (!cur) return prev;
       return {
@@ -356,7 +334,7 @@ export const TaskBoard = ({
   };
 
   const handleUnlinkResource = (taskId: string, resourceId: string) => {
-    setTasks((prev) => {
+    patchTasks((prev) => {
       const cur = prev[taskId];
       if (!cur) return prev;
       return {
@@ -370,10 +348,7 @@ export const TaskBoard = ({
   };
 
   const refetch = () => {
-    void loadTaskData().catch(() => {
-      setIsError(true);
-      setIsLoading(false);
-    });
+    void tasksQuery.refetch();
   };
 
   const sourceLink: SourceDocumentLink | null = null;
@@ -392,7 +367,7 @@ export const TaskBoard = ({
     setColumns((prev) => {
       if (prev.length <= 2) return prev;
       const fallback = prev[0]?.status ?? "todo";
-      setTasks((taskState) => {
+      patchTasks((taskState) => {
         const nextTasks = { ...taskState };
         for (const task of Object.values(nextTasks)) {
           if (task.status === status) task.status = fallback;
@@ -659,9 +634,9 @@ export const TaskBoard = ({
           assignableMembers={
             ["OWNER", "ADMIN", "MANAGER"].includes(myRole)
               ? members
-              : members.filter((m) => m.id === CURRENT_USER_ID)
+              : members.filter((m) => m.id === currentUserId)
           }
-          currentUserId={CURRENT_USER_ID}
+          currentUserId={currentUserId}
           sourceLink={sourceLink}
           onClose={() => setCreateDialogStatus(null)}
           onCreated={handleCreate}
@@ -675,7 +650,7 @@ export const TaskBoard = ({
         isLoading={sheetLoading}
         isArchived={isArchived}
         myRole={myRole}
-        currentUserId={CURRENT_USER_ID}
+        currentUserId={currentUserId}
         members={members}
         onClose={() => setSelectedTaskId(null)}
         onDelete={handleDelete}
