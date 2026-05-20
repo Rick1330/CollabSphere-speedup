@@ -9,10 +9,13 @@
     "@prisma/client": "^6.7.0",
     "@types/jsonwebtoken": "^9.0.10",
     "jsonwebtoken": "^9.0.3",
+    "redis": "^5.12.1",
     "yjs": "^13.6.30"
   },
   "scripts": {
     "dev": "tsx watch src/dev.ts",
-    "build": "pnpm --filter @collabsphere/database run generate && pnpm exec tsc -p tsconfig.json && tsx ../../scripts/build-bootstrap-app.ts ."
+    "dev:main": "tsx watch src/main.ts",
+    "build": "pnpm --filter @collabsphere/database run generate && pnpm exec tsc -p tsconfig.json && tsx ../../scripts/build-bootstrap-app.ts .",
+    "start": "node dist/main.js"
   }
 }
