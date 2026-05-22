@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { useEditor, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
@@ -10,6 +10,7 @@ import TableHeader from "@tiptap/extension-table-header";
 import TableCell from "@tiptap/extension-table-cell";
 import Collaboration from "@tiptap/extension-collaboration";
 import CollaborationCursor from "@tiptap/extension-collaboration-cursor";
+import Gapcursor from "@tiptap/extension-gapcursor";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import * as Y from "yjs";
 
@@ -25,6 +26,23 @@ import type { PresenceUser } from "@/features/documents/components/editor/editor
 import { prepareDocumentCollabBootstrap } from "@/features/documents/collab/collab-bootstrap";
 import { renderCursor } from "@/editor/cursor-render";
 import { normalizeCollabWsUrl, resolveCollabWsUrlFromEnv } from "@/lib/collab-ws-url";
+
+export type CollabPointer = {
+  x: number;
+  y: number;
+  visible: boolean;
+};
+
+export type AwarenessClientSnapshot = {
+  clientId: number;
+  isLocal: boolean;
+  hasCursor: boolean;
+  hasUser: boolean;
+  hasPointer: boolean;
+  userName: string | null;
+  userColor: string | null;
+  pointer: CollabPointer | null;
+};
 
 type Status = "connecting" | "connected" | "synced" | "offline" | "error" | "auth_failed";
 
@@ -92,6 +110,15 @@ function setProviderAwarenessUser(
   });
 }
 
+function setProviderAwarenessPointer(
+  provider: HocuspocusProvider,
+  pointer: CollabPointer | null,
+): void {
+  provider.setAwarenessField("pointer", pointer);
+}
+
+const POINTER_THROTTLE_MS = 50;
+
 function collabCursorUser(user: { id: string; fullName: string }) {
   return {
     id: user.id,
@@ -156,22 +183,164 @@ function collectOnlineUsersFromAwareness(
   return list;
 }
 
+export function buildAwarenessSnapshot(provider: HocuspocusProvider): AwarenessClientSnapshot[] {
+  const awareness = provider.awareness;
+  if (!awareness) return [];
+  const localClientId = awareness.clientID;
+  const entries: AwarenessClientSnapshot[] = [];
+  for (const [clientId, state] of awareness.getStates()) {
+    const typed = state as {
+      cursor?: unknown;
+      pointer?: CollabPointer | null;
+      user?: { name?: string; color?: string; id?: string };
+    };
+    const name = typed.user?.name;
+    const userId = typed.user?.id;
+    const userColor =
+      typeof typed.user?.color === "string" && typed.user.color
+        ? typed.user.color
+        : userId
+          ? generateUserColor(userId)
+          : null;
+    const pointer = typed.pointer;
+    const hasPointer =
+      pointer != null &&
+      typeof pointer === "object" &&
+      pointer.visible === true &&
+      typeof pointer.x === "number" &&
+      typeof pointer.y === "number";
+    entries.push({
+      clientId,
+      isLocal: clientId === localClientId,
+      hasCursor: typed.cursor != null,
+      hasUser: typed.user != null,
+      hasPointer,
+      userName: typeof name === "string" ? name : null,
+      userColor,
+      pointer: hasPointer ? pointer : null,
+    });
+  }
+  return entries;
+}
+
+function logAwarenessCursorsDev(provider: HocuspocusProvider): void {
+  if (!import.meta.env.DEV) return;
+  console.debug("[collab] awareness cursors", buildAwarenessSnapshot(provider));
+}
+
+type CollabSession = {
+  ydoc: Y.Doc;
+  provider: HocuspocusProvider;
+};
+
+const EDITOR_PROSE_CLASS = [
+  "tiptap",
+  "prose prose-stone max-w-none",
+  "prose-headings:font-bold prose-headings:tracking-tight prose-headings:text-stone-900",
+  "prose-p:leading-relaxed prose-p:text-stone-700",
+  "prose-a:text-teal-600 prose-a:no-underline hover:prose-a:underline",
+  "prose-strong:text-stone-900",
+  "prose-code:text-teal-700 prose-code:bg-stone-100",
+  "prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:text-sm prose-code:font-medium",
+  "prose-code:before:content-none prose-code:after:content-none",
+  "prose-blockquote:border-l-4 prose-blockquote:border-l-teal-500 prose-blockquote:not-italic",
+  "prose-blockquote:text-stone-600 prose-blockquote:font-normal",
+  "prose-pre:bg-stone-900 prose-pre:text-stone-100 prose-pre:rounded-lg",
+  "prose-li:marker:text-stone-400",
+  "prose-hr:border-stone-200",
+  "focus:outline-none min-h-[60vh]",
+].join(" ");
+
+function buildEditorExtensions(
+  collabSession: CollabSession | null,
+  user: { id: string; fullName: string },
+) {
+  const extensions: any[] = [
+    (StarterKit as any).configure({
+      heading: { levels: [1, 2, 3, 4, 5, 6] },
+      history: false,
+      gapcursor: false,
+      codeBlock: {
+        HTMLAttributes: {
+          class:
+            "not-prose rounded-lg bg-stone-900 text-stone-100 p-4 text-sm font-mono overflow-x-auto",
+        },
+      },
+    }),
+    Gapcursor as any,
+  ];
+
+  if (collabSession) {
+    extensions.push(
+      Collaboration.configure({ document: collabSession.provider.document }),
+      CollaborationCursor.configure({
+        provider: collabSession.provider,
+        user: collabCursorUser(user),
+        render: renderCursor as any,
+      }),
+    );
+  }
+
+  extensions.push(
+    Underline as any,
+    (Link as any).configure({
+      openOnClick: false,
+      HTMLAttributes: { class: "text-teal-600 hover:underline cursor-pointer" },
+    }),
+    (Placeholder as any).configure({
+      placeholder: ({ node }: { node: { type: { name: string } } }) => {
+        if (node.type.name === "heading") return "Heading";
+        return "Start writing, or press / for commands…";
+      },
+    }),
+    (Table as any).configure({
+      resizable: true,
+      HTMLAttributes: { class: "w-full border-collapse my-4 text-sm rounded-md overflow-hidden" },
+    }),
+    TableRow as any,
+    (TableHeader as any).configure({
+      HTMLAttributes: {
+        class:
+          "bg-stone-100 text-left font-semibold text-stone-800 px-3 py-2 border border-stone-200",
+      },
+    }),
+    (TableCell as any).configure({
+      HTMLAttributes: { class: "px-3 py-2 border border-stone-200 align-top" },
+    }),
+    MermaidBlock,
+    MathBlock,
+    CalloutBlock,
+    SectionBlock,
+    TOCBlock,
+    CoverPageBlock,
+    PageBreakBlock,
+    CommentAnchorExtension,
+  );
+
+  return extensions;
+}
+
 export function useCollaborativeDocumentEditor(input: {
   workspaceId: string;
   documentId: string;
   user: { id: string; fullName: string; avatarUrl?: string | null };
   readOnly: boolean;
   properties?: any;
+  /** Writing column root for remote mouse pointer overlay (0..1 coordinates). */
+  pointerRootRef?: RefObject<HTMLElement | null>;
 }) {
-  const { workspaceId, documentId, user, readOnly, properties = {} } = input;
+  const { workspaceId, documentId, user, readOnly, properties = {}, pointerRootRef } = input;
 
   const [status, setStatus] = useState<Status>("connecting");
   const [onlineUsers, setOnlineUsers] = useState<(PresenceUser & { isCurrentUser?: boolean })[]>([]);
   const [sessionVersion, setSessionVersion] = useState(0);
+  const [collabSession, setCollabSession] = useState<CollabSession | null>(null);
+  const [awarenessSnapshot, setAwarenessSnapshot] = useState<AwarenessClientSnapshot[]>([]);
 
   const sessionKeyRef = useRef("");
   const ydocRef = useRef<Y.Doc | null>(null);
   const providerRef = useRef<HocuspocusProvider | null>(null);
+  const collabExtensionsReadyRef = useRef(false);
   const connectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tokenRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bootstrapGenerationRef = useRef(0);
@@ -274,6 +443,9 @@ export function useCollaborativeDocumentEditor(input: {
   const teardownCollabSession = () => {
     clearConnectTimeout();
     clearTokenRefreshTimer();
+    collabExtensionsReadyRef.current = false;
+    setCollabSession(null);
+    setAwarenessSnapshot([]);
     if (providerRef.current) {
       destroyProvider(providerRef.current);
       providerRef.current = null;
@@ -299,6 +471,7 @@ export function useCollaborativeDocumentEditor(input: {
     }
 
     if (sessionKeyRef.current !== sessionKey) {
+      collabExtensionsReadyRef.current = false;
       teardownCollabSession();
       sessionKeyRef.current = sessionKey;
       bootstrapGenerationRef.current += 1;
@@ -309,26 +482,24 @@ export function useCollaborativeDocumentEditor(input: {
 
   useEffect(() => {
     const provider = providerRef.current;
-    if (!provider) return;
-    setProviderAwarenessUser(provider, user);
-  }, [user.id, user.fullName, user.avatarUrl, sessionKey]);
-
-  useEffect(() => {
-    const provider = providerRef.current;
     if (!provider || !workspaceId || !documentId) return;
 
-    const updateOnlineUsers = () => {
-      setOnlineUsers(collectOnlineUsersFromAwareness(provider, user.id, workspaceId));
+    const updateAwareness = () => {
+      setAwarenessSnapshot(buildAwarenessSnapshot(provider));
+      if (collabSession?.provider === provider) {
+        setOnlineUsers(collectOnlineUsersFromAwareness(provider, user.id, workspaceId));
+      }
+      logAwarenessCursorsDev(provider);
     };
 
     const awareness = provider.awareness;
-    awareness?.on("change", updateOnlineUsers);
-    updateOnlineUsers();
+    awareness?.on("change", updateAwareness);
+    updateAwareness();
 
     return () => {
-      awareness?.off("change", updateOnlineUsers);
+      awareness?.off("change", updateAwareness);
     };
-  }, [sessionKey, user.id, workspaceId, documentId]);
+  }, [collabSession, sessionKey, user.id, workspaceId, documentId]);
 
   // v3: fetch token first, then create Y.Doc + provider with token+URL at construction.
   useEffect(() => {
@@ -391,6 +562,18 @@ export function useCollaborativeDocumentEditor(input: {
               console.info("[collab] provider synced", { documentId, workspaceId });
             }
             setStatus("synced");
+            const activeYdoc = ydocRef.current;
+            const activeProvider = providerRef.current;
+            if (
+              activeYdoc &&
+              activeProvider &&
+              !collabExtensionsReadyRef.current &&
+              bootstrapGenerationRef.current === generation
+            ) {
+              collabExtensionsReadyRef.current = true;
+              setCollabSession({ ydoc: activeYdoc, provider: activeProvider });
+              setSessionVersion((n) => n + 1);
+            }
           },
           onDisconnect: () => {
             if (import.meta.env.DEV) {
@@ -420,14 +603,16 @@ export function useCollaborativeDocumentEditor(input: {
           onAwarenessUpdate: () => {
             const active = providerRef.current;
             if (!active) return;
-            setOnlineUsers(collectOnlineUsersFromAwareness(active, user.id, workspaceId));
+            setAwarenessSnapshot(buildAwarenessSnapshot(active));
+            if (collabExtensionsReadyRef.current) {
+              setOnlineUsers(collectOnlineUsersFromAwareness(active, user.id, workspaceId));
+            }
           },
         });
 
-        setProviderAwarenessUser(provider, user);
         providerRef.current = provider;
+        setProviderAwarenessUser(provider, user);
         scheduleTokenRefresh(bootstrap.expiresInSeconds);
-        setSessionVersion((n) => n + 1);
 
         clearConnectTimeout();
         connectTimeoutRef.current = window.setTimeout(() => {
@@ -459,104 +644,77 @@ export function useCollaborativeDocumentEditor(input: {
     };
   }, [sessionKey]);
 
-  const ydoc = ydocRef.current;
-  const provider = providerRef.current;
+  const extensions = useMemo(
+    () => buildEditorExtensions(collabSession, user),
+    [collabSession, user.id, user.fullName, sessionKey],
+  );
 
   const editor = useEditor(
     {
-      extensions: [
-        (StarterKit as any).configure({
-          heading: { levels: [1, 2, 3, 4, 5, 6] },
-          history: false,
-          codeBlock: {
-            HTMLAttributes: {
-              class:
-                "not-prose rounded-lg bg-stone-900 text-stone-100 p-4 text-sm font-mono overflow-x-auto",
-            },
-          },
-        }),
-        Underline as any,
-        (Link as any).configure({
-          openOnClick: false,
-          HTMLAttributes: { class: "text-teal-600 hover:underline cursor-pointer" },
-        }),
-        (Placeholder as any).configure({
-          placeholder: ({ node }: { type: { name: string } }) => {
-            if (node.type.name === "heading") return "Heading";
-            return "Start writing, or press / for commands…";
-          },
-        }),
-        (Table as any).configure({
-          resizable: true,
-          HTMLAttributes: { class: "w-full border-collapse my-4 text-sm rounded-md overflow-hidden" },
-        }),
-        TableRow as any,
-        (TableHeader as any).configure({
-          HTMLAttributes: {
-            class:
-              "bg-stone-100 text-left font-semibold text-stone-800 px-3 py-2 border border-stone-200",
-          },
-        }),
-        (TableCell as any).configure({
-          HTMLAttributes: { class: "px-3 py-2 border border-stone-200 align-top" },
-        }),
-        ...(ydoc ? [Collaboration.configure({ document: ydoc })] : []),
-        ...(provider
-          ? [
-              CollaborationCursor.configure({
-                provider,
-                user: collabCursorUser(user),
-                render: renderCursor as any,
-              }),
-            ]
-          : []),
-        MermaidBlock,
-        MathBlock,
-        CalloutBlock,
-        SectionBlock,
-        TOCBlock,
-        CoverPageBlock,
-        PageBreakBlock,
-        CommentAnchorExtension,
-      ],
+      extensions,
       editable: !readOnly,
       autofocus: !readOnly ? "end" : false,
       documentProperties: properties,
       editorProps: {
         attributes: {
-          class: [
-            "tiptap",
-            "prose prose-stone max-w-none",
-            "prose-headings:font-bold prose-headings:tracking-tight prose-headings:text-stone-900",
-            "prose-p:leading-relaxed prose-p:text-stone-700",
-            "prose-a:text-teal-600 prose-a:no-underline hover:prose-a:underline",
-            "prose-strong:text-stone-900",
-            "prose-code:text-teal-700 prose-code:bg-stone-100",
-            "prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:text-sm prose-code:font-medium",
-            "prose-code:before:content-none prose-code:after:content-none",
-            "prose-blockquote:border-l-4 prose-blockquote:border-l-teal-500 prose-blockquote:not-italic",
-            "prose-blockquote:text-stone-600 prose-blockquote:font-normal",
-            "prose-pre:bg-stone-900 prose-pre:text-stone-100 prose-pre:rounded-lg",
-            "prose-li:marker:text-stone-400",
-            "prose-hr:border-stone-200",
-            "focus:outline-none min-h-[60vh]",
-          ].join(" "),
+          class: EDITOR_PROSE_CLASS,
         },
       },
-    } as Parameters<typeof useEditor>[0],
-    [
-      readOnly,
-      documentId,
-      workspaceId,
-      user.id,
-      user.fullName,
-      JSON.stringify(properties),
-      sessionKey,
-      sessionVersion,
-      provider,
-      ydoc,
-    ],
+    },
+    [extensions, readOnly, documentId, workspaceId, user.id, user.fullName, JSON.stringify(properties)],
   ) as Editor | null;
+
+  useEffect(() => {
+    if (!collabSession || !editor || editor.isDestroyed) return;
+    const cursorUser = collabCursorUser(user);
+    editor.commands.updateUser(cursorUser);
+    setProviderAwarenessUser(collabSession.provider, user);
+  }, [collabSession, editor, user.id, user.fullName, user.avatarUrl]);
+
+  useEffect(() => {
+    const root = pointerRootRef?.current;
+    const provider = providerRef.current;
+    if (!root || !provider || status !== "synced" || readOnly) {
+      if (provider) {
+        setProviderAwarenessPointer(provider, null);
+      }
+      return;
+    }
+
+    let lastEmit = 0;
+
+    const clearPointer = () => {
+      setProviderAwarenessPointer(provider, null);
+    };
+
+    const onMove = (event: MouseEvent) => {
+      const now = Date.now();
+      if (now - lastEmit < POINTER_THROTTLE_MS) return;
+      lastEmit = now;
+      const rect = root.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+      const x = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+      const y = Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height));
+      setProviderAwarenessPointer(provider, { x, y, visible: true });
+    };
+
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") {
+        clearPointer();
+      }
+    };
+
+    root.addEventListener("mousemove", onMove);
+    root.addEventListener("mouseleave", clearPointer);
+    document.addEventListener("visibilitychange", onVisibility);
+
+    return () => {
+      root.removeEventListener("mousemove", onMove);
+      root.removeEventListener("mouseleave", clearPointer);
+      document.removeEventListener("visibilitychange", onVisibility);
+      clearPointer();
+    };
+  }, [pointerRootRef, status, readOnly, sessionKey, collabSession]);
 
   const filteredOnlineUsers = useMemo(
     () => onlineUsers.filter((u) => !u.isCurrentUser),
@@ -572,7 +730,9 @@ export function useCollaborativeDocumentEditor(input: {
     editor,
     status,
     onlineUsers: filteredOnlineUsers,
-    provider,
+    provider: providerRef.current,
+    awarenessSnapshot,
     reconnect,
+    sessionVersion,
   };
 }

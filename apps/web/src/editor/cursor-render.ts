@@ -3,34 +3,23 @@ type CursorUser = {
   color: string;
 };
 
+/** Remote caret widget for @tiptap/extension-collaboration-cursor (y-prosemirror). */
 export function renderCursor(user: CursorUser): HTMLElement {
   const caret = document.createElement("span");
-  caret.style.position = "relative";
+  caret.classList.add("collaboration-cursor__caret");
   caret.style.display = "inline-block";
-
-  const line = document.createElement("span");
-  line.style.display = "inline-block";
-  line.style.borderLeft = `2px solid ${user.color}`;
-  line.style.height = "1.2em";
-  line.style.marginLeft = "-1px";
-  line.style.marginRight = "-1px";
+  caret.style.width = "0";
+  caret.style.height = "1.25em";
+  caret.style.verticalAlign = "text-bottom";
+  caret.style.borderLeft = `3px solid ${user.color}`;
+  caret.style.boxShadow = `0 0 0 1px ${user.color}33, 0 0 6px ${user.color}55`;
+  caret.style.pointerEvents = "none";
 
   const label = document.createElement("span");
+  label.classList.add("collaboration-cursor__label");
   label.textContent = user.name;
-  label.style.position = "absolute";
-  label.style.left = "0";
-  label.style.top = "-1.35em";
-  label.style.transform = "translateX(-2px)";
   label.style.backgroundColor = user.color;
-  label.style.color = "#fff";
-  label.style.fontSize = "10px";
-  label.style.fontWeight = "600";
-  label.style.padding = "2px 6px";
-  label.style.borderRadius = "6px";
-  label.style.whiteSpace = "nowrap";
-  label.style.pointerEvents = "none";
 
-  caret.append(line, label);
+  caret.append(label);
   return caret;
 }
-

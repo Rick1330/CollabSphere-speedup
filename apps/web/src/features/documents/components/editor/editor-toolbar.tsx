@@ -73,6 +73,19 @@ const ToolbarSep = () => (
   <div className="w-px h-4 bg-stone-200 mx-1 flex-shrink-0" aria-hidden="true" />
 );
 
+/** Safe when StarterKit history is off and Collaboration is not mounted yet. */
+function canUndo(editor: Editor | null): boolean {
+  if (!editor || editor.isDestroyed) return false;
+  const undo = (editor.can() as { undo?: () => boolean }).undo;
+  return typeof undo === "function" ? undo() : false;
+}
+
+function canRedo(editor: Editor | null): boolean {
+  if (!editor || editor.isDestroyed) return false;
+  const redo = (editor.can() as { redo?: () => boolean }).redo;
+  return typeof redo === "function" ? redo() : false;
+}
+
 export const EditorToolbar = ({ 
   editor, 
   isReadOnly, 
@@ -260,13 +273,13 @@ export const EditorToolbar = ({
           icon={Undo}
           label="Undo (⌘Z)"
           onClick={() => editor?.chain().focus().undo().run()}
-          disabled={isReadOnly || !editor?.can().undo()}
+          disabled={isReadOnly || !canUndo(editor)}
         />
         <ToolbarBtn
           icon={Redo}
           label="Redo (⌘⇧Z)"
           onClick={() => editor?.chain().focus().redo().run()}
-          disabled={isReadOnly || !editor?.can().redo()}
+          disabled={isReadOnly || !canRedo(editor)}
         />
       </div>
 
@@ -373,10 +386,16 @@ export const EditorToolbar = ({
               <Scissors className="h-4 w-4 mr-2" /> Page break
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => editor?.chain().focus().undo().run()}>
+            <DropdownMenuItem
+              disabled={isReadOnly || !canUndo(editor)}
+              onClick={() => editor?.chain().focus().undo().run()}
+            >
               <Undo className="h-4 w-4 mr-2" /> Undo
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => editor?.chain().focus().redo().run()}>
+            <DropdownMenuItem
+              disabled={isReadOnly || !canRedo(editor)}
+              onClick={() => editor?.chain().focus().redo().run()}
+            >
               <Redo className="h-4 w-4 mr-2" /> Redo
             </DropdownMenuItem>
           </DropdownMenuContent>

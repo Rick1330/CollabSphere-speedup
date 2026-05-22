@@ -31,6 +31,8 @@ import {
 } from "@/features/documents/components/editor/editor-readonly-banner";
 import { EditorToolbar } from "@/features/documents/components/editor/editor-toolbar";
 import { EditorContentArea } from "@/features/documents/components/editor/editor-content";
+import { CollabCaretDebug } from "@/features/documents/components/editor/collab-caret-debug";
+import { RemotePointerOverlay } from "@/features/documents/components/editor/remote-pointer-overlay";
 import { EditorSlashCommand } from "@/features/documents/components/editor/editor-slash-command";
 import {
   EditorStatusBar,
@@ -608,6 +610,9 @@ const DocumentEditorPage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mergedDoc?.id, mergedDoc?.content]);
 
+  const editorScrollRef = useRef<HTMLDivElement>(null);
+  const writingColumnRef = useRef<HTMLDivElement>(null);
+
   const collab = useCollaborativeDocumentEditor({
     workspaceId: isDatabaseWorkspaceId(workspaceId) ? workspaceId : "",
     documentId: documentId && isDatabaseWorkspaceId(documentId) ? documentId : "",
@@ -618,6 +623,7 @@ const DocumentEditorPage = () => {
     },
     readOnly: !isEditable,
     properties: { ...properties, title: mergedDoc?.title },
+    pointerRootRef: writingColumnRef,
   });
   const editor = collab.editor;
 
@@ -710,8 +716,6 @@ const DocumentEditorPage = () => {
   });
   const { activeThreadId, focusThread, flashAnchorId, flashAnchor } =
     useDocumentThreadFocus();
-
-  const editorScrollRef = useRef<HTMLDivElement>(null);
 
   // Floating composer state for inline anchored comments
   const [pendingAnchor, setPendingAnchor] = useState<string | null>(null);
@@ -1295,12 +1299,28 @@ const DocumentEditorPage = () => {
         {showSubmissionHistory && (
           <EditorSubmissionHistory history={submissionHistory} />
         )}
-        <EditorToolbar 
-          editor={editor} 
-          isReadOnly={!isEditable} 
+        {(connectionStatus === "connecting" || collab.status === "connected") && (
+          <div className="shrink-0 border-b border-amber-200 bg-amber-50 px-4 py-2 text-center text-xs font-medium text-amber-800">
+            {collab.status === "connected"
+              ? "Syncing document for collaboration…"
+              : "Connecting to collaboration server…"}
+          </div>
+        )}
+        <EditorToolbar
+          editor={editor}
+          isReadOnly={
+            !isEditable || connectionStatus === "connecting" || collab.status === "connected"
+          }
           onInsertTableRequest={() => setTableDialogOpen(true)}
         />
-        <EditorContentArea ref={editorScrollRef} editor={editor} />
+        <EditorContentArea ref={editorScrollRef} writingColumnRef={writingColumnRef} editor={editor}>
+          {collab.status === "synced" && (
+            <RemotePointerOverlay clients={collab.awarenessSnapshot} />
+          )}
+        </EditorContentArea>
+        {collab.provider && (
+          <CollabCaretDebug status={collab.status} clients={collab.awarenessSnapshot} />
+        )}
         {isEditable && (
           <EditorSlashCommand 
             editor={editor} 
