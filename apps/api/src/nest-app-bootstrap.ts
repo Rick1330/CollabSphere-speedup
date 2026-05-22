@@ -2,6 +2,7 @@ import "reflect-metadata";
 import cookieParser from "cookie-parser";
 import helmet from "helmet";
 import { NestFactory } from "@nestjs/core";
+import { ModuleRef } from "@nestjs/core";
 import { HttpException, ValidationPipe } from "@nestjs/common";
 import type { INestApplication } from "@nestjs/common";
 import { AppModule } from "./app.module.js";
@@ -10,6 +11,13 @@ import { HttpSuccessStatusInterceptor } from "./common/nest/http-success-status.
 import { NestAppErrorFilter } from "./common/nest/nest-app-error.filter.js";
 import { createValidationPipeExceptionFactory } from "./common/nest/validation-pipe.util.js";
 import { RedisIoAdapter } from "./realtime/redis-io.adapter.js";
+import { RealtimeGateway } from "./realtime/realtime.gateway.js";
+import {
+  getRegisteredRealtimeSessionService,
+  registerNestApplication,
+  registerRealtimeSessionService,
+} from "./realtime/realtime-session.registry.js";
+import { RealtimeSessionService } from "./realtime/realtime-session.service.js";
 import { apiRuntimeEnv } from "./config/api-runtime.js";
 import { setDevNestAppRef } from "./dev/dev.nest.controller.js";
 import {
@@ -21,6 +29,22 @@ import { devCorsPreflightMiddleware } from "./common/middleware/dev-cors-preflig
 import { corsResponseMiddleware } from "./common/middleware/cors-response.middleware.js";
 
 export { parseCorsOrigins };
+
+function resolveRealtimeSessionService(app: INestApplication): RealtimeSessionService | null {
+  const fromRegistry = getRegisteredRealtimeSessionService();
+  if (fromRegistry) {
+    return fromRegistry;
+  }
+  const moduleRef = app.get(ModuleRef, { strict: false });
+  if (moduleRef?.get) {
+    const fromModuleRef = moduleRef.get(RealtimeSessionService, { strict: false });
+    if (fromModuleRef) {
+      return fromModuleRef;
+    }
+  }
+  const fromApp = app.get(RealtimeSessionService, { strict: false });
+  return fromApp ?? null;
+}
 
 export async function createNestApp(): Promise<INestApplication> {
   const app = await NestFactory.create(AppModule, {
@@ -65,6 +89,15 @@ export async function createNestApp(): Promise<INestApplication> {
   }
   setDevNestAppRef(app);
 
+  registerNestApplication(app);
+  const moduleRef = app.get(ModuleRef);
+  const sessionService = resolveRealtimeSessionService(app);
+  if (sessionService) {
+    registerRealtimeSessionService(sessionService);
+    RealtimeGateway.registerSessionService(sessionService);
+  }
+  RealtimeGateway.registerModuleRef(moduleRef);
+
   return app;
 }
 
@@ -81,6 +114,18 @@ export async function listenNestApp(app: INestApplication): Promise<void> {
   const port = Number.parseInt(process.env.PORT ?? "3001", 10) || 3001;
   const host = (process.env.HOST ?? "0.0.0.0").trim() || "0.0.0.0";
   await app.listen(port, host);
+
+  const sessionService = resolveRealtimeSessionService(app);
+  if (!sessionService) {
+    console.error(
+      "[api] RealtimeSessionService is not wired for WebSocket handlers — check nest-app-bootstrap registration order.",
+    );
+    if (nodeEnv !== "production") {
+      process.exit(1);
+    }
+  } else if (nodeEnv !== "production") {
+    console.log("[api] RealtimeSessionService wired for WebSocket handlers");
+  }
 
   const server = app.getHttpServer();
   const stack = server?._events?.request?._router?.stack ?? [];

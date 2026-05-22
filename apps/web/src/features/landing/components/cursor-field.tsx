@@ -70,6 +70,7 @@ const AnimatedCursor = ({ data, seed }: { data: CursorData; seed: number }) => {
   const controls = useAnimationControls();
   const pulse = useAnimationControls();
   const alive = useRef(true);
+  const mounted = useRef(false);
 
   // Deterministic-ish initial position so SSR/CSR don't mismatch in feel
   const initial = useMemo(
@@ -86,10 +87,11 @@ const AnimatedCursor = ({ data, seed }: { data: CursorData; seed: number }) => {
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
     const loop = async () => {
+      if (!mounted.current) return;
       // Set start without animating
       controls.set({ left: `${initial.x}%`, top: `${initial.y}%` });
 
-      while (alive.current) {
+      while (alive.current && mounted.current) {
         const target = {
           x: randomInRange(data.region.xMin, data.region.xMax),
           y: randomInRange(data.region.yMin, data.region.yMax),
@@ -106,27 +108,30 @@ const AnimatedCursor = ({ data, seed }: { data: CursorData; seed: number }) => {
             x: target.x + randomInRange(-3, 3),
             y: target.y + randomInRange(-3, 3),
           };
+          if (!mounted.current) return;
           await controls.start({
             left: `${overshoot.x}%`,
             top: `${overshoot.y}%`,
             transition: { duration: duration * 0.85, ease: data.easing },
           });
-          if (!alive.current) return;
+          if (!alive.current || !mounted.current) return;
           await controls.start({
             left: `${target.x}%`,
             top: `${target.y}%`,
             transition: { duration: 0.25, ease: "easeOut" },
           });
         } else {
+          if (!mounted.current) return;
           await controls.start({
             left: `${target.x}%`,
             top: `${target.y}%`,
             transition: { duration, ease: data.easing },
           });
         }
-        if (!alive.current) return;
+        if (!alive.current || !mounted.current) return;
         // Optional click pulse at destination
         if (randomBool(data.clickRate)) {
+          if (!mounted.current) return;
           pulse.start({
             scale: [0, 1.4, 0],
             opacity: [0.5, 0.15, 0],
@@ -138,9 +143,20 @@ const AnimatedCursor = ({ data, seed }: { data: CursorData; seed: number }) => {
       }
     };
 
-    loop();
+    let raf2 = 0;
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => {
+        if (!alive.current) return;
+        mounted.current = true;
+        void loop();
+      });
+    });
+
     return () => {
       alive.current = false;
+      mounted.current = false;
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
     };
   }, [controls, pulse, data, reduced, initial.x, initial.y]);
 

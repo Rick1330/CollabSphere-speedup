@@ -6,7 +6,7 @@
  * surface is wrapped in `RequireAuth`. Admin pages additionally pass
  * through `AdminGuard`.
  */
-import { Route, Routes } from "react-router-dom";
+import { Route, Routes, useParams } from "react-router-dom";
 import { RequireAuth, RedirectIfAuthed } from "./auth-guards";
 import { GlobalShortcuts } from "@/app/shell/global-shortcuts";
 import { ShortcutHelpDialog } from "@/app/shell/shortcut-help-dialog";
@@ -67,6 +67,11 @@ import NotFound from "@/pages/NotFound";
 const protect = (el: JSX.Element) => <RequireAuth>{el}</RequireAuth>;
 const guestOnly = (el: JSX.Element) => <RedirectIfAuthed>{el}</RedirectIfAuthed>;
 
+const DocumentEditorRoute = () => {
+  const { workspaceId = "", documentId = "" } = useParams();
+  return <DocumentEditor key={`${workspaceId}:${documentId}`} />;
+};
+
 export function AppRoutes() {
   return (
     <>
@@ -101,7 +106,7 @@ export function AppRoutes() {
           <Route index element={<WorkspaceHome />} />
           <Route path="documents" element={<Documents />} />
           <Route path="documents/new" element={<NewDocument />} />
-          <Route path="documents/:documentId" element={<DocumentEditor />} />
+          <Route path="documents/:documentId" element={<DocumentEditorRoute />} />
           <Route path="documents/:documentId/history" element={<DocumentHistory />} />
           <Route path="tasks" element={<Tasks />} />
           <Route path="tasks/list" element={<TasksList />} />

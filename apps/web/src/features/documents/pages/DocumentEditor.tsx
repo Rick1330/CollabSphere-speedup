@@ -4,7 +4,7 @@ import { ArrowLeft, FileX, RefreshCw, Send, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { useTiptapEditor } from "@/features/documents/hooks/use-tiptap-editor";
+import { useCollaborativeDocumentEditor } from "@/hooks/use-collaborative-document-editor";
 import { useIsBelowLg } from "@/hooks/use-is-below-lg";
 import {
   isContextRailVisible,
@@ -22,7 +22,7 @@ import type { TreeContentPermissions } from "@/features/documents/components/doc
 import { getRolePermissions, type WorkspaceRoleKey } from "@/lib/persona-scenario";
 import { listWorkspaceMembers } from "@/api/adapters/tasks";
 import { fetchWorkspaceSidebarContext } from "@/api/adapters/workspaces";
-import { fetchWorkspaceDocument, plaintextToEditorHtml, createDocument, createWorkspaceFolder } from "@/api/adapters/documents";
+import { fetchWorkspaceDocument, createDocument, createWorkspaceFolder } from "@/api/adapters/documents";
 import { ApiError } from "@/api/client";
 import { EditorHeader, type EditorDocument } from "@/features/documents/components/editor/editor-header";
 import {
@@ -67,7 +67,6 @@ import {
 import { resolveDocumentParam, resolveWorkspaceParam } from "@/lib/route-params";
 import { useCurrentAccount } from "@/lib/auth-session";
 import { isDatabaseWorkspaceId } from "@/lib/workspace-id";
-import { useDocumentPresence } from "@/hooks/use-document-presence";
 import {
   CreateTaskDialog,
   type SourceDocumentLink,
@@ -79,9 +78,6 @@ import {
   type TaskPriority,
   type TaskStatus,
 } from "@/api/adapters/tasks";
-import { subscribeRealtimeStatus } from "@/api/realtime/socket-client";
-import { prepareDocumentCollabBootstrap } from "@/features/documents/collab/collab-bootstrap";
-
 type SidebarTab = "outline" | "readiness" | "properties" | "comments";
 
 type WorkspaceRole = "OWNER" | "ADMIN" | "MANAGER" | "MEMBER" | "VIEWER";
@@ -473,7 +469,7 @@ const DocumentEditorPage = () => {
           if (cancelled) return;
           const pending = readPendingDoc(documentId);
           const folderName = apiDoc.folder?.name ?? null;
-          const contentHtml = pending?.contentHTML ?? plaintextToEditorHtml(apiDoc.contentPlaintext ?? "");
+          const contentHtml = pending?.contentHTML ?? "";
           if (pending) clearPendingDoc(documentId);
           const doc: MockDocument = {
             id: apiDoc.id,
@@ -549,32 +545,6 @@ const DocumentEditorPage = () => {
     };
   }, [workspaceId, documentId, retryNonce, effectiveUserId, account?.fullName]);
 
-  const livePresence = useDocumentPresence(
-    isDatabaseWorkspaceId(workspaceId) ? workspaceId : "",
-    documentId && isDatabaseWorkspaceId(documentId) ? documentId : "",
-    {
-      userId: effectiveUserId,
-      fullName: account?.fullName ?? "You",
-    },
-  );
-
-  const headerPresence: PresenceUser[] = useMemo(() => {
-    if (isDatabaseWorkspaceId(workspaceId) && isDatabaseWorkspaceId(documentId)) {
-      return livePresence;
-    }
-    if (!account) return [];
-    return [
-      {
-        id: effectiveUserId,
-        fullName: account.fullName,
-        color: AVATAR_COLORS[0],
-        profileHref: "/settings/profile",
-        roleLabel: "You",
-        statusLabel: "Editing now",
-      },
-    ];
-  }, [workspaceId, documentId, livePresence, account, effectiveUserId]);
-
   const { doc, workspace } = state;
 
   // Local doc mutations (lock/unlock, delete-flag)
@@ -623,33 +593,33 @@ const DocumentEditorPage = () => {
     });
   };
 
-  const [collabReadOnlyReason, setCollabReadOnlyReason] = useState<ReadOnlyReason | null>(null);
   const readOnlyReason =
-    collabReadOnlyReason ??
-    (mergedDoc && workspace ? getReadOnlyReason(mergedDoc, workspace, effectiveUserId) : null);
+    mergedDoc && workspace ? getReadOnlyReason(mergedDoc, workspace, effectiveUserId) : null;
   const isEditable = state.status === "loaded" && readOnlyReason === null;
 
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
-  const [content, setContent] = useState<string>("");
 
   useEffect(() => {
     if (mergedDoc) {
-      setContent(mergedDoc.content);
       setSaveStatus("saved");
       setLastSavedAt(new Date().toISOString());
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mergedDoc?.id, mergedDoc?.content]);
 
-  const editor = useTiptapEditor({
-    content,
-    editable: isEditable,
-    properties: { ...properties, title: mergedDoc?.title },
-    onUpdate: () => {
-      setSaveStatus("unsaved");
+  const collab = useCollaborativeDocumentEditor({
+    workspaceId: isDatabaseWorkspaceId(workspaceId) ? workspaceId : "",
+    documentId: documentId && isDatabaseWorkspaceId(documentId) ? documentId : "",
+    user: {
+      id: effectiveUserId,
+      fullName: account?.fullName ?? "You",
+      avatarUrl: account?.avatarUrl ?? null,
     },
+    readOnly: !isEditable,
+    properties: { ...properties, title: mergedDoc?.title },
   });
+  const editor = collab.editor;
 
   // ─────── Outline + readiness (right rail data) ───────
   const outline = useDocumentOutline(editor);
@@ -659,19 +629,16 @@ const DocumentEditorPage = () => {
   );
   const readiness = useDocumentReadiness(editor, templateContract);
 
-  // Auto "save" simulation
   useEffect(() => {
-    if (saveStatus !== "unsaved") return;
-    const t1 = window.setTimeout(() => setSaveStatus("saving"), 800);
-    const t2 = window.setTimeout(() => {
-      setSaveStatus("saved");
-      setLastSavedAt(new Date().toISOString());
-    }, 1400);
-    return () => {
-      window.clearTimeout(t1);
-      window.clearTimeout(t2);
+    if (!editor) return;
+    const onUpdate = () => {
+      setSaveStatus("unsaved");
     };
-  }, [saveStatus]);
+    editor.on("update", onUpdate);
+    return () => {
+      editor.off("update", onUpdate);
+    };
+  }, [editor]);
 
   // Focus mode + comments rail + mobile drawers
   const [focusMode, setFocusMode] = useState(() => {
@@ -751,29 +718,31 @@ const DocumentEditorPage = () => {
   // Pending "create task from selection" snippet
   const [pendingTaskSnippet, setPendingTaskSnippet] = useState<string | null>(null);
 
-  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("reconnecting");
+  const connectionStatus = useMemo((): ConnectionStatus => {
+    if (collab.status === "synced" || collab.status === "connected") {
+      return "connected";
+    }
+    if (collab.status === "offline" || collab.status === "auth_failed" || collab.status === "error") {
+      return "offline";
+    }
+    if (collab.status === "connecting") {
+      return "connecting";
+    }
+    return "reconnecting";
+  }, [collab.status]);
 
-  useEffect(() => {
-    if (!workspaceId || !documentId) return;
-    let cancelled = false;
-    const unsubscribe = subscribeRealtimeStatus((status) => {
-      if (cancelled) return;
-      setConnectionStatus(status === "unavailable" ? "offline" : status);
-    });
-    prepareDocumentCollabBootstrap({ workspaceId, documentId }).then((result) => {
-      if (!cancelled) {
-        setCollabReadOnlyReason(result.readOnlyReason);
-      }
-    }).catch(() => {
-      if (!cancelled) {
-        setConnectionStatus("offline");
-      }
-    });
-    return () => {
-      cancelled = true;
-      unsubscribe();
+  const headerPresence: PresenceUser[] = useMemo(() => {
+    if (!account) return [];
+    const self: PresenceUser = {
+      id: effectiveUserId,
+      fullName: account.fullName,
+      color: AVATAR_COLORS[0],
+      profileHref: "/settings/profile",
+      roleLabel: "You",
+      statusLabel: "Editing now",
     };
-  }, [workspaceId, documentId]);
+    return [self, ...collab.onlineUsers];
+  }, [account, effectiveUserId, collab.onlineUsers]);
 
   const handleAnchorClick = (threadId: string) => {
     focusThread(threadId);

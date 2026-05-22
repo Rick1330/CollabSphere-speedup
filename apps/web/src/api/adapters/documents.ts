@@ -106,7 +106,6 @@ export type WorkspaceDocumentDetail = {
   status: TreeDocumentNode["status"];
   templateId: string | null;
   templateVersion: number | null;
-  contentPlaintext: string;
   isLocked: boolean;
   createdAt: string;
   updatedAt: string;
@@ -114,21 +113,6 @@ export type WorkspaceDocumentDetail = {
   createdBy: { id: string; fullName: string };
   folder: { name: string } | null;
 };
-
-/** Turn API plaintext snapshot into safe HTML for TipTap when Yjs/HTML body is not loaded yet. */
-export function plaintextToEditorHtml(text: string): string {
-  const raw = text.trim();
-  if (!raw) return "<p></p>";
-  const escaped = raw
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-  return escaped
-    .split(/\n\n+/)
-    .filter(Boolean)
-    .map((chunk) => `<p>${chunk.replace(/\n/g, "<br/>")}</p>`)
-    .join("");
-}
 
 export async function fetchWorkspaceDocument(
   workspaceId: string,

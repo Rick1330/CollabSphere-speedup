@@ -1,10 +1,11 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import type { Editor } from "@tiptap/react";
 import type { CommentThread } from "@/lib/mock-comments";
 
 const PLUGIN_KEY = new PluginKey("doc-anchors");
+const UPDATE_META_KEY = "doc-anchors:update";
 
 interface UseAnchorDecorationsArgs {
   editor: Editor | null;
@@ -27,6 +28,38 @@ export function useAnchorDecorations({
   flashThreadId,
   onAnchorClick,
 }: UseAnchorDecorationsArgs) {
+  const lastUpdateSignatureRef = useRef<string>("");
+  const threadsRef = useRef<CommentThread[]>(threads);
+  const activeThreadIdRef = useRef<string | null>(activeThreadId);
+  const flashThreadIdRef = useRef<string | null>(flashThreadId);
+  const onAnchorClickRef = useRef<(threadId: string) => void>(onAnchorClick);
+
+  threadsRef.current = threads;
+  activeThreadIdRef.current = activeThreadId;
+  flashThreadIdRef.current = flashThreadId;
+  onAnchorClickRef.current = onAnchorClick;
+
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return;
+    // Trigger decoration rebuild without reconfiguring plugins.
+    // This keeps plugin installation stable and avoids React update loops.
+    try {
+      const signature = [
+        threads.length,
+        activeThreadId ?? "",
+        flashThreadId ?? "",
+        threads.map((t) => `${t.id}:${t.resolved ? 1 : 0}:${t.anchor?.snippet?.length ?? 0}`).join("|"),
+      ].join("::");
+
+      if (signature !== lastUpdateSignatureRef.current) {
+        lastUpdateSignatureRef.current = signature;
+        editor.view.dispatch(editor.state.tr.setMeta(UPDATE_META_KEY, true));
+      }
+    } catch {
+      // ignore if view is tearing down
+    }
+  }, [editor, threads, activeThreadId, flashThreadId]);
+
   useEffect(() => {
     if (!editor || editor.isDestroyed) return;
     const view = editor.view;
@@ -39,7 +72,11 @@ export function useAnchorDecorations({
       const decorations: Decoration[] = [];
       const usedRanges: Array<[number, number]> = [];
 
-      threads.forEach((t) => {
+      const currentThreads = threadsRef.current;
+      const currentActive = activeThreadIdRef.current;
+      const currentFlash = flashThreadIdRef.current;
+
+      currentThreads.forEach((t) => {
         if (!t.anchor || t.resolved) return;
         const snippet = t.anchor.snippet;
         if (!snippet) return;
@@ -76,8 +113,8 @@ export function useAnchorDecorations({
 
             if (pmFrom !== -1 && pmTo !== -1) {
               const classes = ["doc-anchor"];
-              if (t.id === activeThreadId) classes.push("is-active");
-              if (t.id === flashThreadId) classes.push("is-flashing");
+              if (t.id === currentActive) classes.push("is-active");
+              if (t.id === currentFlash) classes.push("is-flashing");
               decorations.push(
                 Decoration.inline(pmFrom, pmTo, {
                   class: classes.join(" "),
@@ -103,7 +140,7 @@ export function useAnchorDecorations({
                     button.addEventListener("mousedown", (event) => {
                       event.preventDefault();
                       event.stopPropagation();
-                      onAnchorClick(t.id);
+                      onAnchorClickRef.current(t.id);
                     });
                     return button;
                   },
@@ -125,7 +162,8 @@ export function useAnchorDecorations({
       key: PLUGIN_KEY,
       state: {
         init: () => buildDecorations(),
-        apply: (tr, old) => (tr.docChanged ? buildDecorations() : old),
+        apply: (tr, old) =>
+          tr.docChanged || tr.getMeta(UPDATE_META_KEY) ? buildDecorations() : old,
       },
       props: {
         decorations(state) {
@@ -136,7 +174,7 @@ export function useAnchorDecorations({
           const anchorEl = target?.closest?.("[data-thread-id]") as HTMLElement | null;
           const threadId = anchorEl?.getAttribute("data-thread-id");
           if (threadId) {
-            onAnchorClick(threadId);
+            onAnchorClickRef.current(threadId);
             return true;
           }
           return false;
@@ -165,5 +203,5 @@ export function useAnchorDecorations({
         // view was torn down between checks; safe to ignore
       }
     };
-  }, [editor, threads, activeThreadId, flashThreadId, onAnchorClick]);
+  }, [editor]);
 }

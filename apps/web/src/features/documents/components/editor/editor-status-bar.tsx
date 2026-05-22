@@ -4,7 +4,7 @@ import type { Editor } from "@tiptap/react";
 import { relativeTime } from "@/lib/format";
 
 export type SaveStatus = "saved" | "saving" | "unsaved" | "error";
-export type ConnectionStatus = "connected" | "reconnecting" | "offline";
+export type ConnectionStatus = "connected" | "connecting" | "reconnecting" | "offline";
 
 interface EditorStatusBarProps {
   editor: Editor | null;
@@ -66,6 +66,12 @@ export const EditorStatusBar = ({
             <>
               <Wifi className="h-3 w-3 text-emerald-500" aria-hidden="true" />
               <span className="text-emerald-600">CONNECTED</span>
+            </>
+          )}
+          {connectionStatus === "connecting" && (
+            <>
+              <Loader2 className="h-3 w-3 text-amber-500 animate-spin" aria-hidden="true" />
+              <span className="text-amber-600">CONNECTING</span>
             </>
           )}
           {connectionStatus === "reconnecting" && (

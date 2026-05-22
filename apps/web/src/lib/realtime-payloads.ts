@@ -1,12 +1,12 @@
 /** Socket.IO payload shapes emitted by `RealtimeListener` (workspace room). */
 
-import type { WorkspaceRoleKey } from "@/lib/persona-scenario";
+import type { WorkspaceRole } from "@/api/adapters/members";
 
 export type WorkspaceRoleChangedPayload = {
   workspaceId: string;
   userId: string;
-  newRole: WorkspaceRoleKey;
-  oldRole?: WorkspaceRoleKey;
+  newRole: WorkspaceRole;
+  oldRole?: WorkspaceRole;
 };
 
 export type WorkspaceMemberJoinedPayload = {

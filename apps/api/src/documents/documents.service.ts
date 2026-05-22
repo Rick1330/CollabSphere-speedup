@@ -146,7 +146,6 @@ export class DocumentsService {
         properties: true,
         createdAt: true,
         updatedAt: true,
-        contentPlaintext: true,
         isLocked: true,
         lockedByUser: { select: { id: true, fullName: true } },
         createdBy: { select: { id: true, fullName: true } },

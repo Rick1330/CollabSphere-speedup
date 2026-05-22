@@ -13,8 +13,9 @@
     "yjs": "^13.6.30"
   },
   "scripts": {
-    "dev": "tsx watch src/dev.ts",
+    "dev": "tsx watch src/main.ts",
     "dev:main": "tsx watch src/main.ts",
+    "dev:legacy": "tsx watch src/dev.ts",
     "build": "pnpm --filter @collabsphere/database run generate && pnpm exec tsc -p tsconfig.json && tsx ../../scripts/build-bootstrap-app.ts .",
     "start": "node dist/main.js"
   }

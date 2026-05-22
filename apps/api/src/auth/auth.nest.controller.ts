@@ -57,6 +57,8 @@ const mapToHttpException = (error: unknown, requestId: string) => {
 };
 
 const csrfHeaderName = "x-csrf-token";
+const uuidPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const validateCsrfDoubleSubmit = (req: Request) => {
   const cookieToken = req.cookies?.[CSRF_TOKEN_COOKIE];
@@ -312,10 +314,10 @@ export class AuthNestController {
     try {
       const workspaceId = typeof body?.workspaceId === "string" ? body.workspaceId.trim() : "";
       const documentId = typeof body?.documentId === "string" ? body.documentId.trim() : "";
-      if (!workspaceId || !documentId) {
+      if (!uuidPattern.test(workspaceId) || !uuidPattern.test(documentId)) {
         throw new AppError({
           code: "VALIDATION_ERROR",
-          message: "workspaceId and documentId are required.",
+          message: "workspaceId and documentId must be valid UUIDs.",
         });
       }
       const result = await this.authSession.issueCollabToken({ userId, workspaceId, documentId });

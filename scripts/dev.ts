@@ -555,6 +555,7 @@ const envForSurface = (surface, appEnv) => {
   const { PORT: _apiPort, ...rest } = appEnv;
   return {
     ...rest,
+    NODE_ENV: rest.NODE_ENV ?? "development",
     COLLAB_PORT: appEnv.COLLAB_PORT ?? "3002",
   };
 };

@@ -83,7 +83,7 @@ export class AuthSessionService {
         isActive: true,
         deletedAt: null,
       },
-      select: { role: true },
+      select: { id: true },
     });
     if (!membership) {
       throw new AppError({ code: "NOT_WORKSPACE_MEMBER" });
@@ -109,13 +109,12 @@ export class AuthSessionService {
       });
     }
 
-    const expiresInSeconds = 5 * 60;
+    // Short-lived in production; longer in dev so local multi-tab testing is not cut off mid-session.
+    const expiresInSeconds =
+      process.env.NODE_ENV === "production" ? 5 * 60 : 30 * 60;
     const token = await new SignJWT({
       workspaceId: input.workspaceId,
       documentId: input.documentId,
-      role: membership.role,
-      scope: "collab",
-      userId: input.userId,
     })
       .setProtectedHeader({ alg: "HS256" })
       .setSubject(input.userId)

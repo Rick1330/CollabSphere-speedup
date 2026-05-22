@@ -1,5 +1,6 @@
 import type { ReadOnlyReason } from "@/features/documents/components/editor/editor-readonly-banner";
 import { AuthError, getCollabToken } from "@/api/adapters/auth";
+import { resolveCollabWsUrlFromEnv } from "@/lib/collab-ws-url";
 
 const READ_ONLY_BY_POLICY_CODE: Partial<Record<string, ReadOnlyReason>> = {
   DOCUMENT_LOCKED: "locked",
@@ -29,7 +30,7 @@ export async function prepareDocumentCollabBootstrap(input: {
     return {
       token: tokenData.token,
       expiresInSeconds: tokenData.expiresInSeconds,
-      hocuspocusUrl: import.meta.env.VITE_COLLAB_WS_URL ?? "ws://localhost:3002/collab",
+      hocuspocusUrl: resolveCollabWsUrlFromEnv(),
       readOnlyReason: null,
     };
   } catch (error) {
@@ -37,7 +38,7 @@ export async function prepareDocumentCollabBootstrap(input: {
       return {
         token: "",
         expiresInSeconds: 0,
-        hocuspocusUrl: import.meta.env.VITE_COLLAB_WS_URL ?? "ws://localhost:3002/collab",
+        hocuspocusUrl: resolveCollabWsUrlFromEnv(),
         readOnlyReason: mapReadOnlyReasonFromPolicyCode(error.code),
       };
     }

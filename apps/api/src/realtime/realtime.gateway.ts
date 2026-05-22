@@ -1,4 +1,5 @@
-import { Logger, type OnModuleDestroy } from "@nestjs/common";
+import { Injectable, Logger, type OnModuleDestroy } from "@nestjs/common";
+import { ModuleRef } from "@nestjs/core";
 import {
   ConnectedSocket,
   MessageBody,
@@ -21,6 +22,11 @@ import type {
   LeaveWorkspaceRoomPayload,
   RealtimeEventName,
 } from "./realtime.types.js";
+import {
+  getNestApplication,
+  getRegisteredRealtimeSessionService,
+  registerRealtimeSessionService,
+} from "./realtime-session.registry.js";
 import { RealtimeSessionService } from "./realtime-session.service.js";
 
 type RoomAckSuccess = { ok: true; room: string };
@@ -45,6 +51,7 @@ export function resolveGatewayRedisUrl(): string {
   return apiRuntimeEnv.REDIS_URL?.trim() ?? "";
 }
 
+@Injectable()
 @WebSocketGateway({
   namespace: "/realtime",
   cors: {
@@ -55,6 +62,19 @@ export function resolveGatewayRedisUrl(): string {
 export class RealtimeGateway
   implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect, OnModuleDestroy
 {
+  /** Nest may invoke connection handlers on instances without constructor DI. */
+  private static registeredModuleRef: ModuleRef | null = null;
+  private static registeredSessionService: RealtimeSessionService | null = null;
+
+  static registerModuleRef(moduleRef: ModuleRef): void {
+    RealtimeGateway.registeredModuleRef = moduleRef;
+  }
+
+  static registerSessionService(sessionService: RealtimeSessionService): void {
+    RealtimeGateway.registeredSessionService = sessionService;
+    registerRealtimeSessionService(sessionService);
+  }
+
   @WebSocketServer()
   server!: Server;
 
@@ -65,10 +85,85 @@ export class RealtimeGateway
   private namespaceRedisSub?: RedisClientType;
   private awarenessRedisSub?: RedisClientType;
 
-  constructor(private readonly sessionService: RealtimeSessionService) {}
+  constructor(
+    private readonly sessionService: RealtimeSessionService,
+    private readonly moduleRef: ModuleRef,
+  ) {}
+
+  private resolveSessionService(): RealtimeSessionService | null {
+    if (this.sessionService) {
+      return this.sessionService;
+    }
+    const fromRegistry = getRegisteredRealtimeSessionService();
+    if (fromRegistry) {
+      return fromRegistry;
+    }
+    const nestApp = getNestApplication();
+    if (nestApp) {
+      try {
+        const nestModuleRef = nestApp.get(ModuleRef, { strict: false });
+        if (nestModuleRef?.get) {
+          const fromNestModuleRef = nestModuleRef.get(RealtimeSessionService, { strict: false });
+          if (fromNestModuleRef) {
+            return fromNestModuleRef;
+          }
+        }
+        const fromApp = nestApp.get(RealtimeSessionService, { strict: false });
+        if (fromApp) {
+          return fromApp;
+        }
+      } catch {
+        // ignore — fall through to legacy static fallbacks
+      }
+    }
+    if (RealtimeGateway.registeredSessionService) {
+      return RealtimeGateway.registeredSessionService;
+    }
+    const ref = this.moduleRef ?? RealtimeGateway.registeredModuleRef;
+    if (!ref?.get) {
+      return null;
+    }
+    return ref.get(RealtimeSessionService, { strict: false }) ?? null;
+  }
+
+  /** Resolves session service for WebSocket handler instances (including those without constructor DI). */
+  private requireSessionService(): RealtimeSessionService {
+    const sessionService = this.resolveSessionService();
+    if (!sessionService) {
+      throw new Error("RealtimeSessionService is not available on this gateway instance (DI misconfiguration)");
+    }
+    return sessionService;
+  }
+
+  /** Copy DI session service onto static fallbacks for WebSocket handler instances without injection. */
+  private registerStaticFallbacks(): void {
+    if (this.sessionService) {
+      registerRealtimeSessionService(this.sessionService);
+      RealtimeGateway.registerSessionService(this.sessionService);
+    }
+    if (this.moduleRef) {
+      RealtimeGateway.registerModuleRef(this.moduleRef);
+    } else if (RealtimeGateway.registeredModuleRef) {
+      const svc = RealtimeGateway.registeredModuleRef.get(RealtimeSessionService, { strict: false });
+      if (svc) {
+        RealtimeGateway.registerSessionService(svc);
+      }
+    }
+
+    const nodeEnv = process.env.NODE_ENV ?? "development";
+    if (nodeEnv !== "production") {
+      if (!RealtimeGateway.registeredSessionService) {
+        this.logger.error("RealtimeSessionService static registration failed after gateway init");
+      } else {
+        this.logger.debug("RealtimeSessionService static registration OK");
+      }
+    }
+  }
 
   afterInit(server: Server): void {
     this.server = server;
+    this.registerStaticFallbacks();
+
     const redisUrl = resolveGatewayRedisUrl();
     const skipRedis = process.env.SKIP_REDIS_IO_ADAPTER === "1";
 
@@ -99,10 +194,19 @@ export class RealtimeGateway
   async handleConnection(client: Socket): Promise<void> {
     const startedAt = process.hrtime.bigint();
     try {
-      const user = await this.sessionService.authenticateSocket(client);
+      const sessionService = this.resolveSessionService();
+      if (!sessionService) {
+        this.logger.error(
+          "RealtimeSessionService is not available on this gateway instance (DI misconfiguration)",
+        );
+        client.disconnect(true);
+        return;
+      }
+
+      const user = await sessionService.authenticateSocket(client);
 
       client.data.user = user;
-      await client.join(this.sessionService.toUserRoom(user.userId));
+      await client.join(sessionService.toUserRoom(user.userId));
       this.activeConnections += 1;
       this.logger.log(
         JSON.stringify({
@@ -145,9 +249,10 @@ export class RealtimeGateway
     @MessageBody() payload: LeaveWorkspaceRoomPayload,
   ): Promise<RoomAck> {
     try {
-      const user = this.sessionService.getAuthenticatedUser(client);
-      await this.sessionService.assertWorkspaceMembership(user.userId, payload.workspaceId);
-      const room = this.sessionService.toWorkspaceRoom(payload.workspaceId);
+      const session = this.requireSessionService();
+      const user = session.getAuthenticatedUser(client);
+      await session.assertWorkspaceMembership(user.userId, payload.workspaceId);
+      const room = session.toWorkspaceRoom(payload.workspaceId);
       await client.leave(room);
       return { ok: true, room };
     } catch (error) {
@@ -161,14 +266,11 @@ export class RealtimeGateway
     @MessageBody() payload: JoinTaskRoomPayload,
   ): Promise<RoomsAck> {
     try {
-      const user = this.sessionService.getAuthenticatedUser(client);
-      await this.sessionService.assertTaskInWorkspace(
-        user.userId,
-        payload.workspaceId,
-        payload.taskId,
-      );
-      const workspaceRoom = this.sessionService.toWorkspaceRoom(payload.workspaceId);
-      const taskRoom = this.sessionService.toTaskRoom(payload.taskId);
+      const session = this.requireSessionService();
+      const user = session.getAuthenticatedUser(client);
+      await session.assertTaskInWorkspace(user.userId, payload.workspaceId, payload.taskId);
+      const workspaceRoom = session.toWorkspaceRoom(payload.workspaceId);
+      const taskRoom = session.toTaskRoom(payload.taskId);
       await client.join(workspaceRoom);
       await client.join(taskRoom);
       return { ok: true, rooms: [workspaceRoom, taskRoom] };
@@ -183,13 +285,10 @@ export class RealtimeGateway
     @MessageBody() payload: JoinDocumentRoomPayload,
   ): Promise<RoomAck> {
     try {
-      const user = this.sessionService.getAuthenticatedUser(client);
-      await this.sessionService.assertDocumentInWorkspace(
-        user.userId,
-        payload.workspaceId,
-        payload.documentId,
-      );
-      const room = this.sessionService.toDocumentRoom(payload.documentId);
+      const session = this.requireSessionService();
+      const user = session.getAuthenticatedUser(client);
+      await session.assertDocumentInWorkspace(user.userId, payload.workspaceId, payload.documentId);
+      const room = session.toDocumentRoom(payload.documentId);
       await client.join(room);
       const presence: DocumentPresencePayload = {
         workspaceId: payload.workspaceId,
@@ -210,8 +309,9 @@ export class RealtimeGateway
     @MessageBody() payload: LeaveDocumentRoomPayload & { workspaceId?: string },
   ): Promise<RoomAck> {
     try {
-      const user = this.sessionService.getAuthenticatedUser(client);
-      const room = this.sessionService.toDocumentRoom(payload.documentId);
+      const session = this.requireSessionService();
+      const user = session.getAuthenticatedUser(client);
+      const room = session.toDocumentRoom(payload.documentId);
       await client.leave(room);
       if (payload.workspaceId) {
         client.to(room).emit("document:presence:leave", {
@@ -232,9 +332,10 @@ export class RealtimeGateway
     @MessageBody() payload: DocumentPresencePayload,
   ): Promise<{ ok: true } | RoomAckFailure> {
     try {
-      const user = this.sessionService.getAuthenticatedUser(client);
-      await this.sessionService.assertWorkspaceMembership(user.userId, payload.workspaceId);
-      const room = this.sessionService.toDocumentRoom(payload.documentId);
+      const session = this.requireSessionService();
+      const user = session.getAuthenticatedUser(client);
+      await session.assertWorkspaceMembership(user.userId, payload.workspaceId);
+      const room = session.toDocumentRoom(payload.documentId);
       client.to(room).emit("document:presence:heartbeat", {
         ...payload,
         userId: user.userId,
@@ -251,15 +352,15 @@ export class RealtimeGateway
     @MessageBody() payload: LeaveTaskRoomPayload,
   ): Promise<RoomAck> {
     try {
-      const user = this.sessionService.getAuthenticatedUser(client);
+      const session = this.requireSessionService();
+      const user = session.getAuthenticatedUser(client);
       const workspaceId =
-        payload.workspaceId?.trim() ||
-        (await this.sessionService.resolveTaskWorkspaceId(payload.taskId));
+        payload.workspaceId?.trim() || (await session.resolveTaskWorkspaceId(payload.taskId));
       if (!workspaceId) {
         return { ok: false, message: "Task not found" };
       }
-      await this.sessionService.assertTaskInWorkspace(user.userId, workspaceId, payload.taskId);
-      const room = this.sessionService.toTaskRoom(payload.taskId);
+      await session.assertTaskInWorkspace(user.userId, workspaceId, payload.taskId);
+      const room = session.toTaskRoom(payload.taskId);
       await client.leave(room);
       return { ok: true, room };
     } catch (error) {
@@ -283,8 +384,9 @@ export class RealtimeGateway
     }
     if (room.startsWith("user:")) {
       try {
-        const user = this.sessionService.getAuthenticatedUser(client);
-        if (room !== this.sessionService.toUserRoom(user.userId)) {
+        const session = this.requireSessionService();
+        const user = session.getAuthenticatedUser(client);
+        if (room !== session.toUserRoom(user.userId)) {
           return { ok: false, message: "Cannot join another user's room" };
         }
         await client.join(room);
@@ -300,9 +402,10 @@ export class RealtimeGateway
         return { ok: false, message: "workspaceId is required for task rooms" };
       }
       try {
-        const user = this.sessionService.getAuthenticatedUser(client);
-        await this.sessionService.assertTaskInWorkspace(user.userId, workspaceId, taskId);
-        await client.join(this.sessionService.toWorkspaceRoom(workspaceId));
+        const session = this.requireSessionService();
+        const user = session.getAuthenticatedUser(client);
+        await session.assertTaskInWorkspace(user.userId, workspaceId, taskId);
+        await client.join(session.toWorkspaceRoom(workspaceId));
         await client.join(room);
         return { ok: true, room };
       } catch (error) {
@@ -316,8 +419,9 @@ export class RealtimeGateway
         return { ok: false, message: "workspaceId is required for document rooms" };
       }
       try {
-        const user = this.sessionService.getAuthenticatedUser(client);
-        await this.sessionService.assertDocumentInWorkspace(user.userId, workspaceId, documentId);
+        const session = this.requireSessionService();
+        const user = session.getAuthenticatedUser(client);
+        await session.assertDocumentInWorkspace(user.userId, workspaceId, documentId);
         await client.join(room);
         return { ok: true, room };
       } catch (error) {
@@ -337,10 +441,11 @@ export class RealtimeGateway
       return { ok: false, message: "Room is required" };
     }
     try {
-      const user = this.sessionService.getAuthenticatedUser(client);
+      const session = this.requireSessionService();
+      const user = session.getAuthenticatedUser(client);
       if (room.startsWith("workspace:")) {
         const workspaceId = room.slice("workspace:".length);
-        await this.sessionService.assertWorkspaceMembership(user.userId, workspaceId);
+        await session.assertWorkspaceMembership(user.userId, workspaceId);
       }
       await client.leave(room);
       return { ok: true, room };
@@ -355,22 +460,23 @@ export class RealtimeGateway
 
   emitToWorkspace(workspaceId: string, event: RealtimeEventName, payload: unknown): void {
     this.logger.debug(JSON.stringify({ event: "realtime.emit", channel: "workspace", workspaceId, name: event }));
-    this.emitToRoom(this.sessionService.toWorkspaceRoom(workspaceId), event, payload);
+    this.emitToRoom(this.requireSessionService().toWorkspaceRoom(workspaceId), event, payload);
   }
 
   emitToUser(userId: string, event: RealtimeEventName, payload: unknown): void {
-    this.server.to(this.sessionService.toUserRoom(userId)).emit(event, payload);
+    this.server.to(this.requireSessionService().toUserRoom(userId)).emit(event, payload);
   }
 
   emitToTask(taskId: string, event: RealtimeEventName, payload: unknown): void {
-    this.server.to(this.sessionService.toTaskRoom(taskId)).emit(event, payload);
+    this.server.to(this.requireSessionService().toTaskRoom(taskId)).emit(event, payload);
   }
 
   private async joinWorkspaceRoomInternal(client: Socket, workspaceId: string): Promise<RoomAck> {
     try {
-      const user = this.sessionService.getAuthenticatedUser(client);
-      await this.sessionService.assertWorkspaceMembership(user.userId, workspaceId);
-      const room = this.sessionService.toWorkspaceRoom(workspaceId);
+      const session = this.requireSessionService();
+      const user = session.getAuthenticatedUser(client);
+      await session.assertWorkspaceMembership(user.userId, workspaceId);
+      const room = session.toWorkspaceRoom(workspaceId);
       await client.join(room);
       return { ok: true, room };
     } catch (error) {
@@ -411,9 +517,11 @@ export class RealtimeGateway
           if (!data.workspaceId) {
             return;
           }
-          server
-            .to(this.sessionService.toWorkspaceRoom(data.workspaceId))
-            .emit("document:awareness", data);
+          const session = this.resolveSessionService();
+          if (!session) {
+            return;
+          }
+          server.to(session.toWorkspaceRoom(data.workspaceId)).emit("document:awareness", data);
         } catch (parseError) {
           this.logger.warn(`Awareness bridge parse error: ${this.toErrorMessage(parseError)}`);
         }
