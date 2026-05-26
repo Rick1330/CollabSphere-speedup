@@ -22,6 +22,18 @@
       ],
       "@collabsphere/shared": [
         "packages/shared/src/index.ts"
+      ],
+      "@collabsphere/shared/s3-env": [
+        "packages/shared/src/s3-env.ts"
+      ],
+      "@collabsphere/docx-import": [
+        "packages/docx-import/src/index.ts"
+      ],
+      "@collabsphere/docx-import/*": [
+        "packages/docx-import/src/*"
+      ],
+      "@collabsphere/docx-import/server": [
+        "packages/docx-import/src/server.ts"
       ]
     }
   }

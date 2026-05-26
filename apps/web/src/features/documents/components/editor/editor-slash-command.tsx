@@ -296,9 +296,18 @@ export const EditorSlashCommand = ({
     const onUpdate = () => {
       const { state } = editor;
       const { from } = state.selection;
+      if (from < 0 || from > state.doc.content.size) return;
+
       // Look at the text in the current text block, up to the caret.
       const $from = state.selection.$from;
-      const blockStart = $from.before($from.depth) + 1;
+      let blockStart: number;
+      try {
+        blockStart = $from.depth > 0 ? $from.before($from.depth) + 1 : $from.start();
+      } catch {
+        return;
+      }
+      if (blockStart < 0 || blockStart > from) return;
+
       const textBefore = state.doc.textBetween(blockStart, from, "\n", "\n");
 
       // Find the trigger `/` — the last `/` preceded by start-of-block or

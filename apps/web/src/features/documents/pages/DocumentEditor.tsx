@@ -1,20 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ArrowLeft, FileX, RefreshCw, Send, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useCollaborativeDocumentEditor } from "@/hooks/use-collaborative-document-editor";
 import { useIsBelowLg } from "@/hooks/use-is-below-lg";
-import {
-  isContextRailVisible,
-  isDocumentTreeVisible,
-  toggleContextRailPanel,
-  toggleDocumentTreePanel,
-} from "@/features/documents/lib/editor-panel-toggles";
+import { isDocumentTreeVisible, toggleDocumentTreePanel } from "@/features/documents/lib/editor-panel-toggles";
+import { useCommentSelectionFilter } from "@/features/documents/hooks/use-comment-selection-filter";
 import { useDocumentComments } from "@/features/documents/hooks/use-document-comments";
 import { useDocumentThreadFocus } from "@/features/documents/hooks/use-document-thread-focus";
-import { useAnchorDecorations } from "@/features/documents/hooks/use-anchor-decorations";
 import { AVATAR_COLORS } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useDocumentTree } from "@/features/documents/hooks/use-document-tree";
@@ -22,43 +17,74 @@ import type { TreeContentPermissions } from "@/features/documents/components/doc
 import { getRolePermissions, type WorkspaceRoleKey } from "@/lib/persona-scenario";
 import { listWorkspaceMembers } from "@/api/adapters/tasks";
 import { fetchWorkspaceSidebarContext } from "@/api/adapters/workspaces";
-import { fetchWorkspaceDocument, createDocument, createWorkspaceFolder } from "@/api/adapters/documents";
+import {
+  fetchWorkspaceDocument,
+  createDocument,
+  createDocumentVersion,
+  createWorkspaceFolder,
+} from "@/api/adapters/documents";
 import { ApiError } from "@/api/client";
-import { EditorHeader, type EditorDocument } from "@/features/documents/components/editor/editor-header";
+import type { EditorDocument } from "@/features/documents/components/editor/editor-header";
+import { EditorShell, TopBar, MenuBar, StatusBar } from "@/components/editor/shell";
+import { LeftRail } from "@/components/editor/left/LeftRail";
+import { LeftPanel } from "@/components/editor/left/LeftPanel";
+import { LeftPanelContent } from "@/components/editor/left/panels/LeftPanelContent";
+import { RightRail } from "@/components/editor/right/RightRail";
+import { RightPanel } from "@/components/editor/right/RightPanel";
+import { RightPanelContent } from "@/components/editor/right/panels/RightPanelContent";
 import {
   EditorReadOnlyBanner,
   type ReadOnlyReason,
 } from "@/features/documents/components/editor/editor-readonly-banner";
-import { EditorToolbar } from "@/features/documents/components/editor/editor-toolbar";
+import { DocumentLoadingOverlay } from "@/components/editor/DocumentLoadingOverlay";
+import { Toolbar } from "@/components/editor/shell/Toolbar";
 import { EditorContentArea } from "@/features/documents/components/editor/editor-content";
 import { CollabCaretDebug } from "@/features/documents/components/editor/collab-caret-debug";
 import { RemotePointerOverlay } from "@/features/documents/components/editor/remote-pointer-overlay";
 import { EditorSlashCommand } from "@/features/documents/components/editor/editor-slash-command";
-import {
-  EditorStatusBar,
-  type ConnectionStatus,
-  type SaveStatus,
-} from "@/features/documents/components/editor/editor-status-bar";
+import type { ConnectionStatus, SaveStatus } from "@/features/documents/components/editor/editor-status-bar";
 import type { PresenceUser } from "@/features/documents/components/editor/editor-presence";
-import { EditorContextRail } from "@/features/documents/components/editor/editor-context-rail";
-import { useDocumentOutline } from "@/features/documents/hooks/use-document-outline";
+import type { DocumentLinkedTaskEntry } from "@/features/documents/components/editor/editor-context-rail";
 import { useDocumentReadiness } from "@/features/documents/hooks/use-document-readiness";
+import { useEditorZoomShortcuts } from "@/features/documents/hooks/use-editor-zoom-shortcuts";
+import { useEditorVersionHistoryShortcuts } from "@/features/documents/hooks/use-editor-version-history-shortcuts";
+import { VersionHistoryOverlay } from "@/features/documents/components/version-history-overlay";
+import {
+  computeFitPageLevel,
+  computeFitWidthLevel,
+} from "@/features/documents/lib/compute-fit-zoom";
+import { useFocusModeShortcut } from "@/components/editor/canvas/use-focus-mode-shortcut";
+import { useEditorChromeDark } from "@/components/editor/hooks/use-editor-appearance";
+import "@/components/editor/styles/tokens.css";
+import { FocusModeToolbarPill } from "@/components/editor/canvas/FocusModeToolbarPill";
+import { Ruler } from "@/components/editor/canvas/Ruler";
 import { getTemplateContract } from "@/features/documents/template-schema";
+import {
+  useEditorStore,
+  type LeftSidebarTab,
+  type RightSidebarTab,
+} from "@/features/documents/stores/use-editor-store";
 import { DocumentTreePanel } from "@/features/documents/components/tree/document-tree-panel";
 import { TreeCreateDialog } from "@/features/documents/components/tree-create-dialog";
 import { DocumentInlineCommentTrigger } from "@/features/documents/components/comments/document-inline-comment-trigger";
-import { DocumentCommentComposer } from "@/features/documents/components/comments/document-comment-composer";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Separator } from "@/components/ui/separator";
+import {
+  EDITOR_COMMENT_COMPOSE_EVENT,
+  type EditorCommentComposeDetail,
+  type PendingCommentState,
+} from "@/features/documents/lib/editor-comment-events";
+import {
+  clearPendingCommentMark,
+  promotePendingCommentMark,
+  setCommentMarkResolved,
+} from "@/features/documents/lib/comment-mark-utils";
 import { EditorSubmitDialog } from "@/features/documents/components/editor/editor-submit-dialog";
 import { EditorReviewPanel } from "@/features/documents/components/editor/editor-review-panel";
 import { EditorReviewFeedback } from "@/features/documents/components/editor/editor-review-feedback";
 import { EditorSubmissionHistory } from "@/features/documents/components/editor/editor-submission-history";
 import { TableInsertDialog } from "@/features/documents/components/editor/table-insert-dialog";
-import {
-  MOCK_SUBMISSION_HISTORY,
-  type SubmissionRecord,
-} from "@/lib/mock-academic";
+import { PageSetupDialog } from "@/components/editor/dialogs/PageSetupDialog";
+import type { SubmissionRecord } from "@/lib/mock-academic";
+import { decideOnSubmission, fetchDocumentHistory, submitForReview } from "@/api/adapters/review";
 import type { CommentNode } from "@/lib/mock-comments";
 import {
   buildDocumentSeed,
@@ -68,6 +94,7 @@ import {
 } from "@/api/adapters/templates";
 import { resolveDocumentParam, resolveWorkspaceParam } from "@/lib/route-params";
 import { useCurrentAccount } from "@/lib/auth-session";
+import { useAuthBootstrap } from "@/lib/auth-bootstrap-context";
 import { isDatabaseWorkspaceId } from "@/lib/workspace-id";
 import {
   CreateTaskDialog,
@@ -77,10 +104,17 @@ import {
   STATUS_LABELS,
   type TaskAssignee,
   type TaskDetail,
+  type TaskLinkedResource,
   type TaskPriority,
   type TaskStatus,
 } from "@/api/adapters/tasks";
-type SidebarTab = "outline" | "readiness" | "properties" | "comments";
+function readCommentsPanelOpenDefault(): boolean {
+  const saved = localStorage.getItem("collab-editor-comments-panel");
+  if (saved !== null) return saved === "true";
+  const legacy = localStorage.getItem("collab-editor-comments");
+  if (legacy !== null) return legacy === "true";
+  return true;
+}
 
 type WorkspaceRole = "OWNER" | "ADMIN" | "MANAGER" | "MEMBER" | "VIEWER";
 type WorkspaceStatus = "active" | "archived";
@@ -227,8 +261,8 @@ function formatAnchorSnippet(snippet: string): string {
 }
 
 function findDecoratedAnchorTarget(scroller: HTMLDivElement, snippet: string): HTMLElement | null {
-  const fallback = scroller.querySelector("[data-thread-id]") as HTMLElement | null;
-  const matching = Array.from(scroller.querySelectorAll<HTMLElement>("[data-thread-id]")).find(
+  const fallback = scroller.querySelector("[data-comment-thread-id]") as HTMLElement | null;
+  const matching = Array.from(scroller.querySelectorAll<HTMLElement>("[data-comment-thread-id]")).find(
     (node) => node.textContent?.includes(snippet),
   );
   return matching ?? fallback;
@@ -236,8 +270,8 @@ function findDecoratedAnchorTarget(scroller: HTMLDivElement, snippet: string): H
 
 function flashAnchorTarget(target: HTMLElement): void {
   target.scrollIntoView({ behavior: "smooth", block: "center" });
-  target.classList.add("is-flashing");
-  window.setTimeout(() => target.classList.remove("is-flashing"), 1800);
+  target.classList.add("comment-anchor--flash");
+  window.setTimeout(() => target.classList.remove("comment-anchor--flash"), 1300);
 }
 
 function jumpToRawSnippet(scroller: HTMLDivElement, snippet: string): boolean {
@@ -378,7 +412,7 @@ const EditorCenterSkeleton = () => (
 );
 
 const EditorShellSkeleton = () => (
-  <div className="app-light flex h-screen bg-stone-50">
+  <div className="flex h-screen bg-[var(--surface-2)]">
     <div className="hidden lg:flex w-[280px] shrink-0">
       <TreeSkeleton />
     </div>
@@ -405,6 +439,7 @@ const DocumentEditorPage = () => {
   const documentId = resolveDocumentParam(params.documentId);
   const isBelowLg = useIsBelowLg();
   const navigate = useNavigate();
+  const { isSessionReady } = useAuthBootstrap();
 
   useEffect(() => {
     if (!rawWorkspaceId || isDatabaseWorkspaceId(rawWorkspaceId)) return;
@@ -419,6 +454,7 @@ const DocumentEditorPage = () => {
   const { tree: documentTree, reload: reloadDocumentTree } = useDocumentTree(workspaceId);
   const [workspaceMembers, setWorkspaceMembers] = useState<TaskAssignee[]>([]);
   useEffect(() => {
+    if (!isSessionReady) return;
     let cancelled = false;
     listWorkspaceMembers(workspaceId)
       .then((m) => {
@@ -430,7 +466,7 @@ const DocumentEditorPage = () => {
     return () => {
       cancelled = true;
     };
-  }, [workspaceId]);
+  }, [workspaceId, isSessionReady]);
 
   const membersById = useMemo(
     () => new Map(workspaceMembers.map((member) => [member.id, member])),
@@ -455,6 +491,11 @@ const DocumentEditorPage = () => {
 
   // Load workspace + document (API for UUID ids, mock catalog for legacy slugs).
   useEffect(() => {
+    if (!isSessionReady) {
+      setState({ status: "loading", doc: null, workspace: null });
+      return;
+    }
+
     let cancelled = false;
     setState({ status: "loading", doc: null, workspace: null });
 
@@ -503,8 +544,13 @@ const DocumentEditorPage = () => {
             },
           };
           setState({ status: "loaded", doc, workspace: ws });
-        } catch {
-          if (!cancelled) setState({ status: "error", doc: null, workspace: null });
+        } catch (err) {
+          if (!cancelled) {
+            if (err instanceof ApiError && err.status === 401) {
+              toast.error("Session expired — sign in again.");
+            }
+            setState({ status: "error", doc: null, workspace: null });
+          }
         }
       })();
       return () => {
@@ -545,7 +591,7 @@ const DocumentEditorPage = () => {
       cancelled = true;
       window.clearTimeout(t);
     };
-  }, [workspaceId, documentId, retryNonce, effectiveUserId, account?.fullName]);
+  }, [workspaceId, documentId, retryNonce, effectiveUserId, account?.fullName, isSessionReady]);
 
   const { doc, workspace } = state;
 
@@ -578,10 +624,27 @@ const DocumentEditorPage = () => {
   })();
 
   // ─────── Academic submission state ───────
-  // Per-document submission history (mock-seeded, locally-mutable).
+  // Per-document submission history (API-backed).
   const [submissionHistory, setSubmissionHistory] = useState<SubmissionRecord[]>([]);
   useEffect(() => {
-    setSubmissionHistory(MOCK_SUBMISSION_HISTORY[documentId] ?? []);
+    let cancelled = false;
+    if (!documentId) {
+      setSubmissionHistory([]);
+      return;
+    }
+
+    void (async () => {
+      try {
+        const history = await fetchDocumentHistory(documentId);
+        if (!cancelled) setSubmissionHistory(history);
+      } catch {
+        if (!cancelled) setSubmissionHistory([]);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [documentId]);
 
   // ─────── Document Properties state ───────
@@ -598,9 +661,35 @@ const DocumentEditorPage = () => {
   const readOnlyReason =
     mergedDoc && workspace ? getReadOnlyReason(mergedDoc, workspace, effectiveUserId) : null;
   const isEditable = state.status === "loaded" && readOnlyReason === null;
+  const [isVersionHistoryOpen, setIsVersionHistoryOpen] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const openVersionHistory = useCallback(() => {
+    if (state.status !== "loaded") return;
+    setIsVersionHistoryOpen(true);
+  }, [state.status]);
+
+  useEffect(() => {
+    if (searchParams.get("history") !== "1" || state.status !== "loaded") return;
+    setIsVersionHistoryOpen(true);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("history");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [searchParams, setSearchParams, state.status]);
+
+  useEditorVersionHistoryShortcuts(
+    state.status === "loaded" && !isVersionHistoryOpen,
+    openVersionHistory,
+  );
 
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+  const autosaveInFlightRef = useRef(false);
 
   useEffect(() => {
     if (mergedDoc) {
@@ -612,10 +701,23 @@ const DocumentEditorPage = () => {
 
   const editorScrollRef = useRef<HTMLDivElement>(null);
   const writingColumnRef = useRef<HTMLDivElement>(null);
+  const onThreadClickRef = useRef<(threadId: string) => void>(() => {});
+
+  const [docxImporting, setDocxImporting] = useState(false);
+  const [docxImportProgress, setDocxImportProgress] = useState<number | null>(null);
+
+  const handleDocxImportStateChange = useCallback(
+    (importState: { importing: boolean; progress: number | null }) => {
+      setDocxImporting(importState.importing);
+      setDocxImportProgress(importState.progress);
+    },
+    [],
+  );
 
   const collab = useCollaborativeDocumentEditor({
     workspaceId: isDatabaseWorkspaceId(workspaceId) ? workspaceId : "",
     documentId: documentId && isDatabaseWorkspaceId(documentId) ? documentId : "",
+    isSessionReady,
     user: {
       id: effectiveUserId,
       fullName: account?.fullName ?? "You",
@@ -624,36 +726,96 @@ const DocumentEditorPage = () => {
     readOnly: !isEditable,
     properties: { ...properties, title: mergedDoc?.title },
     pointerRootRef: writingColumnRef,
+    onThreadClick: (threadId) => onThreadClickRef.current(threadId),
   });
   const editor = collab.editor;
 
-  // ─────── Outline + readiness (right rail data) ───────
-  const outline = useDocumentOutline(editor);
+  const handleDocxImportStart = useCallback(() => {
+    collab.pauseCollabForImport();
+  }, [collab]);
+
+  // ─────── Template readiness (submit gating) ───────
   const templateContract = useMemo(
     () => getTemplateContract(mergedDoc?.templateId),
     [mergedDoc?.templateId],
   );
   const readiness = useDocumentReadiness(editor, templateContract);
 
+  const chromeDark = useEditorChromeDark();
+  const hydratePageWidth = useEditorStore((s) => s.hydratePageWidth);
+  const hydrateZoomLevel = useEditorStore((s) => s.hydrateZoomLevel);
+  const hydratePageSetup = useEditorStore((s) => s.hydratePageSetup);
+  const hydrateDocumentPageTheme = useEditorStore((s) => s.hydrateDocumentPageTheme);
+  const zoomLevel = useEditorStore((s) => s.zoomLevel);
+  const showRuler = useEditorStore((s) => s.showRuler);
+  const pageSetup = useEditorStore((s) => s.pageSetup);
+  const setZoomLevel = useEditorStore((s) => s.setZoomLevel);
+  useEffect(() => {
+    hydratePageWidth();
+    hydrateZoomLevel();
+    hydratePageSetup();
+    hydrateDocumentPageTheme();
+  }, [hydratePageWidth, hydrateZoomLevel, hydratePageSetup, hydrateDocumentPageTheme]);
+
+  useEditorZoomShortcuts(state.status === "loaded");
+
   useEffect(() => {
     if (!editor) return;
+    let debounceTimer: number | null = null;
+    let autosaveTimer: number | null = null;
+    const AUTOSAVE_IDLE_MS = 2500;
     const onUpdate = () => {
-      setSaveStatus("unsaved");
+      if (debounceTimer) window.clearTimeout(debounceTimer);
+      debounceTimer = window.setTimeout(() => {
+        debounceTimer = null;
+        setSaveStatus("unsaved");
+      }, 300);
+
+      if (autosaveTimer) window.clearTimeout(autosaveTimer);
+      autosaveTimer = window.setTimeout(() => {
+        autosaveTimer = null;
+
+        if (!isEditable) return;
+        if (!mergedDoc) return;
+        if (!isDatabaseWorkspaceId(workspaceId) || !isDatabaseWorkspaceId(documentId)) return;
+        if (collab.status === "offline" || collab.status === "auth_failed" || collab.status === "error") return;
+        if (autosaveInFlightRef.current) return;
+
+        autosaveInFlightRef.current = true;
+        setSaveStatus("saving");
+
+        void (async () => {
+          try {
+            await createDocumentVersion(workspaceId, mergedDoc.id, {
+              versionLabel: `auto-${Date.now().toString(36)}`,
+            });
+            setSaveStatus("saved");
+            setLastSavedAt(new Date().toISOString());
+          } catch {
+            setSaveStatus("error");
+          } finally {
+            autosaveInFlightRef.current = false;
+          }
+        })();
+      }, AUTOSAVE_IDLE_MS);
     };
     editor.on("update", onUpdate);
     return () => {
+      if (debounceTimer) window.clearTimeout(debounceTimer);
+      if (autosaveTimer) window.clearTimeout(autosaveTimer);
       editor.off("update", onUpdate);
     };
-  }, [editor]);
+  }, [editor, isEditable, mergedDoc?.id, workspaceId, documentId, collab.status]);
 
   // Focus mode + comments rail + mobile drawers
   const [focusMode, setFocusMode] = useState(() => {
     return localStorage.getItem("collab-editor-focus") === "true";
   });
-  const defaultSidebarTab: Exclude<SidebarTab, "comments"> =
-    templateContract?.enforcement === "sections-required" ? "readiness" : "outline";
-  const [sidebarTab, setSidebarTab] = useState<SidebarTab>(defaultSidebarTab);
-  const [previousSidebarTab, setPreviousSidebarTab] = useState<Exclude<SidebarTab, "comments">>(defaultSidebarTab);
+  const [commentsPanelOpen, setCommentsPanelOpen] = useState(readCommentsPanelOpenDefault);
+  const [contextRailCollapsed, setContextRailCollapsed] = useState(
+    () => !readCommentsPanelOpenDefault(),
+  );
+  const [selectionFilterBypass, setSelectionFilterBypass] = useState(false);
   const [treeOpen, setTreeOpen] = useState(() => {
     const saved = localStorage.getItem("collab-editor-tree");
     return saved === null ? true : saved === "true";
@@ -661,7 +823,6 @@ const DocumentEditorPage = () => {
 
   const [mobileTreeOpen, setMobileTreeOpen] = useState(false);
   const [mobileCommentsOpen, setMobileCommentsOpen] = useState(false);
-  const [contextRailCollapsed, setContextRailCollapsed] = useState(false);
   const [contextRailWidth, setContextRailWidth] = useState(332);
   const contextRailResizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
@@ -688,11 +849,16 @@ const DocumentEditorPage = () => {
     localStorage.setItem("collab-editor-focus", String(focusMode));
   }, [focusMode]);
 
-  const commentsOpen = sidebarTab === "comments";
+  useEffect(() => {
+    localStorage.setItem("collab-editor-comments-panel", String(commentsPanelOpen));
+  }, [commentsPanelOpen]);
 
   useEffect(() => {
-    localStorage.setItem("collab-editor-comments", String(commentsOpen));
-  }, [commentsOpen]);
+    if (!focusMode) return;
+    setCommentsPanelOpen(false);
+    setContextRailCollapsed(true);
+    setMobileCommentsOpen(false);
+  }, [focusMode]);
 
   useEffect(() => {
     localStorage.setItem("collab-editor-tree", String(treeOpen));
@@ -716,15 +882,23 @@ const DocumentEditorPage = () => {
   });
   const { activeThreadId, focusThread, flashAnchorId, flashAnchor } =
     useDocumentThreadFocus();
+  const flashAnchorClassTimeoutRef = useRef<number | null>(null);
 
-  // Floating composer state for inline anchored comments
-  const [pendingAnchor, setPendingAnchor] = useState<string | null>(null);
+  const [pendingComment, setPendingComment] = useState<PendingCommentState | null>(null);
   // Pending "create task from selection" snippet
   const [pendingTaskSnippet, setPendingTaskSnippet] = useState<string | null>(null);
+  const [sessionLinkedTasks, setSessionLinkedTasks] = useState<DocumentLinkedTaskEntry[]>([]);
+  const leftSidebarTab = useEditorStore((s) => s.leftSidebarTab);
+  const setLeftSidebarTab = useEditorStore((s) => s.setLeftSidebarTab);
+  const rightSidebarTab = useEditorStore((s) => s.rightSidebarTab);
+  const setRightSidebarTab = useEditorStore((s) => s.setRightSidebarTab);
 
   const connectionStatus = useMemo((): ConnectionStatus => {
-    if (collab.status === "synced" || collab.status === "connected") {
+    if (collab.status === "synced") {
       return "connected";
+    }
+    if (collab.status === "connected") {
+      return "connecting";
     }
     if (collab.status === "offline" || collab.status === "auth_failed" || collab.status === "error") {
       return "offline";
@@ -736,35 +910,301 @@ const DocumentEditorPage = () => {
   }, [collab.status]);
 
   const headerPresence: PresenceUser[] = useMemo(() => {
-    if (!account) return [];
-    const self: PresenceUser = {
-      id: effectiveUserId,
-      fullName: account.fullName,
-      color: AVATAR_COLORS[0],
-      profileHref: "/settings/profile",
-      roleLabel: "You",
-      statusLabel: "Editing now",
-    };
-    return [self, ...collab.onlineUsers];
-  }, [account, effectiveUserId, collab.onlineUsers]);
-
-  const handleAnchorClick = (threadId: string) => {
-    focusThread(threadId);
-    setContextRailCollapsed(false);
-    if (isBelowLg) {
-      setMobileCommentsOpen(true);
+    if (collab.presenceUsers.length > 0) {
+      return collab.presenceUsers;
     }
-    setSidebarTab("comments");
+    if (!account) return [];
+    return [
+      {
+        id: effectiveUserId,
+        fullName: account.fullName,
+        color: AVATAR_COLORS[0],
+        profileHref: "/settings/profile",
+        roleLabel: "You",
+        statusLabel: "Editing now",
+      },
+    ];
+  }, [collab.presenceUsers, account, effectiveUserId]);
+
+  const openContextRailTab = useCallback(
+    (tab: RightSidebarTab) => {
+      setRightSidebarTab(tab);
+      setCommentsPanelOpen(true);
+      setContextRailCollapsed(false);
+      if (isBelowLg) {
+        setMobileCommentsOpen(true);
+      }
+    },
+    [isBelowLg, setRightSidebarTab],
+  );
+
+  const handleLeftRailSelect = useCallback(
+    (tab: LeftSidebarTab) => {
+      if (!isBelowLg && tab === leftSidebarTab && treeOpen && !focusMode) {
+        setTreeOpen(false);
+        return;
+      }
+      setLeftSidebarTab(tab);
+      if (isBelowLg) {
+        setMobileTreeOpen(true);
+        return;
+      }
+      setTreeOpen(true);
+      if (focusMode) {
+        setFocusMode(false);
+      }
+    },
+    [focusMode, isBelowLg, leftSidebarTab, setLeftSidebarTab, treeOpen],
+  );
+
+  const handleRightRailSelect = useCallback(
+    (tab: RightSidebarTab) => {
+      const panelVisible = commentsPanelOpen && !contextRailCollapsed;
+      if (!isBelowLg && tab === rightSidebarTab && panelVisible && !focusMode) {
+        setCommentsPanelOpen(false);
+        setContextRailCollapsed(true);
+        return;
+      }
+      openContextRailTab(tab);
+    },
+    [
+      commentsPanelOpen,
+      contextRailCollapsed,
+      focusMode,
+      isBelowLg,
+      openContextRailTab,
+      rightSidebarTab,
+    ],
+  );
+
+  const openCommentsPanel = useCallback(() => {
+    openContextRailTab("comments");
+  }, [openContextRailTab]);
+
+  const handleJumpToTaskSnippet = useCallback(
+    (snippet: string) => {
+      const scroller = editorScrollRef.current;
+      if (!scroller || !snippet.trim()) return;
+      jumpToAnchorSnippet(scroller, snippet);
+    },
+    [],
+  );
+
+  const handleFitWidth = useCallback(() => {
+    const outer = editorScrollRef.current;
+    const page = writingColumnRef.current;
+    if (!outer || !page) return;
+    setZoomLevel(computeFitWidthLevel(outer, page, zoomLevel));
+  }, [zoomLevel, setZoomLevel]);
+
+  const handleFitPage = useCallback(() => {
+    const outer = editorScrollRef.current;
+    const page = writingColumnRef.current;
+    if (!outer || !page) return;
+    setZoomLevel(computeFitPageLevel(outer, page, zoomLevel));
+  }, [zoomLevel, setZoomLevel]);
+
+  useFocusModeShortcut(
+    state.status === "loaded",
+    focusMode,
+    () => setFocusMode((f) => !f),
+    () => setFocusMode(false),
+  );
+
+  const handleAnchorClick = useCallback(
+    (threadId: string) => {
+      focusThread(threadId);
+      openCommentsPanel();
+    },
+    [focusThread, openCommentsPanel],
+  );
+
+  useEffect(() => {
+    onThreadClickRef.current = handleAnchorClick;
+  }, [handleAnchorClick]);
+
+  useEffect(() => {
+    const handleCompose = (event: Event) => {
+      const detail = (event as CustomEvent<EditorCommentComposeDetail>).detail;
+      if (!detail) return;
+      setPendingComment(detail);
+      openCommentsPanel();
+    };
+    document.addEventListener(EDITOR_COMMENT_COMPOSE_EVENT, handleCompose);
+    return () => document.removeEventListener(EDITOR_COMMENT_COMPOSE_EVENT, handleCompose);
+  }, [openCommentsPanel]);
+
+  const handleClearSelectionFilterBypass = useCallback(() => {
+    setSelectionFilterBypass(false);
+  }, []);
+
+  const handleClearSelectionFilter = useCallback(() => {
+    setSelectionFilterBypass(true);
+  }, []);
+
+  useEffect(() => {
+    setPendingComment(null);
+    setSessionLinkedTasks([]);
+  }, [mergedDoc?.id]);
+
+  const handleCancelPendingComment = useCallback(() => {
+    if (!editor || !pendingComment) {
+      setPendingComment(null);
+      return;
+    }
+    clearPendingCommentMark(editor, { from: pendingComment.from, to: pendingComment.to });
+    setPendingComment(null);
+  }, [editor, pendingComment]);
+
+  const handleSubmitAnchoredComment = useCallback(
+    async (body: CommentNode[]) => {
+      if (!editor || !pendingComment) return;
+      const pending = pendingComment;
+      try {
+        const threadId = await createThread({
+          body,
+          anchorSnippet: pending.quote,
+          anchorFrom: pending.from,
+          anchorTo: pending.to,
+        });
+        promotePendingCommentMark(
+          editor,
+          { from: pending.from, to: pending.to },
+          threadId,
+        );
+        setPendingComment(null);
+        focusThread(threadId);
+        toast.success("Comment posted");
+      } catch {
+        clearPendingCommentMark(editor, { from: pending.from, to: pending.to });
+        setPendingComment(null);
+      }
+    },
+    [editor, pendingComment, createThread, focusThread],
+  );
+
+  const handleToggleComments = () => {
+    if (isBelowLg) {
+      setMobileCommentsOpen((open) => !open);
+      return;
+    }
+    setCommentsPanelOpen((open) => {
+      const next = !open;
+      setContextRailCollapsed(!next);
+      return next;
+    });
   };
 
-  const handleToggleContextRail = () => {
-    const next = toggleContextRailPanel(isBelowLg, {
-      contextRailCollapsed,
-      mobileCommentsOpen,
-    });
-    setContextRailCollapsed(next.contextRailCollapsed);
-    setMobileCommentsOpen(next.mobileCommentsOpen);
-  };
+  const { railThreads, selectionFilterActive } = useCommentSelectionFilter(
+    visibleThreads,
+    editor,
+    selectionFilterBypass,
+    handleClearSelectionFilterBypass,
+  );
+
+  const handleJumpToAnchor = useCallback(
+    (threadId: string) => {
+      const scroller = editorScrollRef.current;
+      if (!scroller) return;
+      const el = scroller.querySelector(
+        `[data-comment-thread-id="${threadId}"]`,
+      ) as HTMLElement | null;
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        flashAnchor(threadId);
+        focusThread(threadId);
+      } else {
+        toast.info("Anchor text not found", {
+          description: "The original text may have been edited.",
+        });
+      }
+    },
+    [flashAnchor, focusThread],
+  );
+
+  const handleCreateGeneralComment = useCallback(
+    (body: CommentNode[]) => {
+      createThread({ body });
+      toast.success("Comment posted");
+    },
+    [createThread],
+  );
+
+  const handleReply = useCallback(
+    (threadId: string, body: CommentNode[]) => {
+      replyToThread(threadId, body);
+    },
+    [replyToThread],
+  );
+
+  const handleToggleResolve = useCallback(
+    (threadId: string) => {
+      const thread = allThreads.find((t) => t.id === threadId);
+      if (!thread) return;
+      const nextResolved = !thread.resolved;
+      toggleResolve(threadId);
+      if (editor) {
+        setCommentMarkResolved(editor, threadId, nextResolved);
+      }
+      toast.success(nextResolved ? "Thread resolved" : "Thread reopened");
+    },
+    [allThreads, editor, toggleResolve],
+  );
+
+  const canComment =
+    workspace?.status === "active" &&
+    workspace?.myRole !== "VIEWER" &&
+    readOnlyReason !== "archived";
+  const canResolveThreads =
+    workspace?.myRole === "OWNER" ||
+    workspace?.myRole === "ADMIN" ||
+    workspace?.myRole === "MANAGER";
+
+  const commentRailData = useMemo(
+    () => ({
+      threads: railThreads,
+      filter,
+      openCount,
+      resolvedCount,
+      activeThreadId,
+      canComment,
+      canResolve: canResolveThreads,
+      members: workspaceMembers,
+      membersById,
+      onFilterChange: setFilter,
+      onCreate: handleCreateGeneralComment,
+      onReply: handleReply,
+      onToggleResolve: handleToggleResolve,
+      onSelectThread: focusThread,
+      onJumpToAnchor: handleJumpToAnchor,
+      pendingComment,
+      onSubmitAnchored: handleSubmitAnchoredComment,
+      onCancelPending: handleCancelPendingComment,
+      selectionFilterActive,
+      onClearSelectionFilter: handleClearSelectionFilter,
+    }),
+    [
+      railThreads,
+      filter,
+      openCount,
+      resolvedCount,
+      activeThreadId,
+      canComment,
+      canResolveThreads,
+      workspaceMembers,
+      membersById,
+      handleCreateGeneralComment,
+      handleReply,
+      handleToggleResolve,
+      focusThread,
+      handleJumpToAnchor,
+      pendingComment,
+      handleSubmitAnchoredComment,
+      handleCancelPendingComment,
+      selectionFilterActive,
+      handleClearSelectionFilter,
+    ],
+  );
 
   const handleContextRailResizeStart = (event: React.PointerEvent<HTMLButtonElement>) => {
     if (focusMode || contextRailCollapsed) return;
@@ -777,30 +1217,48 @@ const DocumentEditorPage = () => {
     event.preventDefault();
   };
 
-  // Decorate the editor with anchor highlights for each open thread
-  useAnchorDecorations({
-    editor,
-    threads: allThreads,
-    activeThreadId,
-    flashThreadId: flashAnchorId,
-    onAnchorClick: handleAnchorClick,
-  });
+  // Keep comment-mark anchors visually in sync with the focused thread.
+  useEffect(() => {
+    if (!editor) return;
+    const root = editor.view.dom;
 
-  // Jump to anchor: scroll the matching decoration into view + flash it
-  const handleJumpToAnchor = (threadId: string) => {
-    const scroller = editorScrollRef.current;
-    if (!scroller) return;
-    const el = scroller.querySelector(`[data-thread-id="${threadId}"]`) as HTMLElement | null;
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
-      flashAnchor(threadId);
-      focusThread(threadId);
-    } else {
-      toast.info("Anchor text not found", {
-        description: "The original text may have been edited.",
-      });
+    root
+      .querySelectorAll<HTMLElement>("[data-comment-thread-id]")
+      .forEach((el) => el.classList.remove("comment-anchor--active"));
+
+    if (!activeThreadId) return;
+
+    const activeEl = root.querySelector<HTMLElement>(
+      `[data-comment-thread-id="${CSS.escape(activeThreadId)}"]`,
+    );
+    activeEl?.classList.add("comment-anchor--active");
+  }, [editor, activeThreadId]);
+
+  useEffect(() => {
+    if (!editor) return;
+    const root = editor.view.dom;
+
+    if (flashAnchorClassTimeoutRef.current) {
+      window.clearTimeout(flashAnchorClassTimeoutRef.current);
+      flashAnchorClassTimeoutRef.current = null;
     }
-  };
+
+    root
+      .querySelectorAll<HTMLElement>("[data-comment-thread-id]")
+      .forEach((el) => el.classList.remove("comment-anchor--flash"));
+
+    if (!flashAnchorId) return;
+
+    const flashEl = root.querySelector<HTMLElement>(
+      `[data-comment-thread-id="${CSS.escape(flashAnchorId)}"]`,
+    );
+    if (!flashEl) return;
+
+    flashEl.classList.add("comment-anchor--flash");
+    flashAnchorClassTimeoutRef.current = window.setTimeout(() => {
+      flashEl.classList.remove("comment-anchor--flash");
+    }, 1300);
+  }, [editor, flashAnchorId]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -819,7 +1277,7 @@ const DocumentEditorPage = () => {
           const next = !f;
           toast(next ? "Focus mode on" : "Focus mode off", {
             description: next
-              ? "Side panels hidden. Press ⌘⇧E to exit."
+              ? "Side panels hidden. Press ⌘. to exit."
               : "Side panels restored.",
             duration: 1400,
           });
@@ -869,6 +1327,7 @@ const DocumentEditorPage = () => {
   const [createTargetFolderId, setCreateTargetFolderId] = useState<string | null>(null);
   const [submitDialogOpen, setSubmitDialogOpen] = useState(false);
   const [tableDialogOpen, setTableDialogOpen] = useState(false);
+  const [pageSetupOpen, setPageSetupOpen] = useState(false);
 
   const handleInsertTable = (rows: number, cols: number) => {
     (editor?.chain().focus() as any)
@@ -927,23 +1386,11 @@ const DocumentEditorPage = () => {
     toast.success(`Created folder "${name}"`);
   };
 
-  const handleSidebarTabChange = (nextTab: SidebarTab) => {
-    setSidebarTab((currentTab) => {
-      if (nextTab !== "comments" && currentTab === "comments") {
-        setPreviousSidebarTab(nextTab);
-      }
-      if (nextTab === "comments" && currentTab !== "comments") {
-        setPreviousSidebarTab(currentTab);
-      }
-      return nextTab;
-    });
-  };
-
   if (state.status === "loading") return <EditorShellSkeleton />;
 
   if (state.status === "error" || !mergedDoc || !workspace) {
     return (
-      <div className="app-light flex h-screen bg-stone-50">
+      <div className="flex h-screen bg-[var(--surface-2)]">
         {!focusMode && (
           <div className="hidden lg:flex w-[280px] shrink-0">
             <DocumentTreePanel
@@ -1016,38 +1463,40 @@ const DocumentEditorPage = () => {
     navigate(`/w/${workspaceId}/documents`);
   };
 
-  const treePanel = (
-    <DocumentTreePanel
-      workspaceId={workspaceId}
-      workspaceName={workspace.name}
-      workspaceType={workspace.type}
-      tree={documentTree}
-      activeDocumentId={mergedDoc.id}
-      permissions={treePermissions}
-      onServerTreeChange={() => reloadDocumentTree()}
-      onNavigate={handleTreeNavigate}
-    />
-  );
-
-  const handleStartAnchoredComment = (snippet: string) => {
-    setPendingAnchor(snippet);
+  const handleTitleChange = (title: string) => {
+    setOverrides((prev) => ({ ...prev, title }));
   };
 
-  const handleSubmitAnchoredComment = (body: CommentNode[]) => {
-    if (pendingAnchor === null) return;
-    createThread({ body, anchorSnippet: pendingAnchor });
-    setPendingAnchor(null);
-    if (!commentsOpen) {
-      setContextRailCollapsed(false);
-      if (isBelowLg) {
-        setMobileCommentsOpen(true);
-      }
-      setSidebarTab("comments");
-    }
+  const leftPanelContentProps = {
+    workspaceId,
+    workspaceName: workspace.name,
+    workspaceType: workspace.type,
+    tree: documentTree,
+    activeDocumentId: mergedDoc.id,
+    permissions: treePermissions,
+    onServerTreeChange: () => reloadDocumentTree(),
+    onNavigate: handleTreeNavigate,
+    editor,
+    isV2Template: templateContract != null,
+    scrollRootRef: editorScrollRef,
+    collaboratorCount: headerPresence.length,
+    lastSavedAt,
+    openCommentCount: openCount,
+    openTaskCount: sessionLinkedTasks.filter((e) => e.task.status !== "done").length,
   };
 
-  const handleCreateTaskFromSelection = (task: TaskDetail) => {
+  const handleCreateTaskFromSelection = (
+    task: TaskDetail,
+    sourceLink?: TaskLinkedResource,
+  ) => {
     setPendingTaskSnippet(null);
+    if (sourceLink && mergedDoc) {
+      setSessionLinkedTasks((prev) => [
+        ...prev.filter((entry) => entry.task.id !== task.id),
+        { task, link: sourceLink },
+      ]);
+      openContextRailTab("tasks");
+    }
     toast.success("Task created from document", {
       description: `"${task.title}" added to ${STATUS_LABELS[task.status]}.`,
       action: {
@@ -1056,33 +1505,6 @@ const DocumentEditorPage = () => {
       },
     });
   };
-
-  const handleCreateGeneralComment = (body: CommentNode[]) => {
-    createThread({ body });
-    toast.success("Comment posted");
-  };
-
-  const handleReply = (threadId: string, body: CommentNode[]) => {
-    replyToThread(threadId, body);
-  };
-
-  const handleToggleResolve = (threadId: string) => {
-    const thread = allThreads.find((t) => t.id === threadId);
-    toggleResolve(threadId);
-    if (thread) {
-      toast.success(thread.resolved ? "Thread reopened" : "Thread resolved");
-    }
-  };
-
-  // Comment composer permissions: viewers/archived workspaces can read but not write
-  const canComment =
-    workspace.status === "active" &&
-    workspace.myRole !== "VIEWER" &&
-    readOnlyReason !== "archived";
-  const canResolveThreads =
-    workspace.myRole === "OWNER" ||
-    workspace.myRole === "ADMIN" ||
-    workspace.myRole === "MANAGER";
 
   // ─────────── Academic workflow ───────────
   const isSupervisor =
@@ -1099,6 +1521,29 @@ const DocumentEditorPage = () => {
   const lastChangesRequested =
     latestSubmission && latestSubmission.decision === "changes_requested"
       ? latestSubmission
+      : undefined;
+
+  const academicSubmissionStatus =
+    academicEnabled
+      ? latestSubmission
+        ? !latestSubmission.decision
+          ? {
+              label: "Submitted",
+              tone: "warning" as const,
+              versionLabel: latestSubmission.versionLabel,
+            }
+          : latestSubmission.decision === "approved"
+            ? {
+                label: "Approved",
+                tone: "success" as const,
+                versionLabel: latestSubmission.versionLabel,
+              }
+            : {
+                label: "Changes requested",
+                tone: "danger" as const,
+                versionLabel: latestSubmission.versionLabel,
+              }
+        : { label: "Draft", tone: "neutral" as const }
       : undefined;
 
   // Surface visibility
@@ -1144,55 +1589,83 @@ const DocumentEditorPage = () => {
   };
 
   const handleConfirmSubmit = (note: string | undefined) => {
-    const newRecord: SubmissionRecord = {
-      id: `sub-${Date.now()}`,
-      documentId: mergedDoc.id,
-      submittedById: effectiveUserId,
-      submittedByName: account?.fullName ?? "You",
-      submittedAt: new Date().toISOString(),
-      submissionNote: note,
-      versionLabel: nextVersionLabel(),
-    };
-    setSubmissionHistory((prev) => [newRecord, ...prev]);
-    setOverrides((prev) => ({ ...prev, status: "submitted" }));
-    setSubmitDialogOpen(false);
-    toast.success(isResubmission ? "Resubmitted for review" : "Submitted for review", {
-      description: "Your supervisor has been notified.",
-    });
+    if (!mergedDoc) return;
+    const versionLabel = nextVersionLabel();
+
+    void (async () => {
+      try {
+        await submitForReview({
+          documentId: mergedDoc.id,
+          documentTitle: mergedDoc.title,
+          studentId: effectiveUserId,
+          studentName: account?.fullName ?? "You",
+          submissionNote: note,
+          versionLabel,
+        });
+
+        setOverrides((prev) => ({ ...prev, status: "submitted" }));
+        setSubmitDialogOpen(false);
+
+        const history = await fetchDocumentHistory(mergedDoc.id);
+        setSubmissionHistory(history);
+
+        toast.success(isResubmission ? "Resubmitted for review" : "Submitted for review", {
+          description: "Your supervisor has been notified.",
+        });
+      } catch {
+        toast.error("Could not submit for review.");
+      }
+    })();
   };
 
   const handleApprove = (note: string | undefined) => {
+    if (!mergedDoc) return;
     if (!pendingSubmission) return;
-    const decided: SubmissionRecord = {
-      ...pendingSubmission,
-      decision: "approved",
-      decidedById: effectiveUserId,
-      decidedByName: account?.fullName ?? "You",
-      decidedAt: new Date().toISOString(),
-      decisionNote: note,
-    };
-    setSubmissionHistory((prev) => [decided, ...prev.slice(1)]);
-    setOverrides((prev) => ({ ...prev, status: "approved" }));
-    toast.success("Document approved", {
-      description: "The author has been notified.",
-    });
+
+    void (async () => {
+      try {
+        await decideOnSubmission({
+          documentId: mergedDoc.id,
+          decision: "approved",
+          note,
+        });
+        setOverrides((prev) => ({ ...prev, status: "approved" }));
+
+        const history = await fetchDocumentHistory(mergedDoc.id);
+        setSubmissionHistory(history);
+
+        toast.success("Document approved", {
+          description: "The author has been notified.",
+        });
+      } catch {
+        toast.error("Could not approve submission.");
+      }
+    })();
   };
 
   const handleRequestChanges = (note: string) => {
+    if (!mergedDoc) return;
     if (!pendingSubmission) return;
-    const decided: SubmissionRecord = {
-      ...pendingSubmission,
-      decision: "changes_requested",
-      decidedById: effectiveUserId,
-      decidedByName: account?.fullName ?? "You",
-      decidedAt: new Date().toISOString(),
-      decisionNote: note,
-    };
-    setSubmissionHistory((prev) => [decided, ...prev.slice(1)]);
-    setOverrides((prev) => ({ ...prev, status: "changes_requested" }));
-    toast.success("Changes requested", {
-      description: "The author can now revise and resubmit.",
-    });
+
+    void (async () => {
+      try {
+        await decideOnSubmission({
+          documentId: mergedDoc.id,
+          decision: "changes_requested",
+          note,
+        });
+        setOverrides((prev) => ({ ...prev, status: "changes_requested" }));
+
+        const history = await fetchDocumentHistory(mergedDoc.id);
+        setSubmissionHistory(history);
+
+        toast.success("Changes requested", {
+          description: "The author can now revise and resubmit.",
+        });
+      } catch {
+        toast.error("Could not request changes.");
+      }
+    })();
   };
 
   const submitButton = canSubmitForReview ? (
@@ -1219,182 +1692,277 @@ const DocumentEditorPage = () => {
   ) : null;
 
 
-  return (
-    <div className="app-light flex h-screen bg-stone-50 overflow-hidden">
-      {/* Desktop tree (hidden in focus mode or if manually closed) */}
-      <div
-        className={cn(
-          "hidden lg:flex shrink-0 transition-[width] duration-300 ease-out overflow-hidden",
-          focusMode || !treeOpen ? "w-0" : "w-[280px]",
-        )}
-        aria-hidden={focusMode || !treeOpen}
-      >
-        <div className="w-[280px] h-full">{treePanel}</div>
-      </div>
+  const handleToggleTree = () => {
+    const next = toggleDocumentTreePanel(isBelowLg, { treeOpen, mobileTreeOpen });
+    setTreeOpen(next.treeOpen);
+    setMobileTreeOpen(next.mobileTreeOpen);
+    if (!isBelowLg && focusMode) {
+      setFocusMode(false);
+    }
+  };
 
-      {/* Mobile/tablet tree drawer (below lg) */}
+  const editorBanners = (
+    <>
+      {showReviewPanel && pendingSubmission && (
+        <EditorReviewPanel
+          pendingSubmission={pendingSubmission}
+          onApprove={handleApprove}
+          onRequestChanges={handleRequestChanges}
+        />
+      )}
+      {showFeedbackBanner && lastChangesRequested && (
+        <EditorReviewFeedback
+          lastDecision={lastChangesRequested}
+          canResubmit={canSubmitForReview}
+          onResubmit={() => setSubmitDialogOpen(true)}
+        />
+      )}
+      {readOnlyReason && !showReviewPanel && !showFeedbackBanner && (
+        <EditorReadOnlyBanner
+          reason={readOnlyReason}
+          lockedByName={mergedDoc.lockedBy?.fullName}
+        />
+      )}
+      {showSubmissionHistory && (
+        <EditorSubmissionHistory history={submissionHistory} />
+      )}
+      {(connectionStatus === "connecting" || collab.status === "connected") && (
+        <div className="shrink-0 border-b border-amber-200 bg-amber-50 px-4 py-2 text-center text-xs font-medium text-amber-800">
+          {collab.status === "connected"
+            ? "Syncing document for collaboration…"
+            : "Connecting to collaboration server…"}
+        </div>
+      )}
+    </>
+  );
+
+  const showCollabLoadingOverlay =
+    !docxImporting &&
+    state.status === "loaded" &&
+    isDatabaseWorkspaceId(workspaceId) &&
+    Boolean(documentId) &&
+    !collab.isCollabReady &&
+    collab.status !== "auth_failed" &&
+    collab.status !== "error";
+
+  const collabCanvasReady = !showCollabLoadingOverlay && !docxImporting;
+
+  return (
+    <div className="flex h-screen overflow-hidden bg-[var(--surface-2)]">
+      {docxImporting ? (
+        <DocumentLoadingOverlay
+          progress={docxImportProgress ?? 0}
+          title="Importing DOCX…"
+          statusLabelOverride={
+            docxImportProgress != null
+              ? `${Math.round(docxImportProgress)}% complete`
+              : "Uploading and converting on server…"
+          }
+        />
+      ) : showCollabLoadingOverlay ? (
+        <DocumentLoadingOverlay progress={collab.loadProgress} />
+      ) : null}
       {isBelowLg && (
         <Sheet open={mobileTreeOpen} onOpenChange={setMobileTreeOpen}>
-          <SheetContent side="left" className="p-0 w-[300px] sm:w-[320px]">
+          <SheetContent side="left" className="w-[300px] p-0 sm:w-[320px]">
             <SheetHeader className="sr-only">
               <SheetTitle>Documents</SheetTitle>
             </SheetHeader>
-            <div className="h-full">{treePanel}</div>
+            <div className="flex h-full">
+              <LeftRail
+                className="flex shrink-0 border-r border-[var(--border-subtle)] bg-[var(--surface-3)] py-2"
+                activeTab={leftSidebarTab}
+                panelOpen={mobileTreeOpen}
+                onSelectTab={handleLeftRailSelect}
+              />
+              <LeftPanel className="min-w-0 flex-1">
+                <LeftPanelContent {...leftPanelContentProps} activeTab={leftSidebarTab} />
+              </LeftPanel>
+            </div>
           </SheetContent>
         </Sheet>
       )}
 
-      {/* Center editor */}
-      <main className="flex-1 min-w-0 flex flex-col bg-white">
-        <EditorHeader
-          workspaceId={workspaceId}
-          document={mergedDoc}
-          presence={headerPresence}
-          canLock={canLock}
-          canDelete={canDelete}
-          onToggleLock={handleToggleLock}
-          onDelete={handleDelete}
-          onToggleTree={() => {
-            const next = toggleDocumentTreePanel(isBelowLg, { treeOpen, mobileTreeOpen });
-            setTreeOpen(next.treeOpen);
-            setMobileTreeOpen(next.mobileTreeOpen);
-            if (!isBelowLg && focusMode) {
-              setFocusMode(false);
-            }
-          }}
-          treeOpen={isDocumentTreeVisible(isBelowLg, { treeOpen, mobileTreeOpen })}
-          onToggleFocusMode={() => setFocusMode((f) => !f)}
-          focusMode={focusMode}
-          onToggleContextRail={handleToggleContextRail}
-          contextRailOpen={isContextRailVisible(isBelowLg, {
-            contextRailCollapsed,
-            mobileCommentsOpen,
-          })}
-          submitSlot={submitButton}
-        />
-        {/* Supervisor review panel — top priority when present */}
-        {showReviewPanel && pendingSubmission && (
-          <EditorReviewPanel
-            pendingSubmission={pendingSubmission}
-            onApprove={handleApprove}
-            onRequestChanges={handleRequestChanges}
+      <EditorShell
+        className={cn("min-w-0 flex-1", chromeDark && "dark")}
+        focusMode={focusMode}
+        leftPanelOpen={!focusMode && treeOpen}
+        rightPanelOpen={!focusMode && !contextRailCollapsed && commentsPanelOpen}
+        rightPanelWidth={contextRailWidth}
+        onRightPanelResizeStart={handleContextRailResizeStart}
+        topBar={
+          <TopBar
+            workspaceId={workspaceId}
+            workspaceName={workspace.name}
+            document={mergedDoc}
+            presence={headerPresence}
+            saveStatus={saveStatus}
+            connectionStatus={connectionStatus}
+            onTitleChange={isEditable ? handleTitleChange : undefined}
+            canLock={canLock}
+            canDelete={canDelete}
+            onToggleLock={handleToggleLock}
+            onDelete={handleDelete}
+            onToggleTree={handleToggleTree}
+            treeOpen={isDocumentTreeVisible(isBelowLg, { treeOpen, mobileTreeOpen })}
+            onToggleFocusMode={() => setFocusMode((f) => !f)}
+            focusMode={focusMode}
+            onToggleComments={handleToggleComments}
+            commentsOpen={isBelowLg ? mobileCommentsOpen : commentsPanelOpen}
+            commentsOpenCount={openCount}
+            submitSlot={submitButton}
+            onOpenVersionHistory={openVersionHistory}
           />
-        )}
-        {/* Student feedback banner for changes_requested */}
-        {showFeedbackBanner && lastChangesRequested && (
-          <EditorReviewFeedback
-            lastDecision={lastChangesRequested}
-            canResubmit={canSubmitForReview}
-            onResubmit={() => setSubmitDialogOpen(true)}
-          />
-        )}
-        {/* Other read-only reasons (locked / approved / archived / viewer) — hide if review panel already explains it */}
-        {readOnlyReason && !showReviewPanel && !showFeedbackBanner && (
-          <EditorReadOnlyBanner
-            reason={readOnlyReason}
-            lockedByName={mergedDoc.lockedBy?.fullName}
-          />
-        )}
-        {/* Submission history rail */}
-        {showSubmissionHistory && (
-          <EditorSubmissionHistory history={submissionHistory} />
-        )}
-        {(connectionStatus === "connecting" || collab.status === "connected") && (
-          <div className="shrink-0 border-b border-amber-200 bg-amber-50 px-4 py-2 text-center text-xs font-medium text-amber-800">
-            {collab.status === "connected"
-              ? "Syncing document for collaboration…"
-              : "Connecting to collaboration server…"}
-          </div>
-        )}
-        <EditorToolbar
-          editor={editor}
-          isReadOnly={
-            !isEditable || connectionStatus === "connecting" || collab.status === "connected"
-          }
-          onInsertTableRequest={() => setTableDialogOpen(true)}
-        />
-        <EditorContentArea ref={editorScrollRef} writingColumnRef={writingColumnRef} editor={editor}>
-          {collab.status === "synced" && (
-            <RemotePointerOverlay clients={collab.awarenessSnapshot} />
-          )}
-        </EditorContentArea>
-        {collab.provider && (
-          <CollabCaretDebug status={collab.status} clients={collab.awarenessSnapshot} />
-        )}
-        {isEditable && (
-          <EditorSlashCommand 
-            editor={editor} 
-            onInsertTableRequest={() => setTableDialogOpen(true)}
-          />
-        )}
-        <EditorStatusBar
-          editor={editor}
-          saveStatus={saveStatus}
-          lastSavedAt={lastSavedAt}
-          connectionStatus={connectionStatus}
-          collaboratorCount={headerPresence.length}
-        />
-      </main>
-
-      {/* Right-side context rail: Outline + Readiness.
-          Hidden in focus mode and on viewports below lg. The comments rail
-          (xl+) sits to the right of this when both are visible. */}
-      <div
-        className={cn(
-          "hidden lg:flex shrink-0 transition-[width] duration-300 ease-out overflow-hidden bg-background",
-          focusMode || contextRailCollapsed ? "w-0" : undefined,
-        )}
-        aria-hidden={focusMode || contextRailCollapsed}
-        style={{ width: focusMode || contextRailCollapsed ? 0 : `${contextRailWidth}px` }}
-      >
-        <div className="relative h-full w-full">
-          {!focusMode && !contextRailCollapsed && (
-            <div className="absolute left-0 inset-y-0 z-20 w-3 -translate-x-1/2 flex items-center justify-center">
-              <Separator orientation="vertical" className="absolute inset-y-2 left-1/2 -translate-x-1/2 bg-transparent dark:bg-transparent" />
-              <button
-                type="button"
-                onPointerDown={handleContextRailResizeStart}
-                aria-label="Resize context rail"
-                title="Resize context rail"
-                className="relative h-full w-full cursor-col-resize rounded-full bg-transparent hover:bg-teal-500/10 transition-colors"
-              />
-            </div>
-          )}
-          <EditorContextRail
+        }
+        menuBar={
+          <MenuBar
             editor={editor}
-            outline={outline}
-            contract={templateContract}
-            readiness={readiness}
-            properties={properties}
-            onUpdateProperties={handleUpdateProperties}
-            tab={sidebarTab}
-            onTabChange={handleSidebarTabChange}
-            commentData={{
-              threads: visibleThreads,
-              filter,
-              openCount,
-              resolvedCount,
-              activeThreadId,
-              canComment,
-              canResolve: canResolveThreads,
-              members: workspaceMembers,
-              membersById,
-              onFilterChange: setFilter,
-              onCreate: handleCreateGeneralComment,
-              onReply: handleReply,
-              onToggleResolve: handleToggleResolve,
-              onSelectThread: focusThread,
-              onJumpToAnchor: handleJumpToAnchor,
-            }}
+            readOnly={!isEditable}
+            documentTitle={mergedDoc?.title}
+            workspaceId={workspaceId}
+            documentId={documentId}
+            onToggleTree={handleToggleTree}
+            onToggleComments={handleToggleComments}
+            onToggleFocusMode={() => setFocusMode((f) => !f)}
+            onFitWidth={handleFitWidth}
+            onFitPage={handleFitPage}
+            onOpenVersionHistory={openVersionHistory}
+            onOpenPageSetup={() => setPageSetupOpen(true)}
+            onServerDocxImported={() => collab.hardReconnectAfterRestore()}
+            onDocxImportStart={handleDocxImportStart}
+            onDocxImportStateChange={handleDocxImportStateChange}
+            isCollabActive={collab.isCollabReady}
           />
+        }
+        toolbar={
+          <Toolbar
+            editor={editor}
+            isReadOnly={!isEditable || connectionStatus === "connecting"}
+            onInsertTableRequest={() => setTableDialogOpen(true)}
+            onToggleComments={handleToggleComments}
+          />
+        }
+        banners={editorBanners}
+        leftRail={
+          <LeftRail
+            activeTab={leftSidebarTab}
+            panelOpen={treeOpen}
+            onSelectTab={handleLeftRailSelect}
+          />
+        }
+        leftPanel={
+          <LeftPanel>
+            <LeftPanelContent {...leftPanelContentProps} activeTab={leftSidebarTab} />
+          </LeftPanel>
+        }
+        rightRail={
+          <RightRail
+            activeTab={rightSidebarTab}
+            panelOpen={commentsPanelOpen && !contextRailCollapsed}
+            openCount={openCount}
+            onSelectTab={handleRightRailSelect}
+          />
+        }
+        rightPanel={
+          <RightPanel>
+            <RightPanelContent
+              workspaceId={workspaceId}
+              documentId={documentId}
+              currentUserId={effectiveUserId}
+              presenceUsers={headerPresence}
+              sessionLinkedTasks={sessionLinkedTasks}
+              commentData={commentRailData}
+              activeTab={rightSidebarTab}
+              onJumpToTaskSnippet={handleJumpToTaskSnippet}
+              onClose={() => {
+                setCommentsPanelOpen(false);
+                setContextRailCollapsed(true);
+              }}
+            />
+          </RightPanel>
+        }
+        statusBar={
+          <StatusBar
+            editor={editor}
+            saveStatus={saveStatus}
+            lastSavedAt={lastSavedAt}
+            connectionStatus={connectionStatus}
+            collaboratorCount={headerPresence.length}
+            isReadOnly={!isEditable}
+            submissionStatus={academicSubmissionStatus}
+            onOpenTeam={() => openContextRailTab("team")}
+            onFitWidth={handleFitWidth}
+            onFitPage={handleFitPage}
+          />
+        }
+      >
+        <div className="relative flex min-h-0 flex-1 flex-col">
+          {focusMode ? (
+            <FocusModeToolbarPill
+              editor={editor}
+              onExitFocus={() => setFocusMode(false)}
+            />
+          ) : null}
+          {!focusMode && showRuler ? (
+            <Ruler
+              pageSetup={pageSetup}
+              zoomLevel={zoomLevel}
+              className="editor-print-hide shrink-0"
+            />
+          ) : null}
+          {collabCanvasReady ? (
+            <EditorContentArea
+              ref={editorScrollRef}
+              writingColumnRef={writingColumnRef}
+              editor={editor}
+              isV2Template={templateContract != null}
+              focusMode={focusMode}
+              readOnly={!isEditable}
+              collabReady={collab.isCollabReady}
+            >
+              {collab.status === "synced" && (
+                <RemotePointerOverlay clients={collab.awarenessSnapshot} />
+              )}
+            </EditorContentArea>
+          ) : (
+            <div
+              ref={editorScrollRef}
+              className="flex min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground"
+              aria-busy="true"
+            />
+          )}
+          {collab.provider && collabCanvasReady && (
+            <CollabCaretDebug status={collab.status} clients={collab.awarenessSnapshot} />
+          )}
+          {isEditable && collabCanvasReady && (
+            <EditorSlashCommand
+              editor={editor}
+              onInsertTableRequest={() => setTableDialogOpen(true)}
+            />
+          )}
+          {isVersionHistoryOpen && mergedDoc && (
+            <VersionHistoryOverlay
+              workspaceId={workspaceId}
+              documentId={documentId}
+              documentTitle={mergedDoc.title}
+              currentUserId={effectiveUserId}
+              canRestore={isEditable}
+              getLiveYjsState={collab.getLiveYjsState}
+              onClose={() => setIsVersionHistoryOpen(false)}
+              onRestored={() => {
+                setIsVersionHistoryOpen(false);
+                collab.hardReconnectAfterRestore();
+              }}
+            />
+          )}
         </div>
-      </div>
+      </EditorShell>
 
       {/* Floating selection-based comment trigger */}
       <DocumentInlineCommentTrigger
         editor={editor}
-        enabled={!!editor && !pendingAnchor && !pendingTaskSnippet}
-        onComment={handleStartAnchoredComment}
+        enabled={!!editor && canComment}
+        hideWhilePending={!!pendingComment || !!pendingTaskSnippet}
         onCreateTask={
           canComment ? (snippet) => setPendingTaskSnippet(snippet) : undefined
         }
@@ -1404,68 +1972,38 @@ const DocumentEditorPage = () => {
       <Sheet open={mobileCommentsOpen} onOpenChange={setMobileCommentsOpen}>
         <SheetContent side="right" className="p-0 w-[340px] sm:w-[400px] xl:hidden">
           <SheetHeader className="sr-only">
-            <SheetTitle>Comments</SheetTitle>
+            <SheetTitle>Document context</SheetTitle>
           </SheetHeader>
-          <div className="h-full">
-            <EditorContextRail
-              editor={editor}
-              outline={outline}
-              contract={templateContract}
-              readiness={readiness}
-              properties={properties}
-              onUpdateProperties={handleUpdateProperties}
-              tab={sidebarTab}
-              onTabChange={handleSidebarTabChange}
-              commentData={{
-                threads: visibleThreads,
-                filter,
-                openCount,
-                resolvedCount,
-                activeThreadId,
-                canComment,
-                canResolve: canResolveThreads,
-                members: workspaceMembers,
-                membersById,
-                onFilterChange: setFilter,
-                onCreate: handleCreateGeneralComment,
-                onReply: handleReply,
-                onToggleResolve: handleToggleResolve,
-                onSelectThread: focusThread,
-                onJumpToAnchor: (id) => {
-                  handleJumpToAnchor(id);
-                  setMobileCommentsOpen(false);
-                },
-              }}
+          <div className="flex h-full">
+            <RightRail
+              className="flex shrink-0 border-l border-[var(--border-subtle)] bg-[var(--surface-3)] py-2"
+              activeTab={rightSidebarTab}
+              panelOpen={mobileCommentsOpen}
+              openCount={openCount}
+              onSelectTab={handleRightRailSelect}
             />
+            <RightPanel className="min-w-0 flex-1">
+              <RightPanelContent
+                workspaceId={workspaceId}
+                documentId={documentId}
+                currentUserId={effectiveUserId}
+                presenceUsers={headerPresence}
+                sessionLinkedTasks={sessionLinkedTasks}
+                commentData={{
+                  ...commentRailData,
+                  onJumpToAnchor: (id) => {
+                    handleJumpToAnchor(id);
+                    setMobileCommentsOpen(false);
+                  },
+                }}
+                activeTab={rightSidebarTab}
+                onJumpToTaskSnippet={handleJumpToTaskSnippet}
+                onClose={() => setMobileCommentsOpen(false)}
+              />
+            </RightPanel>
           </div>
         </SheetContent>
       </Sheet>
-
-      {/* Anchored comment dialog: prompts the user to confirm + write the thread */}
-      <Dialog open={pendingAnchor !== null} onOpenChange={(o) => !o && setPendingAnchor(null)}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="text-base">Comment on selection</DialogTitle>
-          </DialogHeader>
-          {pendingAnchor && (
-            <>
-              <div className="px-3 py-2 rounded-md bg-stone-50 border-l-2 border-teal-400 text-[13px] text-stone-700 leading-snug max-h-32 overflow-y-auto">
-                <span className="opacity-60">"</span>
-                {pendingAnchor}
-                <span className="opacity-60">"</span>
-              </div>
-              <DocumentCommentComposer
-                placeholder="Add your comment… use @ to mention"
-                submitLabel="Add comment"
-                autoFocus
-                members={workspaceMembers}
-                onSubmit={handleSubmitAnchoredComment}
-                onCancel={() => setPendingAnchor(null)}
-              />
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
 
       {createDocOpen && (
         <TreeCreateDialog
@@ -1528,6 +2066,8 @@ const DocumentEditorPage = () => {
         onOpenChange={setTableDialogOpen}
         onConfirm={handleInsertTable}
       />
+
+      <PageSetupDialog open={pageSetupOpen} onOpenChange={setPageSetupOpen} />
     </div>
   );
 };

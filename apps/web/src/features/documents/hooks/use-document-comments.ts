@@ -29,6 +29,8 @@ interface UseDocumentCommentsArgs {
 interface CreateThreadArgs {
   body: CommentNode[];
   anchorSnippet?: string | null;
+  anchorFrom?: number;
+  anchorTo?: number;
 }
 
 function toAuthor(user: DocumentCommentCurrentUser): CommentAuthor {
@@ -36,6 +38,15 @@ function toAuthor(user: DocumentCommentCurrentUser): CommentAuthor {
     id: user.id,
     fullName: user.fullName,
     avatarUrl: user.avatarUrl,
+  };
+}
+
+function buildAnchorInput(args: CreateThreadArgs) {
+  if (!args.anchorSnippet) return null;
+  return {
+    snippet: args.anchorSnippet,
+    ...(typeof args.anchorFrom === "number" ? { from: args.anchorFrom } : {}),
+    ...(typeof args.anchorTo === "number" ? { to: args.anchorTo } : {}),
   };
 }
 
@@ -85,12 +96,21 @@ export function useDocumentComments({ workspaceId, documentId, currentUser }: Us
   }, [threads, filter]);
 
   const createThread = useCallback(
-    ({ body, anchorSnippet }: CreateThreadArgs) => {
+    ({ body, anchorSnippet, anchorFrom, anchorTo }: CreateThreadArgs): Promise<string> => {
       const author = toAuthor(currentUser);
+      const anchorInput = buildAnchorInput({ body, anchorSnippet, anchorFrom, anchorTo });
+      const optimisticId = `tmp-${Date.now()}`;
       const optimistic: CommentThread = {
-        id: `tmp-${Date.now()}`,
+        id: optimisticId,
         documentId,
-        anchor: anchorSnippet ? { snippet: anchorSnippet, status: "ok" } : null,
+        anchor: anchorInput
+          ? {
+              snippet: anchorInput.snippet,
+              status: "ok",
+              ...(typeof anchorInput.from === "number" ? { from: anchorInput.from } : {}),
+              ...(typeof anchorInput.to === "number" ? { to: anchorInput.to } : {}),
+            }
+          : null,
         authorId: currentUser.id,
         author,
         body,
@@ -100,36 +120,22 @@ export function useDocumentComments({ workspaceId, documentId, currentUser }: Us
       };
       const previous = queryClient.getQueryData<CommentThread[]>(threadsQueryKey) ?? [];
       patchThreads((prev) => [...prev, optimistic]);
-      void createDocumentThread(workspaceId, documentId, body, anchorSnippet)
-        .then(() => refetchThreads())
+
+      return createDocumentThread(workspaceId, documentId, body, anchorInput)
+        .then((threadId) => {
+          patchThreads((prev) =>
+            prev.map((t) => (t.id === optimisticId ? { ...t, id: threadId } : t)),
+          );
+          void refetchThreads();
+          return threadId;
+        })
         .catch((error: unknown) => {
-          // #region agent log
-          fetch("http://127.0.0.1:7352/ingest/38fbd051-1833-4296-ab67-281907013a27", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "X-Debug-Session-Id": "833b60",
-            },
-            body: JSON.stringify({
-              sessionId: "833b60",
-              runId: "pre-fix",
-              hypothesisId: "H",
-              location: "use-document-comments.ts:createThread",
-              message: "createDocumentThread failed",
-              data: {
-                code: error instanceof ApiError ? error.code : "unknown",
-                apiMessage: error instanceof ApiError ? error.message : String(error),
-              },
-              timestamp: Date.now(),
-            }),
-          }).catch(() => undefined);
-          // #endregion
           queryClient.setQueryData(threadsQueryKey, previous);
           const message =
             error instanceof ApiError ? error.message : "Could not post comment.";
           toast.error(message);
+          throw error;
         });
-      return optimistic;
     },
     [workspaceId, documentId, currentUser, patchThreads, refetchThreads, queryClient, threadsQueryKey],
   );

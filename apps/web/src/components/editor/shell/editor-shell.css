@@ -1,0 +1,289 @@
+@import "../styles/tokens.css";
+
+.cs-editor-shell {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  background: var(--surface-2);
+  font-family: var(--font-ui);
+}
+
+.cs-editor-shell__row {
+  flex-shrink: 0;
+}
+
+.cs-editor-shell__topbar {
+  height: var(--topbar-h);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface-0);
+}
+
+.cs-editor-shell__menubar {
+  height: var(--menubar-h);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface-1);
+}
+
+.cs-editor-shell__toolbar-row {
+  flex-shrink: 0;
+  min-width: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface-1);
+}
+
+.cs-editor-shell.dark .cs-editor-shell__topbar,
+.cs-editor-shell.dark .cs-editor-shell__menubar,
+.cs-editor-shell.dark .cs-editor-shell__toolbar-row,
+.cs-editor-shell.dark .cs-editor-shell__statusbar {
+  background: var(--surface-1);
+  border-color: var(--border-subtle);
+}
+
+.cs-editor-shell__main {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+.cs-editor-shell__left-rail {
+  flex-shrink: 0;
+  width: var(--left-rail-w);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-2) 0;
+  border-right: 1px solid var(--border-subtle);
+  background: var(--surface-3);
+}
+
+.cs-editor-shell__left-panel {
+  flex-shrink: 0;
+  overflow: hidden;
+  border-right: 1px solid var(--border-subtle);
+  background: var(--surface-0);
+  transition: width var(--dur-base) var(--ease-out);
+}
+
+.cs-editor-shell__left-panel--open {
+  width: var(--left-panel-w);
+}
+
+.cs-editor-shell__left-panel--closed {
+  width: 0;
+  border-right-width: 0;
+}
+
+.cs-editor-shell__canvas {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.cs-editor-shell__canvas-inner {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.cs-editor-shell__right-panel-wrap {
+  position: relative;
+  flex-shrink: 0;
+  display: flex;
+  min-height: 0;
+}
+
+.cs-editor-shell__right-panel {
+  overflow: hidden;
+  background: var(--surface-0);
+  border-left: 1px solid var(--border-subtle);
+  transition: width var(--dur-base) var(--ease-out);
+}
+
+.cs-editor-shell__right-panel--open {
+  width: var(--right-panel-w, var(--right-panel-w));
+}
+
+.cs-editor-shell__right-panel--closed {
+  width: 0;
+  border-left-width: 0;
+}
+
+.cs-editor-shell__right-rail {
+  flex-shrink: 0;
+  width: var(--right-rail-w);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-2) 0;
+  border-left: 1px solid var(--border-subtle);
+  background: var(--surface-3);
+}
+
+.cs-editor-shell__statusbar {
+  height: var(--statusbar-h);
+  flex-shrink: 0;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--surface-1);
+}
+
+.cs-editor-shell--focus .cs-editor-shell__left-rail,
+.cs-editor-shell--focus .cs-editor-shell__left-panel,
+.cs-editor-shell--focus .cs-editor-shell__right-rail,
+.cs-editor-shell--focus .cs-editor-shell__right-panel-wrap {
+  display: none;
+}
+
+.cs-editor-shell--focus .cs-editor-shell__menubar,
+.cs-editor-shell--focus .cs-editor-shell__topbar {
+  opacity: 0.35;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+.cs-editor-shell--focus .cs-editor-shell__toolbar-row {
+  visibility: hidden;
+  height: 0;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+  border: none;
+}
+
+.cs-editor-shell--focus .cs-editor-shell__statusbar {
+  opacity: 0.5;
+}
+
+.cs-editor-rail-btn {
+  position: relative;
+}
+
+.cs-editor-rail-btn[data-active="true"]::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: var(--space-1);
+  bottom: var(--space-1);
+  width: 3px;
+  border-radius: var(--radius-pill) 0 0 var(--radius-pill);
+  background: var(--brand-500);
+}
+
+.cs-editor-rail-badge {
+  position: absolute;
+  top: var(--space-1);
+  right: var(--space-1);
+  min-width: var(--space-4);
+  height: var(--space-4);
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-pill);
+  background: var(--brand-500);
+  color: var(--text-inverse);
+  font-size: var(--text-xs-size);
+  line-height: var(--space-4);
+  font-weight: 600;
+  text-align: center;
+}
+
+.cs-editor-shell__resize-handle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  z-index: var(--z-sticky);
+  transform: translateX(-50%);
+}
+
+.cs-doc-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: var(--space-6);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-xs-size);
+  font-weight: var(--text-sm-weight);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.cs-doc-pill__dot {
+  fill: currentColor;
+}
+
+.cs-doc-pill__dot--pulse {
+  animation: cs-doc-pill-pulse var(--dur-slow) var(--ease-in-out) infinite;
+}
+
+@keyframes cs-doc-pill-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.cs-doc-pill--live {
+  background: var(--brand-50);
+  color: var(--brand-700);
+}
+
+.cs-doc-pill--saved {
+  background: var(--surface-inset);
+  color: var(--text-muted);
+}
+
+.cs-doc-pill--saving {
+  background: var(--surface-inset);
+  color: var(--text-muted);
+}
+
+.cs-doc-pill--warning {
+  background: oklch(0.97 0.04 75);
+  color: oklch(0.45 0.12 75);
+}
+
+.cs-doc-pill--danger {
+  background: oklch(0.97 0.03 27);
+  color: var(--danger);
+}
+
+.cs-doc-pill__spin {
+  animation: cs-kit-spin var(--dur-slow) linear infinite;
+}
+
+.cs-editor-topbar__title:hover:not(:disabled),
+.cs-editor-topbar__title:focus-visible {
+  background: var(--surface-inset);
+  border-radius: var(--radius-xs);
+}
+
+.cs-editor-topbar__share {
+  align-items: center;
+  gap: var(--space-1);
+  height: var(--space-8);
+  padding: 0 var(--space-3);
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--brand-500);
+  color: var(--text-inverse);
+  font-size: var(--text-sm-size);
+  font-weight: var(--text-sm-weight);
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+
+.cs-editor-topbar__share:hover {
+  background: var(--brand-600);
+}

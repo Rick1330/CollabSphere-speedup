@@ -12,7 +12,8 @@
     "./constants": "./src/constants/index.ts",
     "./enums": "./src/enums/index.ts",
     "./types": "./src/types/index.ts",
-    "./jobs": "./src/jobs/job-types.ts"
+    "./jobs": "./src/jobs/job-types.ts",
+    "./s3-env": "./src/s3-env.ts"
   },
   "main": "./src/index.ts",
   "types": "./src/index.ts",

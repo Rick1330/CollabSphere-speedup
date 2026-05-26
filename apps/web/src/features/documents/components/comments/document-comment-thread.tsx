@@ -1,5 +1,12 @@
 import { useState } from "react";
-import { Check, CornerDownRight, MessageSquare, RotateCcw } from "lucide-react";
+import {
+  Check,
+  CheckCircle2,
+  CornerDownRight,
+  LocateFixed,
+  MessageSquare,
+  RotateCcw,
+} from "lucide-react";
 import type { TaskAssignee } from "@/api/adapters/tasks";
 import { getInitials, relativeTime } from "@/lib/format";
 import type { CommentThread } from "@/lib/mock-comments";
@@ -43,84 +50,90 @@ export const DocumentCommentThreadCard = ({
     <article
       onClick={onSelect}
       className={cn(
-        "group relative rounded-lg border bg-white transition-all cursor-pointer",
+        "group relative cursor-pointer overflow-hidden rounded-xl border bg-[var(--editor-surface)] transition-all duration-150",
+        thread.resolved && !isActive && "opacity-90",
         isActive
-          ? "border-teal-300 shadow-sm ring-1 ring-teal-200"
-          : "border-stone-200 hover:border-stone-300",
+          ? "border-teal-300 shadow-md ring-1 ring-teal-200/60"
+          : "border-[var(--editor-border)] shadow-sm hover:border-stone-300 hover:shadow",
       )}
       aria-current={isActive ? "true" : undefined}
     >
+      {isActive && (
+        <span
+          className="absolute bottom-0 left-0 top-0 w-[3px] bg-[var(--editor-accent)]"
+          aria-hidden="true"
+        />
+      )}
+
+      {thread.resolved && (
+        <div className="flex items-center gap-1 border-b border-emerald-100 bg-emerald-50/80 px-3 py-1 text-[10px] font-medium text-emerald-700">
+          <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
+          Resolved
+          {resolver && <span className="text-emerald-600/80">· {resolver.fullName.split(" ")[0]}</span>}
+        </div>
+      )}
+
       {thread.anchor && (
-        <div className="flex items-start gap-2 px-3 pt-2.5 pb-1.5">
-          <div
+        <div className="px-3 pt-2.5">
+          <blockquote
             className={cn(
-              "flex-1 min-w-0 px-2 py-1 rounded text-[12px] leading-snug border-l-2 truncate",
+              "rounded-lg border-l-[3px] bg-[var(--editor-surface-hover)] px-2.5 py-2 text-[12px] italic leading-snug text-[var(--editor-text-secondary)]",
               thread.anchor.status === "changed"
-                ? "border-amber-400 bg-amber-50/60 text-amber-800"
-                : "border-teal-400 bg-teal-50/60 text-teal-800",
+                ? "border-l-amber-400 bg-amber-50/50 text-amber-900"
+                : "border-l-[var(--editor-accent)]",
             )}
           >
-            <span className="opacity-70">"</span>
-            {thread.anchor.snippet}
-            <span className="opacity-70">"</span>
-          </div>
-          {onJumpToAnchor && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onJumpToAnchor();
-              }}
-              className="flex-shrink-0 text-[10px] font-mono tracking-wider uppercase text-stone-400 hover:text-teal-600 transition-colors px-1.5 py-1 rounded hover:bg-stone-50"
-              aria-label="Jump to anchor in document"
-            >
-              Jump
-            </button>
-          )}
+            &ldquo;{thread.anchor.snippet}&rdquo;
+          </blockquote>
         </div>
       )}
       {thread.anchor?.status === "changed" && (
-        <p className="px-3 pb-1 text-[10px] font-mono tracking-wider uppercase text-amber-600">
-          Text changed since comment
-        </p>
+        <p className="px-3 pb-1 text-[10px] font-medium text-amber-600">Text changed since comment</p>
       )}
 
-      <div className="flex items-start gap-2.5 px-3 pt-2 pb-1">
+      <div className="flex items-start gap-2.5 px-3 pt-2.5 pb-1">
         <div
-          className="h-6 w-6 rounded-full flex items-center justify-center text-[9px] font-bold text-white flex-shrink-0"
+          className={cn(
+            "flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white ring-2 ring-white",
+            isActive && "ring-teal-100",
+          )}
           style={{ backgroundColor: author.avatarColor }}
         >
           {getInitials(author.fullName, 2)}
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline justify-between gap-2">
-            <span className="text-[13px] font-semibold text-stone-900 truncate">{author.fullName}</span>
-            <span className="text-[10px] font-mono tracking-wider uppercase text-stone-400 flex-shrink-0">
+            <span className="truncate text-[13px] font-semibold text-[var(--editor-text-primary)]">
+              {author.fullName}
+            </span>
+            <span className="flex-shrink-0 text-[10px] text-[var(--editor-text-muted)]">
               {relativeTime(thread.createdAt)}
             </span>
           </div>
-          <div className="mt-0.5">
+          <div className="mt-1">
             <DocumentCommentBody body={thread.body} />
           </div>
         </div>
       </div>
 
       {replyCount > 0 && (
-        <ul className="pl-10 pr-3 pb-1 space-y-2">
+        <ul className="space-y-2.5 pb-1 pl-11 pr-3">
           {thread.replies.map((reply) => {
             const ra = resolveCommentAuthor(reply.author, membersById);
             return (
               <li key={reply.id} className="flex items-start gap-2">
                 <div
-                  className="h-5 w-5 rounded-full flex items-center justify-center text-[8px] font-bold text-white flex-shrink-0 mt-px"
+                  className="mt-px flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-[8px] font-bold text-white"
                   style={{ backgroundColor: ra.avatarColor }}
                 >
                   {getInitials(ra.fullName, 2)}
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline justify-between gap-2">
-                    <span className="text-xs font-semibold text-stone-800 truncate">{ra.fullName}</span>
-                    <span className="text-[10px] font-mono tracking-wider uppercase text-stone-400 flex-shrink-0">
+                    <span className="truncate text-xs font-semibold text-[var(--editor-text-secondary)]">
+                      {ra.fullName}
+                    </span>
+                    <span className="flex-shrink-0 text-[10px] text-[var(--editor-text-muted)]">
                       {relativeTime(reply.createdAt)}
                     </span>
                   </div>
@@ -134,17 +147,27 @@ export const DocumentCommentThreadCard = ({
         </ul>
       )}
 
-      <div className="flex items-center justify-between gap-2 px-3 py-1.5 border-t border-stone-100">
-        <div className="flex items-center gap-1 text-[10px] font-mono tracking-wider uppercase text-stone-400">
+      <div className="flex items-center justify-between gap-2 border-t border-[var(--editor-border)] px-2 py-1">
+        <div className="flex items-center gap-1 px-1 text-[10px] text-[var(--editor-text-muted)]">
           <MessageSquare className="h-3 w-3" aria-hidden="true" />
           {replyCount} {replyCount === 1 ? "reply" : "replies"}
-          {thread.resolved && resolver && (
-            <span className="ml-1.5 text-emerald-600">
-              · resolved by {resolver.fullName.split(" ")[0]}
-            </span>
-          )}
         </div>
         <div className="flex items-center gap-0.5">
+          {onJumpToAnchor && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onJumpToAnchor();
+              }}
+              className="flex h-7 items-center gap-1 rounded-md px-2 text-[11px] font-medium text-[var(--editor-text-muted)] transition-colors hover:bg-[var(--editor-surface-hover)] hover:text-[var(--editor-accent-text)]"
+              title="Jump to anchor in document"
+              aria-label="Jump to anchor in document"
+            >
+              <LocateFixed className="h-3.5 w-3.5" aria-hidden="true" />
+              Jump
+            </button>
+          )}
           {canReply && !thread.resolved && (
             <button
               type="button"
@@ -153,9 +176,9 @@ export const DocumentCommentThreadCard = ({
                 setReplyOpen((v) => !v);
                 onSelect();
               }}
-              className="h-6 px-2 rounded-md text-[11px] font-medium text-stone-500 hover:text-stone-800 hover:bg-stone-100 transition-colors flex items-center gap-1"
+              className="flex h-7 items-center gap-1 rounded-md px-2 text-[11px] font-medium text-[var(--editor-text-muted)] transition-colors hover:bg-[var(--editor-surface-hover)] hover:text-[var(--editor-text-primary)]"
             >
-              <CornerDownRight className="h-3 w-3" aria-hidden="true" />
+              <CornerDownRight className="h-3.5 w-3.5" aria-hidden="true" />
               Reply
             </button>
           )}
@@ -167,7 +190,7 @@ export const DocumentCommentThreadCard = ({
                 onToggleResolve();
               }}
               className={cn(
-                "h-6 px-2 rounded-md text-[11px] font-medium transition-colors flex items-center gap-1",
+                "flex h-7 items-center gap-1 rounded-md px-2 text-[11px] font-medium transition-colors",
                 thread.resolved
                   ? "text-amber-600 hover:bg-amber-50"
                   : "text-emerald-600 hover:bg-emerald-50",
@@ -176,12 +199,12 @@ export const DocumentCommentThreadCard = ({
             >
               {thread.resolved ? (
                 <>
-                  <RotateCcw className="h-3 w-3" aria-hidden="true" />
+                  <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
                   Reopen
                 </>
               ) : (
                 <>
-                  <Check className="h-3 w-3" aria-hidden="true" />
+                  <Check className="h-3.5 w-3.5" aria-hidden="true" />
                   Resolve
                 </>
               )}
@@ -191,7 +214,7 @@ export const DocumentCommentThreadCard = ({
       </div>
 
       {replyOpen && canReply && !thread.resolved && (
-        <div className="px-3 pb-3" onClick={(e) => e.stopPropagation()}>
+        <div className="border-t border-[var(--editor-border)] px-3 pb-3 pt-2" onClick={(e) => e.stopPropagation()}>
           <DocumentCommentComposer
             placeholder="Reply…"
             submitLabel="Reply"

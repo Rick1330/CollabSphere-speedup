@@ -1,5 +1,7 @@
 import "reflect-metadata";
+import path from "node:path";
 import cookieParser from "cookie-parser";
+import express from "express";
 import helmet from "helmet";
 import { NestFactory } from "@nestjs/core";
 import { ModuleRef } from "@nestjs/core";
@@ -88,6 +90,9 @@ export async function createNestApp(): Promise<INestApplication> {
     app.useWebSocketAdapter(redisIoAdapter);
   }
   setDevNestAppRef(app);
+
+  const uploadsRoot = path.resolve(process.env.STORAGE_LOCAL_PATH ?? "./uploads");
+  app.getHttpAdapter().getInstance().use("/uploads", express.static(uploadsRoot));
 
   registerNestApplication(app);
   const moduleRef = app.get(ModuleRef);

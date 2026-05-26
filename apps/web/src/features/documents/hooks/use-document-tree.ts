@@ -16,6 +16,7 @@ import {
   type TreeNode,
 } from "@/api/adapters/documents";
 import { ApiError } from "@/api/client";
+import { useAuthBootstrap } from "@/lib/auth-bootstrap-context";
 
 export type { TreeNode };
 export type DocumentTreeState = "loading" | "loaded" | "error";
@@ -39,10 +40,11 @@ export interface UseDocumentTreeResult {
 
 export function useDocumentTree(workspaceId: string): UseDocumentTreeResult {
   const queryClient = useQueryClient();
+  const { isSessionReady } = useAuthBootstrap();
   const query = useQuery({
     queryKey: documentTreeQueryKey(workspaceId),
     queryFn: () => getDocumentTree(workspaceId),
-    enabled: Boolean(workspaceId),
+    enabled: Boolean(workspaceId) && isSessionReady,
     staleTime: 5_000,
   });
 

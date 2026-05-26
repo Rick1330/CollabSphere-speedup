@@ -1,0 +1,16 @@
+node_modules
+**/node_modules
+.git
+.tmp
+**/.turbo
+**/dist
+apps/web
+apps/api
+apps/collab
+high-rev
+new-rev
+claude answers
+collab-ui-prompts
+questionaries
+*.md
+!apps/worker/README.md

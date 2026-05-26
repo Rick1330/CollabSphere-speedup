@@ -4,12 +4,15 @@
     "rootDir": "../..",
     "outDir": "./dist",
     "noEmit": false,
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
     "types": [
       "node"
     ]
   },
   "include": [
     "src/**/*.ts",
-    "../../packages/shared/src/**/*.ts"
+    "../../packages/shared/src/**/*.ts",
+    "../../packages/docx-import/src/**/*.ts"
   ]
 }

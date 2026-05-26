@@ -1,0 +1,1038 @@
+/* CollabSphere ui-kit — token-only styling (no component hex/px in TSX) */
+
+.cs-kit-font-ui {
+  font-family: var(--font-ui);
+}
+
+.cs-kit-text-xs {
+  font-size: var(--text-xs-size);
+  line-height: var(--text-xs-line);
+  font-weight: var(--text-xs-weight);
+}
+
+.cs-kit-text-sm {
+  font-size: var(--text-sm-size);
+  line-height: var(--text-sm-line);
+  font-weight: var(--text-sm-weight);
+}
+
+.cs-kit-text-base {
+  font-size: var(--text-base-size);
+  line-height: var(--text-base-line);
+  font-weight: var(--text-base-weight);
+}
+
+.cs-kit-text-md {
+  font-size: var(--text-md-size);
+  line-height: var(--text-md-line);
+  font-weight: var(--text-md-weight);
+}
+
+.cs-kit-text-lg {
+  font-size: var(--text-lg-size);
+  line-height: var(--text-lg-line);
+  font-weight: var(--text-lg-weight);
+}
+
+.cs-kit-text-xl {
+  font-size: var(--text-xl-size);
+  line-height: var(--text-xl-line);
+  font-weight: var(--text-xl-weight);
+}
+
+.cs-kit-text-2xl {
+  font-size: var(--text-2xl-size);
+  line-height: var(--text-2xl-line);
+  font-weight: var(--text-2xl-weight);
+}
+
+.cs-kit-focus:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-ring-focus);
+}
+
+.cs-kit-surface-page {
+  background: var(--surface-0);
+  color: var(--text-default);
+}
+
+.cs-kit-surface-panel {
+  background: var(--surface-3);
+  color: var(--text-default);
+}
+
+.cs-kit-surface-overlay {
+  background: var(--surface-overlay);
+  color: var(--text-default);
+}
+
+.cs-kit-surface-inset {
+  background: var(--surface-inset);
+  color: var(--text-default);
+}
+
+.cs-kit-stack {
+  display: flex;
+  flex-direction: column;
+}
+
+.cs-kit-inline {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+}
+
+.cs-kit-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--space-8);
+  height: var(--space-8);
+  min-width: var(--space-8);
+  min-height: var(--space-8);
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-default);
+  cursor: pointer;
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.cs-kit-icon-btn:hover:not(:disabled) {
+  background: var(--surface-inset);
+}
+
+.cs-kit-icon-btn:active:not(:disabled) {
+  background: var(--border-subtle);
+}
+
+.cs-kit-icon-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.cs-kit-icon-btn[data-pressed="true"] {
+  background: var(--brand-100);
+  color: var(--brand-700);
+}
+
+.cs-kit-icon-btn[data-selected="true"] {
+  background: var(--brand-50);
+  color: var(--brand-600);
+}
+
+.cs-kit-icon-btn[data-error="true"] {
+  color: var(--danger);
+}
+
+.cs-kit-icon-btn[data-loading="true"] {
+  cursor: wait;
+}
+
+.cs-kit-icon-btn-spinner {
+  animation: cs-kit-spin var(--dur-slow) linear infinite;
+}
+
+@keyframes cs-kit-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.cs-kit-split-btn {
+  display: inline-flex;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-default);
+  overflow: hidden;
+}
+
+.cs-kit-split-btn-main {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  background: var(--brand-500);
+  color: var(--text-inverse);
+  font-size: var(--text-sm-size);
+  font-weight: var(--text-sm-weight);
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+
+.cs-kit-split-btn-main:hover:not(:disabled) {
+  background: var(--brand-600);
+}
+
+.cs-kit-split-btn-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-2);
+  border: none;
+  border-left: 1px solid var(--border-default);
+  background: var(--surface-1);
+  color: var(--text-default);
+  cursor: pointer;
+}
+
+.cs-kit-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--toolbar-h);
+  padding: 0 var(--space-2);
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.cs-kit-toolbar-group {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.cs-kit-toolbar-separator {
+  width: 1px;
+  height: var(--space-4);
+  margin: 0 var(--space-1);
+  background: var(--border-default);
+  flex-shrink: 0;
+}
+
+.cs-kit-menu-content {
+  z-index: var(--z-overlay);
+  min-width: 12rem;
+  padding: var(--space-1);
+  background: var(--surface-0);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  animation: cs-kit-menu-in var(--dur-base) var(--ease-out);
+}
+
+@keyframes cs-kit-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--space-1));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.cs-kit-menu-label {
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-xs-size);
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.cs-kit-menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-default);
+  font-size: var(--text-sm-size);
+  line-height: var(--text-sm-line);
+  text-align: left;
+  cursor: pointer;
+  outline: none;
+}
+
+.cs-kit-menu-item[data-highlighted] {
+  background: var(--surface-inset);
+}
+
+.cs-kit-menu-item[data-disabled] {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.cs-kit-menu-shortcut {
+  margin-left: auto;
+  font-size: var(--text-xs-size);
+  color: var(--text-subtle);
+}
+
+.cs-kit-menu-separator {
+  height: 1px;
+  margin: var(--space-1) 0;
+  background: var(--border-subtle);
+}
+
+.cs-kit-popover-content {
+  z-index: var(--z-overlay);
+  padding: var(--space-3);
+  background: var(--surface-0);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+}
+
+.cs-kit-tooltip-content {
+  z-index: var(--z-overlay);
+  padding: var(--space-1) var(--space-2);
+  background: var(--text-strong);
+  color: var(--text-inverse);
+  font-size: var(--text-xs-size);
+  line-height: var(--text-xs-line);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-sm);
+}
+
+.cs-kit-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-dialog);
+  background: oklch(0.2 0.02 250 / 0.5);
+}
+
+.cs-kit-dialog-content {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  z-index: var(--z-dialog);
+  width: min(90vw, 28rem);
+  max-height: 85vh;
+  overflow: auto;
+  transform: translate(-50%, -50%);
+  padding: var(--space-6);
+  background: var(--surface-0);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+}
+
+.cs-kit-dialog-title {
+  font-size: var(--text-lg-size);
+  line-height: var(--text-lg-line);
+  font-weight: var(--text-lg-weight);
+  color: var(--text-strong);
+  margin: 0 0 var(--space-2);
+}
+
+.cs-kit-dialog-desc {
+  font-size: var(--text-md-size);
+  line-height: var(--text-md-line);
+  color: var(--text-muted);
+  margin: 0 0 var(--space-4);
+}
+
+.cs-kit-sheet-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-overlay);
+  background: oklch(0.2 0.02 250 / 0.45);
+}
+
+.cs-kit-sheet-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: var(--z-dialog);
+  height: 100%;
+  width: min(100vw, var(--right-panel-w));
+  padding: var(--space-6);
+  background: var(--surface-0);
+  border-left: 1px solid var(--border-default);
+  box-shadow: var(--shadow-lg);
+}
+
+.cs-kit-drawer-content {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: var(--z-dialog);
+  max-height: 90vh;
+  padding: var(--space-6);
+  background: var(--surface-0);
+  border-top: 1px solid var(--border-default);
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  box-shadow: var(--shadow-lg);
+}
+
+.cs-kit-tabs-list-segmented {
+  display: inline-flex;
+  padding: var(--space-1);
+  background: var(--surface-inset);
+  border-radius: var(--radius-md);
+  gap: var(--space-1);
+}
+
+.cs-kit-tabs-trigger-segmented {
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--text-sm-size);
+  cursor: pointer;
+}
+
+.cs-kit-tabs-trigger-segmented[data-state="active"] {
+  background: var(--surface-0);
+  color: var(--text-strong);
+  box-shadow: var(--shadow-xs);
+}
+
+.cs-kit-tabs-list-underline {
+  display: flex;
+  gap: var(--space-4);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.cs-kit-tabs-trigger-underline {
+  padding: var(--space-2) 0;
+  margin-bottom: -1px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--text-sm-size);
+  cursor: pointer;
+}
+
+.cs-kit-tabs-trigger-underline[data-state="active"] {
+  color: var(--brand-600);
+  border-bottom-color: var(--brand-500);
+}
+
+.cs-kit-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.cs-kit-field-label {
+  font-size: var(--text-sm-size);
+  font-weight: 500;
+  color: var(--text-default);
+}
+
+.cs-kit-field-hint {
+  font-size: var(--text-xs-size);
+  color: var(--text-muted);
+}
+
+.cs-kit-field-error {
+  font-size: var(--text-xs-size);
+  color: var(--danger);
+}
+
+.cs-kit-input {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--surface-0);
+  color: var(--text-default);
+  font-size: var(--text-base-size);
+  line-height: var(--text-base-line);
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+
+.cs-kit-input:hover:not(:disabled) {
+  border-color: var(--border-strong);
+}
+
+.cs-kit-input:focus-visible {
+  outline: none;
+  border-color: var(--border-focus);
+  box-shadow: var(--shadow-ring-focus);
+}
+
+.cs-kit-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.cs-kit-input[data-error="true"] {
+  border-color: var(--danger);
+}
+
+.cs-kit-select-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 8rem;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--surface-0);
+  color: var(--text-default);
+  font-size: var(--text-base-size);
+  cursor: pointer;
+}
+
+.cs-kit-select-content {
+  z-index: var(--z-overlay);
+  overflow: hidden;
+  background: var(--surface-0);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+}
+
+.cs-kit-select-item {
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm-size);
+  cursor: pointer;
+  outline: none;
+}
+
+.cs-kit-select-item[data-highlighted] {
+  background: var(--surface-inset);
+}
+
+.cs-kit-stepper {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.cs-kit-stepper-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--space-8);
+  height: var(--space-8);
+  border: none;
+  background: var(--surface-1);
+  color: var(--text-default);
+  cursor: pointer;
+}
+
+.cs-kit-stepper-value {
+  min-width: var(--space-10);
+  padding: 0 var(--space-2);
+  text-align: center;
+  font-size: var(--text-sm-size);
+  border-left: 1px solid var(--border-subtle);
+  border-right: 1px solid var(--border-subtle);
+}
+
+.cs-kit-color-picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: min(100%, 16.5rem);
+}
+
+.cs-kit-color-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.cs-kit-color-section-label {
+  font-size: var(--text-xs-size);
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.cs-kit-color-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.cs-kit-color-swatch {
+  width: var(--space-6);
+  height: var(--space-6);
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.cs-kit-color-swatch[data-selected="true"] {
+  border-color: var(--border-focus);
+  box-shadow: var(--shadow-ring-focus);
+}
+
+.cs-kit-color-picker-main {
+  width: 100%;
+}
+
+.cs-kit-color-hsv {
+  width: 100% !important;
+  height: 9rem !important;
+}
+
+.cs-kit-color-hsv .react-colorful__saturation {
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+}
+
+.cs-kit-color-hsv .react-colorful__hue {
+  height: var(--space-3);
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+}
+
+.cs-kit-color-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.cs-kit-color-input-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1;
+  min-width: 0;
+}
+
+.cs-kit-color-input-label {
+  font-size: var(--text-xs-size);
+  color: var(--text-muted);
+  width: var(--space-6);
+  flex-shrink: 0;
+}
+
+.cs-kit-color-hex-input {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+.cs-kit-color-rgb-row {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.cs-kit-color-rgb-input {
+  width: 100%;
+  min-width: 0;
+}
+
+.cs-kit-color-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.cs-kit-color-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  color: var(--text-default);
+  font-size: var(--text-xs-size);
+  cursor: pointer;
+}
+
+.cs-kit-color-action-btn:hover {
+  background: var(--surface-inset);
+}
+
+.cs-kit-slider-root {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: var(--space-5);
+  touch-action: none;
+}
+
+.cs-kit-slider-track {
+  position: relative;
+  flex-grow: 1;
+  height: var(--space-1);
+  background: var(--surface-inset);
+  border-radius: var(--radius-pill);
+}
+
+.cs-kit-slider-range {
+  position: absolute;
+  height: 100%;
+  background: var(--brand-500);
+  border-radius: var(--radius-pill);
+}
+
+.cs-kit-slider-thumb {
+  display: block;
+  width: var(--space-4);
+  height: var(--space-4);
+  background: var(--surface-0);
+  border: 2px solid var(--brand-500);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-sm);
+}
+
+.cs-kit-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: var(--brand-100);
+  color: var(--brand-700);
+  font-size: var(--text-xs-size);
+  font-weight: 600;
+}
+
+.cs-kit-avatar-sm {
+  width: var(--space-6);
+  height: var(--space-6);
+}
+
+.cs-kit-avatar-md {
+  width: var(--space-8);
+  height: var(--space-8);
+}
+
+.cs-kit-avatar-lg {
+  width: var(--space-10);
+  height: var(--space-10);
+}
+
+.cs-kit-avatar-presence {
+  box-shadow: 0 0 0 2px var(--surface-0), 0 0 0 3px var(--brand-500);
+}
+
+.cs-kit-avatar-stack {
+  display: flex;
+  flex-direction: row-reverse;
+  justify-content: flex-end;
+}
+
+.cs-kit-avatar-stack > * {
+  margin-left: calc(var(--space-2) * -1);
+  border: 2px solid var(--surface-0);
+}
+
+.cs-kit-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs-size);
+  font-weight: 500;
+}
+
+.cs-kit-badge-neutral {
+  background: var(--surface-inset);
+  color: var(--text-muted);
+}
+
+.cs-kit-badge-brand {
+  background: var(--brand-100);
+  color: var(--brand-700);
+}
+
+.cs-kit-badge-success {
+  background: oklch(0.72 0.15 155 / 0.15);
+  color: var(--success);
+}
+
+.cs-kit-badge-warning {
+  background: oklch(0.78 0.15 75 / 0.15);
+  color: var(--warning);
+}
+
+.cs-kit-badge-danger {
+  background: oklch(0.62 0.22 27 / 0.15);
+  color: var(--danger);
+}
+
+.cs-kit-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-xs-size);
+  background: var(--surface-inset);
+  color: var(--text-default);
+}
+
+.cs-kit-status-dot {
+  width: var(--space-2);
+  height: var(--space-2);
+  border-radius: var(--radius-pill);
+  flex-shrink: 0;
+}
+
+.cs-kit-status-dot-success {
+  background: var(--success);
+}
+
+.cs-kit-status-dot-warning {
+  background: var(--warning);
+}
+
+.cs-kit-status-dot-danger {
+  background: var(--danger);
+}
+
+.cs-kit-status-dot-muted {
+  background: var(--text-subtle);
+}
+
+.cs-kit-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: var(--space-12) var(--space-6);
+  gap: var(--space-3);
+}
+
+.cs-kit-empty-icon {
+  color: var(--text-subtle);
+}
+
+.cs-kit-empty-title {
+  font-size: var(--text-2xl-size);
+  line-height: var(--text-2xl-line);
+  font-weight: var(--text-2xl-weight);
+  color: var(--text-strong);
+  margin: 0;
+}
+
+.cs-kit-empty-body {
+  font-size: var(--text-md-size);
+  line-height: var(--text-md-line);
+  color: var(--text-muted);
+  margin: 0;
+  max-width: 24rem;
+}
+
+.cs-kit-skeleton {
+  border-radius: var(--radius-sm);
+  background: linear-gradient(
+    90deg,
+    var(--surface-inset) 0%,
+    var(--surface-3) 50%,
+    var(--surface-inset) 100%
+  );
+  background-size: 200% 100%;
+  animation: cs-kit-shimmer var(--dur-slow) var(--ease-in-out) infinite;
+}
+
+@keyframes cs-kit-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.cs-kit-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm-size);
+  line-height: var(--text-sm-line);
+}
+
+.cs-kit-banner-info {
+  background: oklch(0.7 0.13 230 / 0.12);
+  color: var(--info);
+  border: 1px solid oklch(0.7 0.13 230 / 0.25);
+}
+
+.cs-kit-banner-success {
+  background: oklch(0.72 0.15 155 / 0.12);
+  color: var(--success);
+  border: 1px solid oklch(0.72 0.15 155 / 0.25);
+}
+
+.cs-kit-banner-warning {
+  background: oklch(0.78 0.15 75 / 0.12);
+  color: var(--warning);
+  border: 1px solid oklch(0.78 0.15 75 / 0.25);
+}
+
+.cs-kit-banner-danger {
+  background: oklch(0.62 0.22 27 / 0.12);
+  color: var(--danger);
+  border: 1px solid oklch(0.62 0.22 27 / 0.25);
+}
+
+.cs-kit-command-dialog {
+  position: fixed;
+  left: 50%;
+  top: 20%;
+  z-index: var(--z-dialog);
+  width: min(90vw, 32rem);
+  transform: translateX(-50%);
+  background: var(--surface-0);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+.cs-kit-command-input {
+  width: 100%;
+  padding: var(--space-4);
+  border: none;
+  border-bottom: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-default);
+  font-size: var(--text-md-size);
+  outline: none;
+}
+
+.cs-kit-command-list {
+  max-height: 20rem;
+  overflow: auto;
+  padding: var(--space-2);
+}
+
+.cs-kit-command-group-heading {
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-xs-size);
+  color: var(--text-muted);
+}
+
+.cs-kit-command-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm-size);
+  cursor: pointer;
+}
+
+.cs-kit-command-item[data-selected="true"] {
+  background: var(--surface-inset);
+}
+
+.cs-kit-segmented {
+  display: inline-flex;
+  padding: var(--space-1);
+  background: var(--surface-inset);
+  border-radius: var(--radius-md);
+  gap: var(--space-1);
+}
+
+.cs-kit-segmented-item {
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--text-sm-size);
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+
+.cs-kit-segmented-item:hover:not(:disabled) {
+  color: var(--text-default);
+}
+
+.cs-kit-segmented-item[data-state="on"] {
+  background: var(--surface-0);
+  color: var(--text-strong);
+  box-shadow: var(--shadow-xs);
+}
+
+.cs-kit-segmented-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.cs-kit-resize-handle {
+  width: var(--space-1);
+  min-width: var(--space-1);
+  cursor: col-resize;
+  background: transparent;
+  border: none;
+  padding: 0;
+  flex-shrink: 0;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+
+.cs-kit-resize-handle:hover,
+.cs-kit-resize-handle:focus-visible {
+  background: var(--brand-400);
+}
+
+.cs-kit-kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--space-5);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-xs);
+  background: var(--surface-inset);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs-size);
+  line-height: 1;
+  box-shadow: var(--shadow-xs);
+}
+
+.cs-kit-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--brand-500);
+  color: var(--text-inverse);
+  font-size: var(--text-sm-size);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+
+.cs-kit-btn-primary:hover:not(:disabled) {
+  background: var(--brand-600);
+}
+
+.cs-kit-btn-primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.cs-kit-btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--surface-0);
+  color: var(--text-default);
+  font-size: var(--text-sm-size);
+  cursor: pointer;
+}
+
+.cs-kit-combobox-popover {
+  width: var(--radix-popover-trigger-width);
+  max-height: 16rem;
+  overflow: auto;
+  padding: var(--space-1);
+}

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -11,8 +12,11 @@ import {
   Put,
   Patch,
   Query,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from "@nestjs/common";
+import { FileInterceptor } from "@nestjs/platform-express";
 import { CurrentUserId } from "../common/decorators/current-user.decorator.js";
 import { WorkspaceMembershipGuard } from "../common/guards/workspace-membership.guard.js";
 import { WorkspaceRoleAtLeast } from "../common/decorators/workspace-role.decorator.js";
@@ -23,6 +27,7 @@ import {
   createSingleResourcePayload,
   wrapSuccessResponse,
 } from "../common/interceptors/response-envelope.interceptor.js";
+import { DocxImportService } from "./docx-import.service.js";
 import { DocumentsService } from "./documents.service.js";
 import {
   CreateDocumentDto,
@@ -30,12 +35,17 @@ import {
   UpdateDocumentDto,
   TransitionNoteDto,
   PatchDocumentVariablesDto,
+  PatchDocumentVersionLabelDto,
+  CreateDocumentVersionDto,
 } from "./documents.dto.js";
 
 @Controller("workspaces/:workspaceId/documents")
 @UseGuards(WorkspaceMembershipGuard)
 export class DocumentsNestController {
-  constructor(@Inject(DocumentsService) private readonly documentsService: DocumentsService) {}
+  constructor(
+    @Inject(DocumentsService) private readonly documentsService: DocumentsService,
+    @Inject(DocxImportService) private readonly docxImportService: DocxImportService,
+  ) {}
 
   @Get()
   async listDocuments(
@@ -92,6 +102,89 @@ export class DocumentsNestController {
         message: "Variables updated.",
         extraData: data,
       }),
+      requestId,
+    });
+  }
+
+  @Post(":documentId/import/docx")
+  @WorkspaceRoleAtLeast("MEMBER")
+  @UseInterceptors(
+    FileInterceptor("file", {
+      limits: { fileSize: 100 * 1024 * 1024 },
+    }),
+  )
+  async importDocx(
+    @Param("workspaceId") workspaceId: string,
+    @Param("documentId") documentId: string,
+    @ReqRequestId() requestId: string,
+    @CurrentUserId() actorUserId: string,
+    @UploadedFile() file?: { buffer: Buffer; originalname?: string },
+  ) {
+    await this.documentsService.getDocumentByIdForUser({
+      actorUserId,
+      workspaceId,
+      documentId,
+    });
+
+    if (!file?.buffer?.length) {
+      throw new BadRequestException("DOCX file is required");
+    }
+
+    const queued = await this.docxImportService.enqueueDocxImport({
+      actorUserId,
+      workspaceId,
+      documentId,
+      fileBuffer: file.buffer,
+    });
+
+    return wrapSuccessResponse({
+      payload: createSingleResourcePayload({
+        importJobId: queued.importJobId,
+        status: queued.status,
+      }),
+      requestId,
+    });
+  }
+
+  @Get(":documentId/import/docx/:importJobId")
+  async getDocxImportStatus(
+    @Param("workspaceId") workspaceId: string,
+    @Param("documentId") documentId: string,
+    @Param("importJobId") importJobId: string,
+    @ReqRequestId() requestId: string,
+    @CurrentUserId() actorUserId: string,
+  ) {
+    await this.documentsService.getDocumentByIdForUser({
+      actorUserId,
+      workspaceId,
+      documentId,
+    });
+
+    const status = await this.docxImportService.getDocxImportStatus(importJobId);
+    if (!status) {
+      throw new BadRequestException("DOCX import job not found");
+    }
+
+    return wrapSuccessResponse({
+      payload: createSingleResourcePayload({ importJob: status }),
+      requestId,
+    });
+  }
+
+  @Get(":documentId/debug/ydoc-size")
+  async debugYDocSize(
+    @Param("workspaceId") workspaceId: string,
+    @Param("documentId") documentId: string,
+    @ReqRequestId() requestId: string,
+    @CurrentUserId() actorUserId: string,
+  ) {
+    const data = await this.documentsService.debugYDocSize({
+      actorUserId,
+      workspaceId,
+      documentId,
+    });
+    return wrapSuccessResponse({
+      payload: createSingleResourcePayload(data),
       requestId,
     });
   }
@@ -235,6 +328,26 @@ export class DocumentsNestController {
     });
   }
 
+  @Post(":documentId/versions")
+  async createVersion(
+    @Param("workspaceId") workspaceId: string,
+    @Param("documentId") documentId: string,
+    @Body() body: CreateDocumentVersionDto,
+    @ReqRequestId() requestId: string,
+    @CurrentUserId() actorUserId: string,
+  ) {
+    const version = await this.documentsService.createManualDocumentVersion({
+      actorUserId,
+      workspaceId,
+      documentId,
+      versionLabel: body.versionLabel,
+    });
+    return wrapSuccessResponse({
+      payload: createSingleResourcePayload({ version }),
+      requestId,
+    });
+  }
+
   @Get(":documentId/versions")
   async listVersions(
     @Param("workspaceId") workspaceId: string,
@@ -249,6 +362,48 @@ export class DocumentsNestController {
     });
     return wrapSuccessResponse({
       payload: createListResponsePayload({ items, total }),
+      requestId,
+    });
+  }
+
+  @Get(":documentId/versions/:versionId")
+  async getVersionDetail(
+    @Param("workspaceId") workspaceId: string,
+    @Param("documentId") documentId: string,
+    @Param("versionId") versionId: string,
+    @ReqRequestId() requestId: string,
+    @CurrentUserId() actorUserId: string,
+  ) {
+    const version = await this.documentsService.getDocumentVersionDetail({
+      actorUserId,
+      workspaceId,
+      documentId,
+      versionId,
+    });
+    return wrapSuccessResponse({
+      payload: createSingleResourcePayload({ version }),
+      requestId,
+    });
+  }
+
+  @Patch(":documentId/versions/:versionId")
+  async patchVersionLabel(
+    @Param("workspaceId") workspaceId: string,
+    @Param("documentId") documentId: string,
+    @Param("versionId") versionId: string,
+    @Body() body: PatchDocumentVersionLabelDto,
+    @ReqRequestId() requestId: string,
+    @CurrentUserId() actorUserId: string,
+  ) {
+    const version = await this.documentsService.updateDocumentVersionLabel({
+      actorUserId,
+      workspaceId,
+      documentId,
+      versionId,
+      versionLabel: body.versionLabel,
+    });
+    return wrapSuccessResponse({
+      payload: createSingleResourcePayload({ version }),
       requestId,
     });
   }

@@ -1,7 +1,19 @@
-import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { useEditor, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
+import TextStyle from "@tiptap/extension-text-style";
+import FontFamily from "@tiptap/extension-font-family";
+import TextAlign from "@tiptap/extension-text-align";
+import TaskList from "@tiptap/extension-task-list";
+import TaskItem from "@tiptap/extension-task-item";
+import Color from "@tiptap/extension-color";
+import { FontSize } from "@/components/editor/extensions/fontSize";
+import { LineHeight } from "@/components/editor/extensions/lineHeight";
+import { ParagraphIndent } from "@/components/editor/extensions/paragraphIndent";
+import Highlight from "@tiptap/extension-highlight";
+import Subscript from "@tiptap/extension-subscript";
+import Superscript from "@tiptap/extension-superscript";
 import Link from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
 import Table from "@tiptap/extension-table";
@@ -11,6 +23,7 @@ import TableCell from "@tiptap/extension-table-cell";
 import Collaboration from "@tiptap/extension-collaboration";
 import CollaborationCursor from "@tiptap/extension-collaboration-cursor";
 import Gapcursor from "@tiptap/extension-gapcursor";
+import CharacterCount from "@tiptap/extension-character-count";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import * as Y from "yjs";
 
@@ -21,11 +34,15 @@ import { SectionBlock } from "@/features/documents/editor-extensions/section-blo
 import { TOCBlock } from "@/features/documents/editor-extensions/toc-block";
 import { CoverPageBlock } from "@/features/documents/editor-extensions/cover-page-block";
 import { PageBreakBlock } from "@/features/documents/editor-extensions/page-break-block";
-import { CommentAnchorExtension } from "@/features/documents/editor-extensions/comment-anchor-extension";
+import { createPaginationPlusExtension } from "@/components/editor/canvas/paginationPlusConfig";
+import { useEditorStore } from "@/features/documents/stores/use-editor-store";
+import { useDocumentPageSetupSync } from "@/hooks/use-document-page-setup-sync";
+import { CommentMarkExtension } from "@/features/documents/editor-extensions/comment-mark.extension";
 import type { PresenceUser } from "@/features/documents/components/editor/editor-presence";
 import { prepareDocumentCollabBootstrap } from "@/features/documents/collab/collab-bootstrap";
 import { renderCursor } from "@/editor/cursor-render";
 import { normalizeCollabWsUrl, resolveCollabWsUrlFromEnv } from "@/lib/collab-ws-url";
+import { encodeYdocState, ydocCache } from "@/lib/ydoc-cache";
 
 export type CollabPointer = {
   x: number;
@@ -152,7 +169,7 @@ function collectOnlineUsersFromAwareness(
   workspaceId: string,
 ): (PresenceUser & { isCurrentUser?: boolean })[] {
   const states = provider.awareness?.getStates?.() ?? new Map();
-  const list: (PresenceUser & { isCurrentUser?: boolean })[] = [];
+  const byUserId = new Map<string, PresenceUser & { isCurrentUser?: boolean }>();
   for (const state of states.values()) {
     const u = (state as { user?: { id?: string; name?: string; color?: string; avatarUrl?: string | null } })
       ?.user;
@@ -163,7 +180,8 @@ function collectOnlineUsersFromAwareness(
     const color = typeof u.color === "string" && u.color ? u.color : generateUserColor(id);
     const avatarUrl = typeof u.avatarUrl === "string" ? u.avatarUrl : null;
     const isCurrentUser = id === currentUserId;
-    list.push(
+    byUserId.set(
+      id,
       toPresenceUser({
         userId: id,
         fullName: name,
@@ -174,9 +192,11 @@ function collectOnlineUsersFromAwareness(
       }),
     );
   }
+  const list = Array.from(byUserId.values());
   if (import.meta.env.DEV) {
     console.debug("[collab] awareness states", {
-      count: states.size,
+      clientCount: states.size,
+      uniqueUsers: list.length,
       users: list.map((u) => ({ id: u.id, name: u.fullName })),
     });
   }
@@ -254,6 +274,7 @@ const EDITOR_PROSE_CLASS = [
 function buildEditorExtensions(
   collabSession: CollabSession | null,
   user: { id: string; fullName: string },
+  onThreadClick?: (threadId: string) => void,
 ) {
   const extensions: any[] = [
     (StarterKit as any).configure({
@@ -268,6 +289,10 @@ function buildEditorExtensions(
       },
     }),
     Gapcursor as any,
+    CharacterCount as any,
+    CommentMarkExtension.configure({
+      onThreadClick,
+    }),
   ];
 
   if (collabSession) {
@@ -283,6 +308,18 @@ function buildEditorExtensions(
 
   extensions.push(
     Underline as any,
+    TextStyle as any,
+    (FontFamily as any).configure({ types: ["textStyle"] }),
+    FontSize as any,
+    (TextAlign as any).configure({ types: ["heading", "paragraph"] }),
+    TaskList as any,
+    (TaskItem as any).configure({ nested: true }),
+    LineHeight as any,
+    ParagraphIndent as any,
+    (Color as any).configure({ types: ["textStyle"] }),
+    (Highlight as any).configure({ multicolor: true }),
+    Subscript as any,
+    Superscript as any,
     (Link as any).configure({
       openOnClick: false,
       HTMLAttributes: { class: "text-teal-600 hover:underline cursor-pointer" },
@@ -307,6 +344,7 @@ function buildEditorExtensions(
     (TableCell as any).configure({
       HTMLAttributes: { class: "px-3 py-2 border border-stone-200 align-top" },
     }),
+    createPaginationPlusExtension(useEditorStore.getState().pageSetup),
     MermaidBlock,
     MathBlock,
     CalloutBlock,
@@ -314,7 +352,6 @@ function buildEditorExtensions(
     TOCBlock,
     CoverPageBlock,
     PageBreakBlock,
-    CommentAnchorExtension,
   );
 
   return extensions;
@@ -323,17 +360,35 @@ function buildEditorExtensions(
 export function useCollaborativeDocumentEditor(input: {
   workspaceId: string;
   documentId: string;
+  /** When false, defer collab-token + provider bootstrap until auth session is validated. */
+  isSessionReady?: boolean;
   user: { id: string; fullName: string; avatarUrl?: string | null };
   readOnly: boolean;
   properties?: any;
   /** Writing column root for remote mouse pointer overlay (0..1 coordinates). */
   pointerRootRef?: RefObject<HTMLElement | null>;
+  onThreadClick?: (threadId: string) => void;
 }) {
-  const { workspaceId, documentId, user, readOnly, properties = {}, pointerRootRef } = input;
+  const {
+    workspaceId,
+    documentId,
+    isSessionReady = true,
+    user,
+    readOnly,
+    properties = {},
+    pointerRootRef,
+    onThreadClick,
+  } = input;
+  const onThreadClickRef = useRef(onThreadClick);
+  onThreadClickRef.current = onThreadClick;
+
+  const propertiesRef = useRef(properties);
+  propertiesRef.current = properties;
 
   const [status, setStatus] = useState<Status>("connecting");
   const [onlineUsers, setOnlineUsers] = useState<(PresenceUser & { isCurrentUser?: boolean })[]>([]);
   const [sessionVersion, setSessionVersion] = useState(0);
+  const [restoreGeneration, setRestoreGeneration] = useState(0);
   const [collabSession, setCollabSession] = useState<CollabSession | null>(null);
   const [awarenessSnapshot, setAwarenessSnapshot] = useState<AwarenessClientSnapshot[]>([]);
 
@@ -341,15 +396,16 @@ export function useCollaborativeDocumentEditor(input: {
   const ydocRef = useRef<Y.Doc | null>(null);
   const providerRef = useRef<HocuspocusProvider | null>(null);
   const collabExtensionsReadyRef = useRef(false);
-  const connectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const tokenRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const connectTimeoutRef = useRef<number | null>(null);
+  const tokenRefreshTimerRef = useRef<number | null>(null);
   const bootstrapGenerationRef = useRef(0);
+  const cacheWriteTimerRef = useRef<number | null>(null);
   const authRetryPendingRef = useRef(false);
   const refreshCollabTokenRef = useRef<(options: { reconnect: boolean }) => Promise<void>>(
     async () => {},
   );
 
-  const sessionKey = `${workspaceId}:${documentId}`;
+  const sessionKey = `${workspaceId}:${documentId}:${restoreGeneration}`;
 
   const clearConnectTimeout = () => {
     if (connectTimeoutRef.current != null) {
@@ -480,30 +536,9 @@ export function useCollaborativeDocumentEditor(input: {
     }
   }, [sessionKey, workspaceId, documentId]);
 
-  useEffect(() => {
-    const provider = providerRef.current;
-    if (!provider || !workspaceId || !documentId) return;
-
-    const updateAwareness = () => {
-      setAwarenessSnapshot(buildAwarenessSnapshot(provider));
-      if (collabSession?.provider === provider) {
-        setOnlineUsers(collectOnlineUsersFromAwareness(provider, user.id, workspaceId));
-      }
-      logAwarenessCursorsDev(provider);
-    };
-
-    const awareness = provider.awareness;
-    awareness?.on("change", updateAwareness);
-    updateAwareness();
-
-    return () => {
-      awareness?.off("change", updateAwareness);
-    };
-  }, [collabSession, sessionKey, user.id, workspaceId, documentId]);
-
   // v3: fetch token first, then create Y.Doc + provider with token+URL at construction.
   useEffect(() => {
-    if (!workspaceId || !documentId) return;
+    if (!workspaceId || !documentId || !isSessionReady) return;
 
     const generation = bootstrapGenerationRef.current;
     let alive = true;
@@ -542,6 +577,24 @@ export function useCollaborativeDocumentEditor(input: {
         const ydoc = new Y.Doc();
         ydocRef.current = ydoc;
 
+        const cachedState = await ydocCache.get(documentId);
+        if (cachedState && cachedState.length > 0) {
+          Y.applyUpdate(ydoc, cachedState);
+        }
+
+        const scheduleCacheWrite = () => {
+          if (cacheWriteTimerRef.current != null) {
+            window.clearTimeout(cacheWriteTimerRef.current);
+          }
+          cacheWriteTimerRef.current = window.setTimeout(() => {
+            const activeDoc = ydocRef.current;
+            if (!activeDoc) return;
+            void ydocCache.set(documentId, encodeYdocState(activeDoc));
+          }, 2_000);
+        };
+
+        ydoc.on("update", scheduleCacheWrite);
+
         const provider = new HocuspocusProvider({
           url: resolvedUrl,
           name: `doc:${documentId}`,
@@ -558,22 +611,14 @@ export function useCollaborativeDocumentEditor(input: {
           onSynced: () => {
             clearConnectTimeout();
             authRetryPendingRef.current = false;
+            const activeDoc = ydocRef.current;
+            if (activeDoc) {
+              void ydocCache.set(documentId, encodeYdocState(activeDoc));
+            }
             if (import.meta.env.DEV) {
               console.info("[collab] provider synced", { documentId, workspaceId });
             }
             setStatus("synced");
-            const activeYdoc = ydocRef.current;
-            const activeProvider = providerRef.current;
-            if (
-              activeYdoc &&
-              activeProvider &&
-              !collabExtensionsReadyRef.current &&
-              bootstrapGenerationRef.current === generation
-            ) {
-              collabExtensionsReadyRef.current = true;
-              setCollabSession({ ydoc: activeYdoc, provider: activeProvider });
-              setSessionVersion((n) => n + 1);
-            }
           },
           onDisconnect: () => {
             if (import.meta.env.DEV) {
@@ -607,10 +652,24 @@ export function useCollaborativeDocumentEditor(input: {
             if (collabExtensionsReadyRef.current) {
               setOnlineUsers(collectOnlineUsersFromAwareness(active, user.id, workspaceId));
             }
+            logAwarenessCursorsDev(active);
           },
         });
 
         providerRef.current = provider;
+
+        // Install the collaboration extensions as soon as the provider/ydoc
+        // exist. We previously waited for `onSynced`, which left a window
+        // where the editor was running without collab extensions.
+        if (!collabExtensionsReadyRef.current && bootstrapGenerationRef.current === generation) {
+          const activeYdoc = ydocRef.current;
+          if (activeYdoc) {
+            collabExtensionsReadyRef.current = true;
+            setCollabSession({ ydoc: activeYdoc, provider });
+            setSessionVersion((n) => n + 1);
+          }
+        }
+
         setProviderAwarenessUser(provider, user);
         scheduleTokenRefresh(bootstrap.expiresInSeconds);
 
@@ -641,11 +700,18 @@ export function useCollaborativeDocumentEditor(input: {
       alive = false;
       clearConnectTimeout();
       clearTokenRefreshTimer();
+      if (cacheWriteTimerRef.current != null) {
+        window.clearTimeout(cacheWriteTimerRef.current);
+        cacheWriteTimerRef.current = null;
+      }
     };
-  }, [sessionKey]);
+  }, [sessionKey, isSessionReady]);
 
   const extensions = useMemo(
-    () => buildEditorExtensions(collabSession, user),
+    () =>
+      buildEditorExtensions(collabSession, user, (threadId) => {
+        onThreadClickRef.current?.(threadId);
+      }),
     [collabSession, user.id, user.fullName, sessionKey],
   );
 
@@ -654,14 +720,14 @@ export function useCollaborativeDocumentEditor(input: {
       extensions,
       editable: !readOnly,
       autofocus: !readOnly ? "end" : false,
-      documentProperties: properties,
+      documentProperties: propertiesRef.current,
       editorProps: {
         attributes: {
           class: EDITOR_PROSE_CLASS,
         },
       },
     },
-    [extensions, readOnly, documentId, workspaceId, user.id, user.fullName, JSON.stringify(properties)],
+    [extensions, readOnly, user.id, user.fullName],
   ) as Editor | null;
 
   useEffect(() => {
@@ -721,18 +787,75 @@ export function useCollaborativeDocumentEditor(input: {
     [onlineUsers],
   );
 
+  const presenceUsers = useMemo(() => onlineUsers, [onlineUsers]);
+
   const reconnect = () => {
     authRetryPendingRef.current = false;
     void refreshCollabTokenRef.current({ reconnect: true });
   };
 
+  /** Disconnect during DOCX import so stale local edits are not synced over the worker result. */
+  const pauseCollabForImport = useCallback(() => {
+    const provider = providerRef.current;
+    if (provider) {
+      provider.disconnect();
+    }
+    setStatus("offline");
+  }, []);
+
+  const RESTORE_RECONNECT_DELAY_MS = 1_000;
+
+  /** After version restore or DOCX import: allow collab server to unload room, then re-bootstrap from DB. */
+  const hardReconnectAfterRestore = useCallback(() => {
+    authRetryPendingRef.current = false;
+    void ydocCache.delete(documentId).catch(() => undefined);
+    teardownCollabSession();
+    window.setTimeout(() => {
+      setRestoreGeneration((generation) => generation + 1);
+    }, RESTORE_RECONNECT_DELAY_MS);
+  }, [documentId, workspaceId]);
+
+  const getLiveYjsState = useCallback((): Uint8Array => {
+    const doc = providerRef.current?.document;
+    if (!doc) return new Uint8Array(0);
+    return Y.encodeStateAsUpdate(doc);
+  }, [sessionKey, status]);
+
+  useDocumentPageSetupSync(collabSession?.ydoc ?? null, status === "synced");
+
+  const loadProgress = useMemo(() => {
+    switch (status) {
+      case "connecting":
+        return 15;
+      case "connected":
+        return 60;
+      case "synced":
+        return 100;
+      case "offline":
+        return 40;
+      case "error":
+      case "auth_failed":
+        return 0;
+      default:
+        return 10;
+    }
+  }, [status]);
+
+  const isCollabReady = status === "synced";
+
   return {
     editor,
     status,
+    isCollabReady,
+    loadProgress,
     onlineUsers: filteredOnlineUsers,
+    presenceUsers,
     provider: providerRef.current,
     awarenessSnapshot,
     reconnect,
+    pauseCollabForImport,
+    hardReconnectAfterRestore,
     sessionVersion,
+    getLiveYjsState,
   };
 }

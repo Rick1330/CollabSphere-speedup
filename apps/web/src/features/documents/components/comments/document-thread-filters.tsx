@@ -1,3 +1,5 @@
+import type { CSSProperties } from "react";
+import { CheckCircle2, MessageCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { CommentFilter } from "@/features/documents/hooks/use-document-comments";
 
@@ -17,7 +19,13 @@ export const DocumentThreadFilters = ({
   <div
     role="tablist"
     aria-label="Filter comment threads"
-    className="inline-flex items-center bg-stone-100 rounded-md p-0.5 text-[11px] font-medium"
+    className="editor-rail-tabs w-full"
+    style={
+      {
+        "--editor-rail-tab-count": 2,
+        "--editor-rail-tab-index": filter === "open" ? 0 : 1,
+      } as CSSProperties
+    }
   >
     <button
       type="button"
@@ -25,18 +33,20 @@ export const DocumentThreadFilters = ({
       aria-selected={filter === "open"}
       onClick={() => onChange("open")}
       className={cn(
-        "h-6 px-2.5 rounded transition-colors flex items-center gap-1.5",
+        "editor-rail-tab flex items-center justify-center gap-1.5 rounded-md py-2 text-xs font-medium transition-colors",
         filter === "open"
-          ? "bg-white text-stone-900 shadow-sm"
-          : "text-stone-500 hover:text-stone-800",
+          ? "text-[var(--editor-accent-text)]"
+          : "text-[var(--editor-text-muted)] hover:text-[var(--editor-text-secondary)]",
       )}
     >
+      <MessageCircle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
       Open
-      {" "}
       <span
         className={cn(
-          "text-[10px] font-mono tracking-wider px-1 rounded",
-          filter === "open" ? "bg-teal-50 text-teal-700" : "bg-stone-200/70 text-stone-500",
+          "rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums",
+          filter === "open"
+            ? "bg-[var(--editor-accent-lighter)] text-[var(--editor-accent-text)]"
+            : "bg-stone-200/80 text-stone-500",
         )}
       >
         {openCount}
@@ -48,18 +58,20 @@ export const DocumentThreadFilters = ({
       aria-selected={filter === "resolved"}
       onClick={() => onChange("resolved")}
       className={cn(
-        "h-6 px-2.5 rounded transition-colors flex items-center gap-1.5",
+        "editor-rail-tab flex items-center justify-center gap-1.5 rounded-md py-2 text-xs font-medium transition-colors",
         filter === "resolved"
-          ? "bg-white text-stone-900 shadow-sm"
-          : "text-stone-500 hover:text-stone-800",
+          ? "text-[var(--editor-text-secondary)]"
+          : "text-[var(--editor-text-muted)] hover:text-[var(--editor-text-secondary)]",
       )}
     >
+      <CheckCircle2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
       Resolved
-      {" "}
       <span
         className={cn(
-          "text-[10px] font-mono tracking-wider px-1 rounded",
-          filter === "resolved" ? "bg-stone-100 text-stone-700" : "bg-stone-200/70 text-stone-500",
+          "rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums",
+          filter === "resolved"
+            ? "bg-stone-200 text-stone-700"
+            : "bg-stone-200/80 text-stone-500",
         )}
       >
         {resolvedCount}

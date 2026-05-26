@@ -38,7 +38,12 @@ const OAUTH_QUERY_ERROR_MESSAGES: Record<string, string> = {
   OAUTH_INVALID_CALLBACK: "Google sign-in failed. Check that the API is running on port 3001.",
   ACCOUNT_DEACTIVATED: "This account has been deactivated.",
   ACCOUNT_EXISTS_LOCAL:
+    "An account with this email already exists. Sign in with email and password instead (demo accounts use seeded passwords).",
+  EMAIL_ALREADY_EXISTS:
     "An account with this email already exists. Sign in with email and password instead.",
+  EMAIL_NOT_VERIFIED: "Your Google email is not verified. Use a verified Google account.",
+  DATABASE_ERROR: "Server database error during sign-in. Check API logs and database connectivity.",
+  INTERNAL_ERROR: "Unexpected server error during Google sign-in. Check the API terminal logs.",
   SERVICE_UNAVAILABLE: "Google sign-in is not configured on the server.",
 };
 

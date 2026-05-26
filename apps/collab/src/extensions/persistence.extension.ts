@@ -1,7 +1,9 @@
 import type { Extension } from "@hocuspocus/server";
 import type { RedisClientType } from "redis";
 import * as Y from "yjs";
+import { documentImportLockKey } from "@collabsphere/shared";
 
+import { extractPlaintextFromYdoc } from "../lib/extract-plaintext.js";
 import { prisma } from "../lib/prisma.js";
 
 const DEBOUNCE_MS = 5_000;
@@ -18,60 +20,38 @@ type PendingSave = {
 
 const pendingSaves = new Map<string, PendingSave>();
 
-const extractPlaintext = (ydoc: Y.Doc): string => {
-  const fragment = ydoc.getXmlFragment("default");
-  const lines: string[] = [];
-
-  const walk = (
-    node: Y.XmlFragment | Y.AbstractType<unknown> | Y.XmlText,
-  ): void => {
-    if (node instanceof Y.XmlText) {
-      const text = node.toString().trim();
-      if (text) {
-        lines.push(text);
-      }
-      return;
-    }
-
-    if (node instanceof Y.XmlElement) {
-      const name = node.nodeName;
-      if (name === "instructionText") {
-        return;
-      }
-
-      if (name === "fillableField") {
-        const value = node.getAttribute("value");
-        if (typeof value === "string") {
-          const trimmed = value.trim();
-          if (trimmed) {
-            lines.push(trimmed);
-          }
-        }
-      }
-
-      node.toArray().forEach((child) => {
-        walk(child as unknown as Y.AbstractType<unknown> | Y.XmlText);
-      });
-      return;
-    }
-
-    if (node instanceof Y.XmlFragment) {
-      node.toArray().forEach((child) => {
-        walk(child as unknown as Y.AbstractType<unknown> | Y.XmlText);
-      });
-    }
-  };
-
-  walk(fragment);
-  return lines.join("\n").trim();
-};
+/** Drop debounced save for a document without writing (e.g. before DOCX import unload). */
+export function discardPendingSave(documentId: string): void {
+  const existing = pendingSaves.get(documentId);
+  if (!existing) return;
+  clearTimeout(existing.timer);
+  pendingSaves.delete(documentId);
+  if (isDev) {
+    console.info("[collab][persistence] discarded pending save", { documentId });
+  }
+}
 
 const persistDocument = async (
   save: Omit<PendingSave, "timer">,
   redisClient: RedisClientType,
 ): Promise<void> => {
+  const lockKey = documentImportLockKey(save.documentId);
+  try {
+    const locked = await redisClient.get(lockKey);
+    if (locked) {
+      if (isDev) {
+        console.info("[collab][persistence] skipped save (import lock)", {
+          documentId: save.documentId,
+        });
+      }
+      return;
+    }
+  } catch (err) {
+    console.warn("[persistence] Import lock check failed", err);
+  }
+
   const state = Buffer.from(Y.encodeStateAsUpdate(save.document));
-  const plaintext = extractPlaintext(save.document);
+  const plaintext = extractPlaintextFromYdoc(save.document);
 
   await prisma.document.update({
     where: { id: save.documentId },
@@ -151,7 +131,7 @@ export const createPersistenceExtension = (input: {
         documentName: string;
       };
       const documentId = documentName.replace("doc:", "");
-      const updatedById = (data as any)?.context?.userId as string | undefined;
+      const updatedById = (data as { context?: { userId?: string } })?.context?.userId;
       const now = Date.now();
 
       const existing = pendingSaves.get(documentId);
@@ -184,6 +164,12 @@ export const createPersistenceExtension = (input: {
       });
     },
 
+    async onUnloadDocument(data) {
+      const documentName = (data as { documentName: string }).documentName;
+      const documentId = documentName.replace("doc:", "");
+      discardPendingSave(documentId);
+    },
+
     async onDestroy() {
       console.info("[persistence] Flushing pending saves", { count: pendingSaves.size });
 
@@ -205,4 +191,3 @@ export const createPersistenceExtension = (input: {
     },
   };
 };
-

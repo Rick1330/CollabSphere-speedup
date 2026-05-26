@@ -2,9 +2,12 @@ import { createHash, randomBytes } from "node:crypto";
 import { Inject, Injectable } from "@nestjs/common";
 import bcrypt from "bcryptjs";
 import { SignJWT } from "jose";
+import { Prisma } from "@prisma/client";
 import { AppError } from "../common/filters/app-error.filter.js";
 import { PrismaClientProvider } from "../common/prisma/prisma-client.provider.js";
 import { apiRuntimeEnv } from "../config/api-runtime.js";
+import { mapRegisterPersistenceError } from "./auth.service.js";
+import { isUniqueConstraintError } from "./auth.repository.js";
 import { JwtAccessService } from "./jwt-access.service.js";
 import {
   createVerificationEmailJob,
@@ -525,6 +528,31 @@ export class AuthSessionService {
     return { message: "Password updated successfully." };
   }
 
+  private mapGoogleOAuthPersistenceError(error: unknown): never {
+    if (error instanceof AppError) {
+      throw error;
+    }
+    if (isUniqueConstraintError(error)) {
+      throw new AppError({
+        code: "EMAIL_ALREADY_EXISTS",
+        message: "An account with this email already exists.",
+        cause: error instanceof Error ? error : undefined,
+      });
+    }
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      throw new AppError({
+        code: "DATABASE_ERROR",
+        message: "Database error during Google sign-in.",
+        cause: error,
+      });
+    }
+    const mapped = mapRegisterPersistenceError(error);
+    if (mapped instanceof AppError) {
+      throw mapped;
+    }
+    throw error;
+  }
+
   async completeGoogleOAuth(input: {
     googleSub: string;
     email: string;
@@ -533,80 +561,84 @@ export class AuthSessionService {
     userAgent: string;
   }): Promise<{ accessToken: string; refreshToken: string; user: SessionUser }> {
     const email = input.email.trim().toLowerCase();
-    let user = await this.prisma.user.findFirst({
-      where: {
-        authProvider: "google",
-        authProviderId: input.googleSub,
-        deletedAt: null,
-      },
-    });
-    if (!user) {
-      const byEmail = await this.prisma.user.findFirst({
-        where: { email, deletedAt: null },
+    try {
+      let user = await this.prisma.user.findFirst({
+        where: {
+          authProvider: "google",
+          authProviderId: input.googleSub,
+          deletedAt: null,
+        },
       });
-      if (byEmail) {
-        if (byEmail.authProvider === "local") {
-          throw new AppError({
-            code: "ACCOUNT_EXISTS_LOCAL",
-            message: "An account with this email already exists. Sign in with email and password.",
+      if (!user) {
+        const byEmail = await this.prisma.user.findFirst({
+          where: { email, deletedAt: null },
+        });
+        if (byEmail) {
+          if (byEmail.authProvider === "local") {
+            throw new AppError({
+              code: "ACCOUNT_EXISTS_LOCAL",
+              message: "An account with this email already exists. Sign in with email and password.",
+            });
+          }
+          user = await this.prisma.user.update({
+            where: { id: byEmail.id },
+            data: {
+              authProvider: "google",
+              authProviderId: input.googleSub,
+              isVerified: true,
+              lastLoginAt: new Date(),
+            },
+          });
+        } else {
+          user = await this.prisma.user.create({
+            data: {
+              email,
+              fullName: input.fullName.slice(0, 200),
+              authProvider: "google",
+              authProviderId: input.googleSub,
+              isVerified: true,
+              isActive: true,
+              lastLoginAt: new Date(),
+            },
           });
         }
-        user = await this.prisma.user.update({
-          where: { id: byEmail.id },
-          data: {
-            authProvider: "google",
-            authProviderId: input.googleSub,
-            isVerified: true,
-            lastLoginAt: new Date(),
-          },
-        });
       } else {
-        user = await this.prisma.user.create({
-          data: {
-            email,
-            fullName: input.fullName.slice(0, 200),
-            authProvider: "google",
-            authProviderId: input.googleSub,
-            isVerified: true,
-            isActive: true,
-            lastLoginAt: new Date(),
-          },
+        user = await this.prisma.user.update({
+          where: { id: user.id },
+          data: { lastLoginAt: new Date() },
         });
       }
-    } else {
-      await this.prisma.user.update({
-        where: { id: user.id },
-        data: { lastLoginAt: new Date() },
+
+      if (!user.isActive) {
+        throw new AppError({
+          code: "ACCOUNT_DEACTIVATED",
+          message: "This account has been deactivated.",
+        });
+      }
+
+      const tokens = await this.issueTokensForUser({
+        user: {
+          id: user.id,
+          email: user.email,
+          globalRole: user.globalRole,
+        },
+        ipAddress: input.ipAddress,
+        userAgent: input.userAgent,
       });
+
+      return {
+        ...tokens,
+        user: {
+          id: user.id,
+          email: user.email,
+          fullName: user.fullName,
+          globalRole: user.globalRole,
+          isVerified: user.isVerified,
+          authProvider: user.authProvider,
+        },
+      };
+    } catch (error) {
+      this.mapGoogleOAuthPersistenceError(error);
     }
-
-    if (!user.isActive) {
-      throw new AppError({
-        code: "ACCOUNT_DEACTIVATED",
-        message: "This account has been deactivated.",
-      });
-    }
-
-    const tokens = await this.issueTokensForUser({
-      user: {
-        id: user.id,
-        email: user.email,
-        globalRole: user.globalRole,
-      },
-      ipAddress: input.ipAddress,
-      userAgent: input.userAgent,
-    });
-
-    return {
-      ...tokens,
-      user: {
-        id: user.id,
-        email: user.email,
-        fullName: user.fullName,
-        globalRole: user.globalRole,
-        isVerified: user.isVerified,
-        authProvider: user.authProvider,
-      },
-    };
   }
 }

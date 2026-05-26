@@ -118,11 +118,61 @@ export async function decideOnSubmission(params: {
   return reviewedItem;
 }
 
+export async function submitForReview(params: {
+  documentId: string;
+  documentTitle: string;
+  studentId: string;
+  studentName: string;
+  submissionNote?: string;
+  versionLabel?: string;
+}): Promise<ReviewItem> {
+  await delay(300);
+
+  const submittedAt = now();
+
+  // Ensure there is at most one pending cycle per document.
+  const existingIdx = pending.findIndex((p) => p.documentId === params.documentId);
+  if (existingIdx !== -1) pending.splice(existingIdx, 1);
+
+  const item: ReviewItem = {
+    documentId: params.documentId,
+    documentTitle: params.documentTitle,
+    studentId: params.studentId,
+    studentName: params.studentName,
+    status: "submitted",
+    lastEventAt: submittedAt,
+    submissionNote: params.submissionNote,
+    versionLabel: params.versionLabel,
+    // The mock adapter doesn't currently know workspace context for arbitrary
+    // document submissions; keep these stable placeholders.
+    workspaceId: "unknown",
+    workspaceName: "Unknown workspace",
+    workspaceType: "academic",
+    folderPath: null,
+  };
+
+  pending.unshift(item);
+  return item;
+}
+
 /** Per-document decision history. Combines seeded submission history with
  * any in-memory decisions recorded during this session. */
 export async function fetchDocumentHistory(documentId: string): Promise<SubmissionRecord[]> {
   await delay(150);
   const seeded = MOCK_SUBMISSION_HISTORY[documentId] ?? [];
+
+  const sessionPending: SubmissionRecord[] = pending
+    .filter((p) => p.documentId === documentId)
+    .map((p) => ({
+      id: `pending-${p.documentId}-${p.lastEventAt}`,
+      documentId: p.documentId,
+      submittedById: p.studentId,
+      submittedByName: p.studentName,
+      submittedAt: p.lastEventAt,
+      submissionNote: p.submissionNote,
+      versionLabel: p.versionLabel,
+    }));
+
   const sessionDecisions: SubmissionRecord[] = reviewed
     .filter((r) => r.documentId === documentId)
     .map((r) => ({
@@ -138,11 +188,29 @@ export async function fetchDocumentHistory(documentId: string): Promise<Submissi
       decisionNote: r.decisionNote,
       versionLabel: r.versionLabel,
     }));
-  // Newest first, dedupe by id
-  const merged = [...sessionDecisions, ...seeded];
-  const seen = new Set<string>();
-  return merged
-    .filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)))
+
+  // Seeded pending/decision entries are historical snapshots. We should avoid
+  // duplicating them when the session queue already has an active pending
+  // entry (or when a decision is already represented by session state).
+  const seededDecisions = seeded.filter((r) => !!r.decision);
+
+  const candidates: SubmissionRecord[] = [
+    ...sessionPending,
+    ...sessionDecisions,
+    ...seededDecisions,
+  ];
+
+  // Dedupe by semantic keys instead of id (mock ids differ across layers).
+  const seenKeys = new Set<string>();
+  return candidates
+    .filter((r) => {
+      const key = r.decision
+        ? `decision:${r.decision}:${r.decidedAt ?? r.submittedAt}`
+        : `pending:${r.submittedAt}`;
+      if (seenKeys.has(key)) return false;
+      seenKeys.add(key);
+      return true;
+    })
     .sort(
       (a, b) =>
         new Date(b.decidedAt ?? b.submittedAt).getTime() -

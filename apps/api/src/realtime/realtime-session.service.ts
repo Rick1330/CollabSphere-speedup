@@ -1,4 +1,4 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Logger } from "@nestjs/common";
 import type { Socket } from "socket.io";
 import { JwtAccessService } from "../auth/jwt-access.service.js";
 import { AppError } from "../common/filters/app-error.filter.js";
@@ -7,13 +7,24 @@ import type { RealtimeAuthUser } from "./realtime.types.js";
 
 @Injectable()
 export class RealtimeSessionService {
+  private readonly logger = new Logger(RealtimeSessionService.name);
+
   constructor(
-    private readonly jwtAccessService: JwtAccessService,
+    @Inject(JwtAccessService) private readonly jwtAccessService: JwtAccessService,
     @Inject(PrismaClientProvider) private readonly prisma: PrismaClientProvider,
   ) {}
 
   async authenticateSocket(client: Socket): Promise<RealtimeAuthUser> {
     const token = this.resolveAccessToken(client);
+    if (!this.jwtAccessService?.verifyAccessToken) {
+      this.logger.error(
+        "JwtAccessService is not injected on RealtimeSessionService (Nest WebSocket DI / duplicate ESM class)",
+      );
+      throw new AppError({
+        code: "UNAUTHORIZED",
+        message: "Realtime auth is not configured",
+      });
+    }
     const payload = await this.jwtAccessService.verifyAccessToken(token);
     const user = await this.prisma.user.findFirst({
       where: {

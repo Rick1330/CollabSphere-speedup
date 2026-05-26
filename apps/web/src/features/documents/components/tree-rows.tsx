@@ -64,7 +64,7 @@ export const TreeFolderRow = ({
 
   return (
     <div role="treeitem" aria-expanded={isExpanded} aria-level={depth + 1} aria-selected="false">
-      <div className={cn("group flex items-center pr-1", rowHeight)}>
+      <div className={cn("group mx-1.5 flex items-center pr-1", rowHeight)}>
         <TreeContextMenu
           permissions={permissions}
           type="folder"
@@ -78,8 +78,11 @@ export const TreeFolderRow = ({
           <button
             type="button"
             className={cn(
-              "flex flex-1 min-w-0 items-center cursor-pointer select-none hover:bg-stone-50 transition-colors duration-100 focus-visible:outline-none focus-visible:bg-stone-50",
+              "flex min-w-0 flex-1 cursor-pointer select-none items-center rounded-md transition-colors duration-100 focus-visible:outline-none",
               rowHeight,
+              isSidebar
+                ? "hover:bg-[var(--editor-surface-hover)] focus-visible:bg-[var(--editor-surface-hover)]"
+                : "hover:bg-stone-50 focus-visible:bg-stone-50",
             )}
             style={{ paddingLeft: `${depth * rowIndent + 8}px` }}
             onClick={() => onToggle(folder.id)}
@@ -105,7 +108,14 @@ export const TreeFolderRow = ({
             >
               {folder.name}
             </span>
-            <span className="font-mono text-[10px] text-stone-300 mr-1 group-hover:text-stone-400 transition-colors">
+            <span
+              className={cn(
+                "mr-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums transition-colors",
+                isSidebar
+                  ? "bg-stone-100 text-stone-500 group-hover:bg-[var(--editor-accent-lighter)] group-hover:text-[var(--editor-accent-text)]"
+                  : "font-mono text-stone-300 group-hover:text-stone-400",
+              )}
+            >
               {folder.children.length}
             </span>
           </button>
@@ -205,7 +215,13 @@ export const TreeDocumentRow = ({
 
   return (
     <div role="treeitem" aria-level={depth + 1} aria-selected={isActive}>
-      <div className={cn("group flex items-center pr-1", rowHeight)}>
+      <div className={cn("group relative mx-1.5 flex items-center pr-1", rowHeight)}>
+        {isSidebar && isActive && (
+          <span
+            className="absolute bottom-1 left-0 top-1 w-0.5 rounded-full bg-[var(--editor-accent)]"
+            aria-hidden="true"
+          />
+        )}
         <TreeContextMenu
           permissions={permissions}
           type="document"
@@ -219,9 +235,14 @@ export const TreeDocumentRow = ({
             to={`/w/${workspaceId}/documents/${doc.id}`}
             onClick={() => onNavigate?.()}
             className={cn(
-              "flex flex-1 min-w-0 items-center hover:bg-stone-50 transition-colors duration-100 focus-visible:outline-none focus-visible:bg-stone-50",
+              "flex min-w-0 flex-1 items-center rounded-md transition-colors duration-100 focus-visible:outline-none",
               rowHeight,
-              isActive && "bg-teal-50/80 hover:bg-teal-50",
+              isSidebar
+                ? isActive
+                  ? "bg-[var(--editor-surface-active)] hover:bg-[var(--editor-surface-active)]"
+                  : "hover:bg-[var(--editor-surface-hover)] focus-visible:bg-[var(--editor-surface-hover)]"
+                : "hover:bg-stone-50 focus-visible:bg-stone-50",
+              !isSidebar && isActive && "bg-teal-50/80 hover:bg-teal-50",
             )}
             style={{ paddingLeft: `${depth * rowIndent + (isSidebar ? 24 : 28)}px` }}
           >

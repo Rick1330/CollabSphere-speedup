@@ -1,9 +1,14 @@
 import { useEffect, useRef } from "react";
-import { MessageSquarePlus, X } from "lucide-react";
-import type { TaskAssignee } from "@/api/adapters/tasks";
+import { Info, MessageSquare, MessageSquarePlus, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import type { TaskAssignee } from "@/api/adapters/tasks";
 import type { CommentNode, CommentThread } from "@/lib/mock-comments";
 import type { CommentFilter } from "@/features/documents/hooks/use-document-comments";
+import type { PendingCommentState } from "@/features/documents/lib/editor-comment-events";
+import {
+  EditorRailEmptyState,
+  EditorRailHeader,
+} from "@/features/documents/components/editor/editor-rail-chrome";
 import { DocumentCommentComposer } from "./document-comment-composer";
 import { DocumentCommentThreadCard } from "./document-comment-thread";
 import { DocumentThreadFilters } from "./document-thread-filters";
@@ -25,6 +30,25 @@ interface DocumentCommentsRailProps {
   onClose?: () => void;
   members: TaskAssignee[];
   membersById: Map<string, TaskAssignee>;
+  pendingComment?: PendingCommentState | null;
+  onSubmitAnchored?: (body: CommentNode[]) => void;
+  onCancelPending?: () => void;
+  selectionFilterActive?: boolean;
+  onClearSelectionFilter?: () => void;
+  embedded?: boolean;
+}
+
+function commentsSubtitle(
+  selectionFilterActive: boolean,
+  threadsLength: number,
+  openCount: number,
+): string {
+  if (selectionFilterActive) {
+    if (threadsLength === 0) return "No comments on selection";
+    return `${threadsLength} on selection`;
+  }
+  if (openCount === 0) return "No open threads";
+  return `${openCount} open ${openCount === 1 ? "thread" : "threads"}`;
 }
 
 export const DocumentCommentsRail = ({
@@ -44,10 +68,15 @@ export const DocumentCommentsRail = ({
   onClose,
   members,
   membersById,
+  pendingComment,
+  onSubmitAnchored,
+  onCancelPending,
+  selectionFilterActive = false,
+  onClearSelectionFilter,
+  embedded = false,
 }: DocumentCommentsRailProps) => {
   const listRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll to active thread
   useEffect(() => {
     if (!activeThreadId || !listRef.current) return;
     const el = listRef.current.querySelector(`[data-thread-id="${activeThreadId}"]`);
@@ -56,34 +85,35 @@ export const DocumentCommentsRail = ({
     }
   }, [activeThreadId]);
 
-  return (
-    <aside
-      aria-label="Document comments"
-      className="flex flex-col h-full bg-white border-l border-stone-200 min-w-0"
-    >
-      {/* Header */}
-      <div className="flex items-start justify-between gap-3 px-4 pt-3 pb-2 border-b border-stone-200 shrink-0">
-        <div className="min-w-0">
-          <h2 className="text-sm font-semibold text-stone-900 tracking-tight">Comments</h2>
-          <p className="font-mono text-[10px] text-stone-400 tracking-wider uppercase mt-0.5">
-            {openCount === 0
-              ? "No open threads"
-              : `${openCount} open ${openCount === 1 ? "thread" : "threads"}`}
-          </p>
-        </div>
-        {onClose && (
-          <button
-            type="button"
-            onClick={onClose}
-            className="h-7 w-7 rounded-md flex items-center justify-center text-stone-400 hover:text-stone-700 hover:bg-stone-100 transition-colors"
-            aria-label="Close comments"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        )}
-      </div>
+  const Root = embedded ? "div" : "aside";
 
-      <div className="px-4 py-2 border-b border-stone-100 shrink-0">
+  return (
+    <Root
+      aria-label="Document comments"
+      className={cn(
+        "flex h-full min-w-0 flex-col",
+        !embedded && "border-l border-stone-200 bg-white editor-rail",
+      )}
+    >
+      <EditorRailHeader
+        title="Comments"
+        subtitle={commentsSubtitle(selectionFilterActive, threads.length, openCount)}
+        icon={MessageSquare}
+        trailing={
+          onClose ? (
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[var(--editor-text-muted)] transition-colors hover:bg-[var(--editor-surface-hover)] hover:text-[var(--editor-text-primary)]"
+              aria-label="Close comments"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          ) : undefined
+        }
+      />
+
+      <div className="shrink-0 border-b border-[var(--editor-border)] px-4 py-2.5">
         <DocumentThreadFilters
           filter={filter}
           openCount={openCount}
@@ -92,9 +122,37 @@ export const DocumentCommentsRail = ({
         />
       </div>
 
-      {/* Composer (only when looking at open threads + can comment) */}
-      {filter === "open" && canComment && (
-        <div className="px-4 py-3 border-b border-stone-100 shrink-0">
+      {pendingComment && onSubmitAnchored && onCancelPending && (
+        <div className="shrink-0 space-y-3 border-b border-teal-100 bg-[var(--editor-accent-lighter)]/40 px-4 py-3">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="flex items-center gap-1.5 text-sm font-semibold text-[var(--editor-text-primary)]">
+              <MessageSquarePlus className="h-4 w-4 text-[var(--editor-accent)]" aria-hidden="true" />
+              New comment
+            </h3>
+            <button
+              type="button"
+              onClick={onCancelPending}
+              className="text-xs font-medium text-[var(--editor-text-muted)] hover:text-[var(--editor-text-primary)]"
+            >
+              Cancel
+            </button>
+          </div>
+          <blockquote className="rounded-lg border border-[var(--editor-border)] border-l-[3px] border-l-[var(--editor-accent)] bg-[var(--editor-surface)] px-3 py-2 text-[13px] italic leading-snug text-[var(--editor-text-secondary)] max-h-28 overflow-y-auto">
+            &ldquo;{pendingComment.quote}&rdquo;
+          </blockquote>
+          <DocumentCommentComposer
+            placeholder="Type your comment… use @ to mention"
+            submitLabel="Comment"
+            autoFocus
+            members={members}
+            onSubmit={onSubmitAnchored}
+            onCancel={onCancelPending}
+          />
+        </div>
+      )}
+
+      {filter === "open" && canComment && !pendingComment && (
+        <div className="shrink-0 border-b border-[var(--editor-border)] px-4 py-3">
           <DocumentCommentComposer
             placeholder="Start a general document discussion…"
             submitLabel="Post"
@@ -104,10 +162,15 @@ export const DocumentCommentsRail = ({
         </div>
       )}
 
-      {/* Thread list */}
-      <div ref={listRef} className="flex-1 overflow-y-auto px-3 py-3 space-y-2.5 min-h-0">
+      <div ref={listRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto scroll-py-2 px-3 py-3">
         {threads.length === 0 ? (
-          <RailEmptyState filter={filter} canComment={canComment} />
+          <RailEmptyState
+            filter={filter}
+            canComment={canComment}
+            hasPending={!!pendingComment}
+            selectionFilterActive={selectionFilterActive}
+            onClearSelectionFilter={onClearSelectionFilter}
+          />
         ) : (
           threads.map((t) => (
             <div key={t.id} data-thread-id={t.id}>
@@ -129,48 +192,72 @@ export const DocumentCommentsRail = ({
       </div>
 
       {!canComment && filter === "open" && (
-        <div className="px-4 py-2.5 border-t border-stone-100 bg-stone-50/60 text-[11px] text-stone-500">
-          You have view-only access. You can read threads but not post replies.
+        <div className="flex shrink-0 items-start gap-2 border-t border-[var(--editor-border)] bg-[var(--editor-surface-hover)] px-4 py-2.5 text-[11px] text-[var(--editor-text-muted)]">
+          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--editor-info)]" aria-hidden="true" />
+          <span>You have view-only access. You can read threads but not post replies.</span>
         </div>
       )}
-    </aside>
+    </Root>
   );
 };
 
 const RailEmptyState = ({
   filter,
   canComment,
+  hasPending,
+  selectionFilterActive,
+  onClearSelectionFilter,
 }: {
   filter: CommentFilter;
   canComment: boolean;
+  hasPending: boolean;
+  selectionFilterActive?: boolean;
+  onClearSelectionFilter?: () => void;
 }) => {
+  if (hasPending) {
+    return null;
+  }
+  if (selectionFilterActive) {
+    return (
+      <EditorRailEmptyState
+        icon={MessageSquare}
+        title="No comments on selection"
+        action={
+          onClearSelectionFilter ? (
+            <button
+              type="button"
+              onClick={onClearSelectionFilter}
+              className="rounded-lg bg-[var(--editor-accent-lighter)] px-3 py-1.5 text-xs font-semibold text-[var(--editor-accent-text)] transition-colors hover:bg-teal-100"
+            >
+              Show all comments
+            </button>
+          ) : undefined
+        }
+      />
+    );
+  }
   if (filter === "resolved") {
     return (
-      <div className="text-center py-10 px-4">
-        <p className="text-sm text-stone-500">No resolved threads yet.</p>
-        <p className="text-[11px] text-stone-400 mt-1">
-          Resolved discussions will appear here for reference.
-        </p>
-      </div>
+      <EditorRailEmptyState
+        icon={MessageSquare}
+        title="No resolved threads"
+        description="Resolved discussions will appear here for reference."
+      />
     );
   }
   return (
-    <div className="text-center py-10 px-4">
-      <div className="h-10 w-10 rounded-full bg-teal-50 border border-teal-100 flex items-center justify-center mx-auto">
-        <MessageSquarePlus className="h-4 w-4 text-teal-600" aria-hidden="true" />
-      </div>
-      <h3 className="text-sm font-semibold text-stone-900 mt-3">No comments yet</h3>
-      <p className="text-[12px] text-stone-500 mt-1.5 leading-relaxed">
-        {canComment ? (
+    <EditorRailEmptyState
+      icon={MessageSquarePlus}
+      title="No comments yet"
+      description={
+        canComment ? (
           <>
-            Select text in the document to leave an
-            <br />
-            inline comment, or start a general thread above.
+            Select text in the document for an inline comment, or start a general thread above.
           </>
         ) : (
           "No discussion has started on this document yet."
-        )}
-      </p>
-    </div>
+        )
+      }
+    />
   );
 };

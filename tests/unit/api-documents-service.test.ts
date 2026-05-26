@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import * as Y from "yjs";
 import { AppError } from "../../apps/api/src/common/filters/app-error.filter.js";
 import { DocumentsService } from "../../apps/api/src/documents/documents.service.js";
 
@@ -483,6 +484,401 @@ test("documents service rejects submit without supervisor in academic workspace"
     (error: unknown) => {
       assert.equal(error instanceof AppError, true);
       assert.equal((error as AppError).code, "NO_SUPERVISOR_ASSIGNED");
+      return true;
+    },
+  );
+});
+
+test("documents service lists document versions with char counts", async () => {
+  const prisma = {
+    workspaceMember: {
+      findFirst: async () => ({
+        id: "m-1",
+        workspace: { id: "ws-1", type: "professional", status: "active" },
+      }),
+    },
+    document: {
+      findFirst: async () => ({ id: "doc-1" }),
+    },
+    documentVersion: {
+      findMany: async () => [
+        {
+          id: "ver-2",
+          documentId: "doc-1",
+          versionNumber: 2,
+          reason: "auto",
+          createdAt: new Date("2026-05-08T01:00:00.000Z"),
+          createdById: "user-1",
+          plaintext: "Second snapshot body",
+          yjsState: Buffer.from([1]),
+          versionLabel: null,
+          createdBy: { id: "user-1", fullName: "Alice" },
+        },
+        {
+          id: "ver-1",
+          documentId: "doc-1",
+          versionNumber: 1,
+          reason: "auto",
+          createdAt: new Date("2026-05-08T00:00:00.000Z"),
+          createdById: "user-1",
+          plaintext: "First",
+          yjsState: Buffer.from([1]),
+          versionLabel: null,
+          createdBy: { id: "user-1", fullName: "Alice" },
+        },
+      ],
+    },
+  };
+
+  const service = new DocumentsService(prisma as never);
+  const { items, total } = await service.listDocumentVersions({
+    actorUserId: "user-1",
+    workspaceId: "ws-1",
+    documentId: "doc-1",
+  });
+
+  assert.equal(total, 2);
+  assert.equal(items[0]?.id, "ver-2");
+  assert.equal(items[0]?.charCount, "Second snapshot body".length);
+  assert.equal(items[0]?.contentExcerpt, "Second snapshot body");
+});
+
+test("documents service returns version detail with yjs state", async () => {
+  const yjsState = Buffer.from([9, 8, 7]);
+  const prisma = {
+    workspaceMember: {
+      findFirst: async () => ({
+        id: "m-1",
+        workspace: { id: "ws-1", type: "professional", status: "active" },
+      }),
+    },
+    documentVersion: {
+      findFirst: async () => ({
+        id: "ver-1",
+        documentId: "doc-1",
+        versionNumber: 1,
+        reason: "auto",
+        createdAt: new Date("2026-05-08T00:00:00.000Z"),
+        createdById: "user-1",
+        plaintext: "Snapshot",
+        yjsState,
+        versionLabel: "Named release",
+        createdBy: { id: "user-1", fullName: "Alice" },
+      }),
+    },
+  };
+
+  const service = new DocumentsService(prisma as never);
+  const detail = await service.getDocumentVersionDetail({
+    actorUserId: "user-1",
+    workspaceId: "ws-1",
+    documentId: "doc-1",
+    versionId: "ver-1",
+  });
+
+  assert.equal(detail.id, "ver-1");
+  assert.equal(detail.yjsStateBase64, Buffer.from(yjsState).toString("base64"));
+  assert.equal(detail.plaintext, "Snapshot");
+  assert.equal(detail.versionLabel, "Named release");
+});
+
+test("documents service backfills plaintext from yjs on detail when stored plaintext missing", async () => {
+  const ydoc = new Y.Doc();
+  const fragment = ydoc.getXmlFragment("prosemirror");
+  const paragraph = new Y.XmlElement("paragraph");
+  const xmlText = new Y.XmlText();
+  xmlText.insert(0, "Recovered body");
+  paragraph.insert(0, [xmlText]);
+  fragment.insert(0, [paragraph]);
+  const yjsState = Buffer.from(Y.encodeStateAsUpdate(ydoc));
+
+  const prisma = {
+    workspaceMember: {
+      findFirst: async () => ({
+        id: "m-1",
+        workspace: { id: "ws-1", type: "professional", status: "active" },
+      }),
+    },
+    documentVersion: {
+      findFirst: async () => ({
+        id: "ver-1",
+        documentId: "doc-1",
+        versionNumber: 1,
+        reason: "auto",
+        createdAt: new Date("2026-05-08T00:00:00.000Z"),
+        createdById: "user-1",
+        plaintext: null,
+        yjsState,
+        versionLabel: null,
+        createdBy: { id: "user-1", fullName: "Alice" },
+      }),
+    },
+  };
+
+  const service = new DocumentsService(prisma as never);
+  const detail = await service.getDocumentVersionDetail({
+    actorUserId: "user-1",
+    workspaceId: "ws-1",
+    documentId: "doc-1",
+    versionId: "ver-1",
+  });
+
+  assert.equal(detail.charCount, "Recovered body".length);
+  assert.equal(detail.plaintext, "Recovered body");
+  assert.ok(detail.yjsStateBase64.length > 0);
+});
+
+test("documents service detail survives corrupt yjs when backfilling plaintext", async () => {
+  const prisma = {
+    workspaceMember: {
+      findFirst: async () => ({
+        id: "m-1",
+        workspace: { id: "ws-1", type: "professional", status: "active" },
+      }),
+    },
+    documentVersion: {
+      findFirst: async () => ({
+        id: "ver-1",
+        documentId: "doc-1",
+        versionNumber: 1,
+        reason: "auto",
+        createdAt: new Date("2026-05-08T00:00:00.000Z"),
+        createdById: "user-1",
+        plaintext: null,
+        yjsState: Buffer.from([255, 0, 1]),
+        versionLabel: null,
+        createdBy: { id: "user-1", fullName: "Alice" },
+      }),
+    },
+  };
+
+  const service = new DocumentsService(prisma as never);
+  const detail = await service.getDocumentVersionDetail({
+    actorUserId: "user-1",
+    workspaceId: "ws-1",
+    documentId: "doc-1",
+    versionId: "ver-1",
+  });
+
+  assert.equal(detail.plaintext, "");
+  assert.equal(detail.charCount, 0);
+  assert.ok(detail.yjsStateBase64.length > 0);
+});
+
+test("documents service creates manual version from current document content", async () => {
+  const yjsState = Buffer.from([1, 2, 3]);
+  let createdPayload: Record<string, unknown> | null = null;
+  const prisma = {
+    workspaceMember: {
+      findFirst: async () => ({
+        id: "m-1",
+        role: "MEMBER",
+        workspace: { id: "ws-1", type: "professional", status: "active" },
+      }),
+    },
+    document: {
+      findFirst: async () => ({
+        id: "doc-1",
+        contentYjs: yjsState,
+        contentPlaintext: "Current body",
+        status: "draft",
+        isLocked: false,
+      }),
+    },
+    $transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
+      const tx = {
+        documentVersion: {
+          findFirst: async () => ({ versionNumber: 2 }),
+          create: async ({ data }: { data: Record<string, unknown> }) => {
+            createdPayload = data;
+            return {
+              id: "ver-3",
+              documentId: data.documentId,
+              versionNumber: data.versionNumber,
+              reason: data.reason,
+              createdAt: new Date("2026-05-08T02:00:00.000Z"),
+              createdById: data.createdById,
+              versionLabel: data.versionLabel,
+              plaintext: data.plaintext,
+              createdBy: { id: "user-1", fullName: "Alice" },
+            };
+          },
+        },
+      };
+      return fn(tx);
+    },
+  };
+
+  const service = new DocumentsService(prisma as never);
+  const created = await service.createManualDocumentVersion({
+    actorUserId: "user-1",
+    workspaceId: "ws-1",
+    documentId: "doc-1",
+    versionLabel: "Before review",
+  });
+
+  assert.equal(created.versionNumber, 3);
+  assert.equal(created.reason, "manual");
+  assert.equal(created.versionLabel, "Before review");
+  assert.equal(createdPayload?.reason, "manual");
+  assert.equal(createdPayload?.plaintext, "Current body");
+});
+
+test("documents service list backfills excerpt from small yjs when plaintext empty", async () => {
+  const ydoc = new Y.Doc();
+  const fragment = ydoc.getXmlFragment("prosemirror");
+  const paragraph = new Y.XmlElement("paragraph");
+  const xmlText = new Y.XmlText();
+  xmlText.insert(0, "List backfill text");
+  paragraph.insert(0, [xmlText]);
+  fragment.insert(0, [paragraph]);
+  const yjsState = Buffer.from(Y.encodeStateAsUpdate(ydoc));
+
+  const prisma = {
+    workspaceMember: {
+      findFirst: async () => ({
+        id: "m-1",
+        workspace: { id: "ws-1", type: "professional", status: "active" },
+      }),
+    },
+    document: {
+      findFirst: async () => ({ id: "doc-1" }),
+    },
+    documentVersion: {
+      findMany: async () => [
+        {
+          id: "ver-1",
+          documentId: "doc-1",
+          versionNumber: 1,
+          reason: "auto",
+          createdAt: new Date("2026-05-08T00:00:00.000Z"),
+          createdById: "user-1",
+          plaintext: null,
+          yjsState,
+          versionLabel: null,
+          createdBy: { id: "user-1", fullName: "Alice" },
+        },
+      ],
+    },
+  };
+
+  const service = new DocumentsService(prisma as never);
+  const { items } = await service.listDocumentVersions({
+    actorUserId: "user-1",
+    workspaceId: "ws-1",
+    documentId: "doc-1",
+  });
+
+  assert.equal(items[0]?.contentExcerpt, "List backfill text");
+  assert.equal(items[0]?.charCount, "List backfill text".length);
+});
+
+test("documents service allows member to restore editable draft", async () => {
+  const restoredYjs = Buffer.from([9, 9, 9]);
+  let updatedContentYjs: unknown;
+  const prisma = {
+    workspaceMember: {
+      findFirst: async () => ({
+        id: "m-1",
+        role: "MEMBER",
+        workspace: { id: "ws-1", type: "professional", status: "active" },
+      }),
+    },
+    $transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
+      const tx = {
+        document: {
+          findFirst: async () => ({
+            id: "doc-1",
+            status: "draft",
+            isLocked: false,
+            contentYjs: Buffer.from([1, 2]),
+            contentPlaintext: "Current",
+          }),
+          update: async ({ data }: { data: Record<string, unknown> }) => {
+            updatedContentYjs = data.contentYjs;
+            return { id: "doc-1", updatedAt: new Date("2026-05-08T03:00:00.000Z") };
+          },
+        },
+        documentVersion: {
+          findFirst: async (args: { where?: { id?: string }; orderBy?: { versionNumber: string } }) => {
+            if (args.where?.id === "ver-1") {
+              return {
+                id: "ver-1",
+                yjsState: restoredYjs,
+                plaintext: "Restored body",
+              };
+            }
+            if (args.orderBy?.versionNumber === "desc") {
+              return { versionNumber: 2 };
+            }
+            return null;
+          },
+          create: async () => ({ id: "ver-before" }),
+        },
+      };
+      return fn(tx);
+    },
+  };
+
+  const eventEmitter = { emit: () => undefined };
+  const service = new DocumentsService(prisma as never, eventEmitter as never);
+  const result = await service.restoreDocumentVersion({
+    actorUserId: "user-1",
+    workspaceId: "ws-1",
+    documentId: "doc-1",
+    versionId: "ver-1",
+  });
+
+  assert.equal(result.id, "doc-1");
+  assert.deepEqual(updatedContentYjs, restoredYjs);
+});
+
+test("documents service rejects restore when document is read-only for viewer", async () => {
+  const prisma = {
+    workspaceMember: {
+      findFirst: async () => ({
+        id: "m-1",
+        role: "VIEWER",
+        workspace: { id: "ws-1", type: "professional", status: "active" },
+      }),
+    },
+    $transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
+      const tx = {
+        document: {
+          findFirst: async () => ({
+            id: "doc-1",
+            status: "draft",
+            isLocked: false,
+            contentYjs: Buffer.from([1]),
+            contentPlaintext: "Current",
+          }),
+        },
+        documentVersion: {
+          findFirst: async () => ({
+            id: "ver-1",
+            yjsState: Buffer.from([9]),
+            plaintext: "Old",
+          }),
+        },
+      };
+      return fn(tx);
+    },
+  };
+
+  const eventEmitter = { emit: () => undefined };
+  const service = new DocumentsService(prisma as never, eventEmitter as never);
+
+  await assert.rejects(
+    () =>
+      service.restoreDocumentVersion({
+        actorUserId: "user-1",
+        workspaceId: "ws-1",
+        documentId: "doc-1",
+        versionId: "ver-1",
+      }),
+    (error: unknown) => {
+      assert.equal(error instanceof AppError, true);
+      assert.equal((error as AppError).code, "DOCUMENT_READONLY_STATUS");
       return true;
     },
   );

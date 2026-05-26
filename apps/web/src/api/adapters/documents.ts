@@ -7,7 +7,8 @@
  * reaching into `@/features/documents/mocks/*` directly.
  */
 import { request } from "@/api/client";
-import { parseApiSingleEnvelope } from "@/api/client/envelope";
+import { parseApiListEnvelope, parseApiSingleEnvelope } from "@/api/client/envelope";
+import { decodeYjsState } from "@/features/documents/lib/decode-yjs-state";
 import type {
   TreeNode,
   TreeFolderNode,
@@ -30,6 +31,124 @@ export interface DocumentVersion {
   contentExcerpt: string;
   note?: string;
   charCount: number;
+  /** Character delta vs the next newer version (positive = more text than older). */
+  wordDelta?: number | null;
+  isLatest?: boolean;
+}
+
+export type DocumentVersionDetail = DocumentVersion & {
+  yjsState: Uint8Array;
+  plaintext?: string;
+};
+
+type ApiVersionListItem = {
+  id: string;
+  documentId?: string;
+  versionNumber: number;
+  reason: VersionReason;
+  createdAt: string;
+  createdById: string;
+  createdBy?: { id: string; fullName?: string } | null;
+  versionLabel?: string | null;
+  note?: string | null;
+  contentExcerpt?: string | null;
+  charCount?: number | null;
+  plaintext?: string | null;
+};
+
+type ApiVersionDetail = ApiVersionListItem & {
+  yjsState?: unknown;
+  yjsStateBase64?: string | null;
+  versionYjsState?: unknown;
+};
+
+const VERSION_REASONS = new Set<VersionReason>([
+  "manual",
+  "auto",
+  "submitted",
+  "approved",
+  "before_restore",
+]);
+
+function normalizeVersionReason(reason: string): VersionReason {
+  if (VERSION_REASONS.has(reason as VersionReason)) {
+    return reason as VersionReason;
+  }
+  if (reason === "collab_sync") {
+    return "auto";
+  }
+  return "auto";
+}
+
+function parseVersionListPayload(payload: unknown): ApiVersionListItem[] {
+  const parsed = parseApiListEnvelope<ApiVersionListItem>(payload);
+  if (parsed.items.length > 0) {
+    return parsed.items;
+  }
+
+  if (!payload || typeof payload !== "object" || !("data" in payload)) {
+    return [];
+  }
+
+  const data = (payload as { data?: Record<string, unknown> }).data;
+  if (!data) return [];
+
+  const resource = data.resource;
+  if (resource && typeof resource === "object") {
+    const items = (resource as { items?: unknown; versions?: unknown }).items;
+    if (Array.isArray(items)) return items as ApiVersionListItem[];
+    const versions = (resource as { versions?: unknown }).versions;
+    if (Array.isArray(versions)) return versions as ApiVersionListItem[];
+  }
+
+  const versions = data.versions;
+  if (Array.isArray(versions)) return versions as ApiVersionListItem[];
+
+  return [];
+}
+
+function mapApiVersionItem(
+  item: ApiVersionListItem,
+  documentId: string,
+): DocumentVersion {
+  const legacyName = (item as ApiVersionListItem & { createdByName?: string }).createdByName;
+  const createdByName =
+    item.createdBy?.fullName?.trim() ||
+    (typeof legacyName === "string" ? legacyName.trim() : "") ||
+    "Unknown";
+  return {
+    id: item.id,
+    documentId: item.documentId ?? documentId,
+    versionNumber: item.versionNumber,
+    reason: normalizeVersionReason(String(item.reason)),
+    createdAt: item.createdAt,
+    createdById: item.createdById,
+    createdByName,
+    versionLabel: item.versionLabel ?? undefined,
+    contentExcerpt: item.contentExcerpt?.trim() ?? item.plaintext?.slice(0, 120) ?? "",
+    note: item.note ?? undefined,
+    charCount: typeof item.charCount === "number" ? item.charCount : 0,
+  };
+}
+
+function enrichVersionList(versions: DocumentVersion[]): DocumentVersion[] {
+  const sorted = [...versions].sort((a, b) => b.versionNumber - a.versionNumber);
+  return sorted.map((version, index) => {
+    const newer = sorted[index + 1];
+    let wordDelta: number | null = null;
+    if (newer) {
+      if (version.charCount > 0 || newer.charCount > 0) {
+        wordDelta = version.charCount - newer.charCount;
+      } else {
+        wordDelta = 0;
+      }
+    }
+    return {
+      ...version,
+      isLatest: index === 0,
+      wordDelta,
+    };
+  });
 }
 
 export const REASON_META: Record<
@@ -278,17 +397,98 @@ export async function listDocumentVersions(
   workspaceId: string,
   documentId: string,
 ): Promise<DocumentVersion[]> {
-  const payload = await request<ListEnvelope<Omit<DocumentVersion, "createdByName" | "contentExcerpt" | "charCount">>>(
+  const payload = await request<unknown>(
     `/workspaces/${workspaceId}/documents/${documentId}/versions`,
   );
-  const items = payload.data?.items ?? [];
-  return items.map((item) => ({
-    ...item,
-    documentId,
-    createdByName: "Unknown",
-    contentExcerpt: "",
-    charCount: 0,
-  }));
+  const items = parseVersionListPayload(payload);
+  if (import.meta.env.DEV) {
+    const { total } = parseApiListEnvelope<ApiVersionListItem>(payload);
+    console.info("[versions] list loaded", { documentId, count: items.length, total });
+  }
+  return enrichVersionList(items.map((item) => mapApiVersionItem(item, documentId)));
+}
+
+export async function getDocumentVersionDetail(
+  workspaceId: string,
+  documentId: string,
+  versionId: string,
+): Promise<DocumentVersionDetail> {
+  const payload = await request<unknown>(
+    `/workspaces/${workspaceId}/documents/${documentId}/versions/${versionId}`,
+  );
+  const res = parseApiSingleEnvelope<{ version?: ApiVersionDetail }>(payload);
+  const version = res.version;
+  if (!version?.id) {
+    throw new Error("Version detail response is missing version.");
+  }
+  const base = mapApiVersionItem(version, documentId);
+  const rawState =
+    version.yjsStateBase64 ??
+    version.yjsState ??
+    version.versionYjsState;
+  const yjsState = decodeYjsState(rawState);
+  if (import.meta.env.DEV) {
+    console.info("[versions] detail loaded", {
+      versionId,
+      yjsStateBytes: yjsState.byteLength,
+      charCount: base.charCount,
+    });
+  }
+  return {
+    ...base,
+    yjsState,
+    plaintext: version.plaintext?.trim() || undefined,
+  };
+}
+
+export async function createDocumentVersion(
+  workspaceId: string,
+  documentId: string,
+  options?: { versionLabel?: string },
+): Promise<DocumentVersion> {
+  const payload = await request<unknown>(
+    `/workspaces/${workspaceId}/documents/${documentId}/versions`,
+    {
+      method: "POST",
+      body: options?.versionLabel ? { versionLabel: options.versionLabel.trim() } : {},
+    },
+  );
+  const res = parseApiSingleEnvelope<{ version?: ApiVersionListItem }>(payload);
+  if (!res.version?.id) {
+    throw new Error("Version create response is missing version.");
+  }
+  return mapApiVersionItem(res.version, documentId);
+}
+
+export async function restoreDocumentVersion(
+  workspaceId: string,
+  documentId: string,
+  versionId: string,
+): Promise<void> {
+  await request<unknown>(
+    `/workspaces/${workspaceId}/documents/${documentId}/versions/${versionId}/restore`,
+    { method: "POST" },
+  );
+}
+
+export async function updateDocumentVersionLabel(
+  workspaceId: string,
+  documentId: string,
+  versionId: string,
+  label: string,
+): Promise<DocumentVersion> {
+  const payload = await request<unknown>(
+    `/workspaces/${workspaceId}/documents/${documentId}/versions/${versionId}`,
+    {
+      method: "PATCH",
+      body: { versionLabel: label.trim() },
+    },
+  );
+  const res = parseApiSingleEnvelope<{ version?: ApiVersionListItem }>(payload);
+  if (!res.version?.id) {
+    throw new Error("Version update response is missing version.");
+  }
+  return mapApiVersionItem(res.version, documentId);
 }
 
 export function getVersionHistory(_documentId: string): DocumentVersion[] {

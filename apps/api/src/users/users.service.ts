@@ -3,6 +3,10 @@ import { AppError, ValidationAppError } from "../common/filters/app-error.filter
 import { PrismaClientProvider } from "../common/prisma/prisma-client.provider.js";
 import { apiRuntimeEnv } from "../config/api-runtime.js";
 import { executePasswordChange } from "./change-password.logic.js";
+import {
+  normalizeRecentColors,
+  type EditorPreferencesJson,
+} from "./editor-preferences.util.js";
 
 @Injectable()
 export class UsersService {
@@ -77,6 +81,27 @@ export class UsersService {
       data,
     });
     return this.getMe(userId);
+  }
+
+  async getEditorPreferences(userId: string) {
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, deletedAt: null },
+      select: { editorPreferences: true },
+    });
+    if (!user) {
+      throw new AppError({ code: "NOT_FOUND", message: "User not found" });
+    }
+    const prefs = (user.editorPreferences as EditorPreferencesJson | null) ?? {};
+    return { recentColors: normalizeRecentColors(prefs.recentColors) };
+  }
+
+  async updateEditorPreferences(userId: string, input: { recentColors: string[] }) {
+    const recentColors = normalizeRecentColors(input.recentColors);
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { editorPreferences: { recentColors } satisfies EditorPreferencesJson },
+    });
+    return { recentColors };
   }
 
   async changePassword(userId: string, input: { currentPassword: string; newPassword: string }) {

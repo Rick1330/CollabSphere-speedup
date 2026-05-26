@@ -314,6 +314,32 @@ test("joinDocumentRoom resolves session service via static registration when DI 
   }
 });
 
+test("RealtimeSessionService.authenticateSocket fails clearly when JwtAccessService is missing", async () => {
+  const service = new RealtimeSessionService(
+    undefined as unknown as import("../../apps/api/src/auth/jwt-access.service.js").JwtAccessService,
+    {
+      user: { findFirst: async () => null },
+    } as never,
+  );
+
+  const client = {
+    handshake: {
+      auth: { token: "test-token" },
+      headers: {},
+    },
+  } as import("socket.io").Socket;
+
+  await assert.rejects(
+    () => service.authenticateSocket(client),
+    (error: unknown) => {
+      assert.ok(error instanceof AppError);
+      assert.equal(error.code, "UNAUTHORIZED");
+      assert.match(error.message, /Realtime auth is not configured/);
+      return true;
+    },
+  );
+});
+
 test("leaveTaskRoom succeeds when user and task are valid", async () => {
   const session = createSessionMock({
     getAuthenticatedUser: () => ({

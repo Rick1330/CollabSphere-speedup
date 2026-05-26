@@ -1,10 +1,25 @@
-import { execSync, spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { execSync, spawn, spawnSync } from "node:child_process";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import net from "node:net";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { assertDevPortContract } from "../packages/shared/src/dev-port-contract.ts";
+import {
+  checkComposeServicePort,
+  formatComposePortCheckFailure,
+} from "./lib/compose-port-check.mts";
+import {
+  checkMinioHostPort,
+  formatMinioPortCheckFailure,
+} from "./lib/minio-port-check.mts";
 
 type EnvMap = Record<string, string>;
 
@@ -21,7 +36,9 @@ const rootDir = join(scriptDir, "..");
 const envExamplePath = join(rootDir, ".env.example");
 const envPath = join(rootDir, ".env");
 const envLocalPath = join(rootDir, ".env.local");
+const workerEnvPath = join(rootDir, "apps", "worker", ".env.worker");
 const composeFilePath = join(rootDir, "docker-compose.yml");
+const workerComposeFilePath = join(rootDir, "docker-compose.worker.yml");
 const windowsTaskkillPath = String.raw`C:\Windows\System32\taskkill.exe`;
 const envKeyPattern = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
@@ -87,17 +104,19 @@ const logError = (message) => {
 };
 
 const exitWithHelp = (code = 0) => {
-  console.log(`Usage: pnpm dev [--skip-compose]
+  console.log(`Usage: pnpm dev [--skip-compose] [--build-worker]
 
 Options:
-  --skip-compose  Reuse existing Docker services and skip docker compose startup.
-  --help          Show this help text.
+  --skip-compose   Reuse existing Docker services and skip docker compose startup.
+  --build-worker   Rebuild the Docker worker image before starting (slow; use after Dockerfile changes).
+  --help           Show this help text.
 `);
   process.exit(code);
 };
 
 const parseArgs = (argv) => {
   let skipCompose = false;
+  let buildWorker = false;
 
   for (const arg of argv) {
     if (arg === "--") {
@@ -109,6 +128,11 @@ const parseArgs = (argv) => {
       continue;
     }
 
+    if (arg === "--build-worker") {
+      buildWorker = true;
+      continue;
+    }
+
     if (arg === "--help") {
       exitWithHelp(0);
     }
@@ -116,7 +140,12 @@ const parseArgs = (argv) => {
     throw new Error(`Unknown argument "${arg}". Use --help for supported options.`);
   }
 
-  return { skipCompose };
+  if (!buildWorker) {
+    const envFlag = process.env.DEV_WORKER_BUILD?.trim().toLowerCase();
+    buildWorker = envFlag === "1" || envFlag === "true" || envFlag === "yes";
+  }
+
+  return { skipCompose, buildWorker };
 };
 
 const hasWrappedQuote = (value, quote) => value.startsWith(quote) && value.endsWith(quote);
@@ -258,7 +287,10 @@ const ensureRequiredEnvFiles = () => {
 const loadEnvSources = () => ({
   exampleValues: parseEnvFile(envExamplePath, ".env.example"),
   envValues: parseEnvFile(envPath, ".env"),
-  envLocalValues: existsSync(envLocalPath) ? parseEnvFile(envLocalPath, ".env.local") : ({} as EnvMap)
+  envLocalValues: existsSync(envLocalPath) ? parseEnvFile(envLocalPath, ".env.local") : ({} as EnvMap),
+  workerEnvValues: existsSync(workerEnvPath)
+    ? parseEnvFile(workerEnvPath, "apps/worker/.env.worker")
+    : ({} as EnvMap),
 });
 
 const validateRequiredKeys = (exampleValues, localValues) => {
@@ -387,7 +419,7 @@ const assertListenPortAvailable = (port, label = "PORT") =>
 
 const loadValidatedEnv = () => {
   ensureRequiredEnvFiles();
-  const { exampleValues, envValues, envLocalValues } = loadEnvSources();
+  const { exampleValues, envValues, envLocalValues, workerEnvValues } = loadEnvSources();
   const appLocalValues = {
     ...envValues,
     ...envLocalValues
@@ -408,18 +440,36 @@ const loadValidatedEnv = () => {
     COLLAB_WS_URL: appLocalValues.COLLAB_WS_URL,
   });
 
+  const googleClientId = appLocalValues.GOOGLE_CLIENT_ID?.trim() ?? "";
+  if (!googleClientId || googleClientId === "local-dev-disabled") {
+    logWarn(
+      "Google OAuth disabled — set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in .env.local (see .env.local.example).",
+    );
+  }
+
+  const docxImportPaths = resolveDocxImportPaths(appLocalValues);
+  const workerDocker = isDevWorkerDocker(appLocalValues);
+
+  warnIfMinioCredentialsMismatch(appLocalValues);
+
   return {
     apiPort,
+    workerDocker,
+    docxImportPaths,
     // Compose follows repo-local .env, while app children can layer runtime-only .env.local overrides.
     composeEnv: {
       ...process.env,
-      ...envValues
+      ...envValues,
+      DOCX_IMPORT_HOST_PATH: toDockerBindSourcePath(docxImportPaths.hostPath),
     },
     appEnv: {
       ...process.env,
       ...appLocalValues,
-      ...createLocalEmailEnv(appLocalValues)
-    }
+      ...createLocalEmailEnv(appLocalValues),
+      DOCX_IMPORT_TMP_DIR: docxImportPaths.tmpDir,
+      DOCX_IMPORT_HOST_PATH: docxImportPaths.hostPath,
+    },
+    workerEnvValues,
   };
 };
 
@@ -436,8 +486,383 @@ const getRunnableDevScript = (manifest) => {
   return devScript || null;
 };
 
-const ensureAppSurfaces = () => {
-  for (const surface of appSurfaces) {
+const isDevWorkerDocker = (values: EnvMap) => {
+  const flag = values.DEV_WORKER_DOCKER?.trim().toLowerCase();
+  return flag === "1" || flag === "true" || flag === "yes";
+};
+
+const COMPOSE_HOST_PORTS: Array<{
+  envKey: string;
+  defaultPort: number;
+  container: string;
+  label: string;
+}> = [
+  { envKey: "REDIS_PORT", defaultPort: 6379, container: "collabsphere-redis", label: "redis" },
+  {
+    envKey: "POSTGRES_PORT",
+    defaultPort: 5432,
+    container: "collabsphere-postgres",
+    label: "postgres",
+  },
+  { envKey: "MINIO_API_PORT", defaultPort: 9000, container: "collabsphere-minio", label: "minio" },
+];
+
+const resolveHostPort = (values: EnvMap, envKey: string, defaultPort: number) =>
+  Number.parseInt(values[envKey] ?? String(defaultPort), 10) || defaultPort;
+
+const assertComposePortsBeforeUp = (values: EnvMap) => {
+  const failures: string[] = [];
+
+  for (const { envKey, defaultPort, container, label } of COMPOSE_HOST_PORTS) {
+    const hostPort = resolveHostPort(values, envKey, defaultPort);
+    const result = checkComposeServicePort(hostPort, container, label);
+    if (!result.ok && result.hint) {
+      failures.push(result.hint);
+    }
+  }
+
+  if (failures.length > 0) {
+    throw new Error(
+      "Docker Compose cannot bind required ports:\n" +
+        failures.map((hint) => `  - ${hint}`).join("\n") +
+        "\nStop the conflicting containers, or run `pnpm dev --skip-compose` if this project's stack is already up.",
+    );
+  }
+};
+
+const assertCollabsphereMinioHostPort = (values: EnvMap) => {
+  if ((values.STORAGE_TYPE ?? "").trim().toLowerCase() !== "s3") {
+    return;
+  }
+
+  const hostPort = resolveHostPort(values, "MINIO_API_PORT", 9000);
+  const result = checkMinioHostPort(hostPort, true);
+  if (!result.ok) {
+    throw new Error(formatMinioPortCheckFailure(result));
+  }
+};
+
+const warnIfMinioCredentialsMismatch = (values: EnvMap) => {
+  if ((values.STORAGE_TYPE ?? "").trim().toLowerCase() !== "s3") {
+    return;
+  }
+
+  const s3AccessKey =
+    values.S3_ACCESS_KEY_ID?.trim() ||
+    values.AWS_ACCESS_KEY_ID?.trim() ||
+    values.MINIO_ACCESS_KEY?.trim() ||
+    "";
+  const minioRootUser = values.MINIO_ROOT_USER?.trim() ?? "";
+
+  if (s3AccessKey && minioRootUser && s3AccessKey !== minioRootUser) {
+    logWarn(
+      `S3_ACCESS_KEY_ID (${s3AccessKey}) does not match MINIO_ROOT_USER (${minioRootUser}). ` +
+        "MinIO uses the root user as the S3 access key — align both in .env or match the running container. " +
+        "Run: pnpm diagnose:minio",
+    );
+  }
+};
+
+const resolvePathFromRepoRoot = (rawPath: string) =>
+  isAbsolute(rawPath) ? resolve(rawPath) : resolve(rootDir, rawPath);
+
+const resolveDocxImportPaths = (values: EnvMap) => {
+  const defaultRelative = join(".tmp", "collabsphere-docx-imports");
+  const tmpDir = values.DOCX_IMPORT_TMP_DIR?.trim()
+    ? resolvePathFromRepoRoot(values.DOCX_IMPORT_TMP_DIR)
+    : resolve(rootDir, defaultRelative);
+  const hostPath = values.DOCX_IMPORT_HOST_PATH?.trim()
+    ? resolvePathFromRepoRoot(values.DOCX_IMPORT_HOST_PATH)
+    : tmpDir;
+
+  mkdirSync(tmpDir, { recursive: true });
+  return { tmpDir, hostPath };
+};
+
+/** Docker Compose on Windows expects forward slashes in bind mount sources. */
+const toDockerBindSourcePath = (absoluteHostPath: string) => {
+  if (process.platform === "win32") {
+    return absoluteHostPath.replace(/\\/g, "/");
+  }
+  return absoluteHostPath;
+};
+
+const DOCX_MOUNT_CONTAINER_PATH = "/tmp/collabsphere-docx-imports";
+
+const verifyDocxImportDockerMount = async (
+  composeEnv: NodeJS.ProcessEnv,
+  hostTmpDir: string,
+) => {
+  const markerName = `.mount-check-${Date.now()}`;
+  const hostMarkerPath = join(hostTmpDir, markerName);
+  const containerMarkerPath = `${DOCX_MOUNT_CONTAINER_PATH}/${markerName}`;
+
+  writeFileSync(hostMarkerPath, "mount-check", "utf8");
+
+  try {
+    const result = spawnSync(
+      "docker",
+      [
+        "compose",
+        "-f",
+        workerComposeFilePath,
+        "exec",
+        "-T",
+        "worker",
+        "test",
+        "-f",
+        containerMarkerPath,
+      ],
+      {
+        cwd: rootDir,
+        env: composeEnv,
+        encoding: "utf8",
+        windowsHide: true,
+      },
+    );
+
+    if (result.status !== 0) {
+      const execDetail = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
+      throw new Error(
+        "DOCX import bind mount is not visible inside the Docker worker.\n" +
+          `- Host folder: ${hostTmpDir}\n` +
+          `- Container path: ${DOCX_MOUNT_CONTAINER_PATH}\n` +
+          (process.platform === "win32"
+            ? "- Enable the drive (e.g. D:) in Docker Desktop → Settings → Resources → File sharing\n"
+            : "") +
+          "- Ensure .env sets DOCX_IMPORT_TMP_DIR and DOCX_IMPORT_HOST_PATH to the same folder\n" +
+          "- Inspect mounts: docker compose -f docker-compose.worker.yml config\n" +
+          "- Manual check: docker exec collabsphere-worker ls -la " +
+          DOCX_MOUNT_CONTAINER_PATH +
+          (execDetail ? `\n- exec test: ${execDetail.slice(0, 300)}` : ""),
+      );
+    }
+
+    logInfo("DOCX import Docker bind mount verified");
+  } finally {
+    try {
+      unlinkSync(hostMarkerPath);
+    } catch {
+      /* best-effort cleanup */
+    }
+  }
+};
+
+const DEFAULT_WIN_LIBREOFFICE_PATH =
+  "C:\\Program Files\\LibreOffice\\program\\soffice.exe";
+
+const WIN_LIBREOFFICE_X86_PATH =
+  "C:\\Program Files (x86)\\LibreOffice\\program\\soffice.exe";
+
+const findVersionedWindowsLibreOfficePaths = (): string[] => {
+  if (process.platform !== "win32") {
+    return [];
+  }
+
+  const bases = ["C:\\Program Files", "C:\\Program Files (x86)"];
+  const results: string[] = [];
+
+  for (const base of bases) {
+    try {
+      const dirs = readdirSync(base, { withFileTypes: true });
+      for (const dir of dirs) {
+        if (!dir.isDirectory() || !dir.name.startsWith("LibreOffice")) {
+          continue;
+        }
+        const candidate = join(base, dir.name, "program", "soffice.exe");
+        if (existsSync(candidate)) {
+          results.push(candidate);
+        }
+      }
+    } catch {
+      /* try next base */
+    }
+  }
+
+  return results;
+};
+
+const listLibreOfficeCandidates = (appEnv: EnvMap): string[] => {
+  const configured = appEnv.LIBREOFFICE_PATH?.trim();
+  const defaults =
+    process.platform === "win32"
+      ? [
+          DEFAULT_WIN_LIBREOFFICE_PATH,
+          WIN_LIBREOFFICE_X86_PATH,
+          ...findVersionedWindowsLibreOfficePaths(),
+          "soffice.exe",
+        ]
+      : [
+          "/usr/bin/libreoffice",
+          "/usr/bin/soffice",
+          "/Applications/LibreOffice.app/Contents/MacOS/soffice",
+          "libreoffice",
+          "soffice",
+        ];
+
+  const candidates = [configured, ...defaults].filter(
+    (candidate): candidate is string => Boolean(candidate?.trim()),
+  );
+
+  return [...new Set(candidates)];
+};
+
+const libreOfficeVersionOutputLooksValid = (stdout: string, stderr: string): boolean =>
+  /LibreOffice|OpenOffice|Version\s+\d/i.test(`${stdout}\n${stderr}`);
+
+const probeLibreOfficeBinary = (bin: string) => {
+  const result = spawnSync(bin, ["--version"], {
+    encoding: "utf8",
+    windowsHide: true,
+    timeout: 5_000,
+  });
+
+  const output = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
+  const spawnCode =
+    result.error && typeof result.error === "object" && "code" in result.error
+      ? String((result.error as { code?: string }).code)
+      : "";
+
+  if (result.status === 0 && !result.error) {
+    return { ok: true as const, bin, detail: output };
+  }
+
+  if (!result.error && libreOfficeVersionOutputLooksValid(result.stdout ?? "", result.stderr ?? "")) {
+    return { ok: true as const, bin, detail: output };
+  }
+
+  if (!result.error && spawnCode !== "ENOENT" && existsSync(bin)) {
+    return { ok: true as const, bin, detail: output || "(no version output; binary exists)" };
+  }
+
+  return {
+    ok: false as const,
+    bin,
+    detail:
+      output ||
+      (result.error instanceof Error ? result.error.message : "") ||
+      `exit ${result.status ?? "unknown"} signal ${result.signal ?? "none"}`,
+  };
+};
+
+const assertLibreOfficeForHostWorker = (appEnv: EnvMap): string => {
+  const candidates = listLibreOfficeCandidates(appEnv);
+  const failures: string[] = [];
+  let existingWithoutVersionProbe: string | null = null;
+
+  for (const candidate of candidates) {
+    if (!existsSync(candidate)) {
+      continue;
+    }
+
+    const probe = probeLibreOfficeBinary(candidate);
+    if (probe.ok) {
+      if (probe.detail && !libreOfficeVersionOutputLooksValid(probe.detail, "")) {
+        logWarn(
+          `LibreOffice at ${candidate} did not report a clear version string; continuing because the binary exists.`,
+        );
+      }
+      return candidate;
+    }
+
+    failures.push(`${candidate}: ${probe.detail}`);
+    existingWithoutVersionProbe ??= candidate;
+  }
+
+  if (existingWithoutVersionProbe) {
+    logWarn(
+      `LibreOffice --version probe failed for all candidates; continuing with ${existingWithoutVersionProbe} because the file exists (worker will retry at runtime).`,
+    );
+    return existingWithoutVersionProbe;
+  }
+
+  throw new Error(
+    "LibreOffice is required for DOCX import with host worker (DEV_WORKER_DOCKER=0).\n" +
+      `- Tried: ${candidates.join(", ") || "(none)"}\n` +
+      (process.platform === "win32"
+        ? "- Install: winget install TheDocumentFoundation.LibreOffice\n" +
+          `- Then set LIBREOFFICE_PATH=${DEFAULT_WIN_LIBREOFFICE_PATH} in .env\n`
+        : "- Install LibreOffice and set LIBREOFFICE_PATH in .env\n") +
+      (failures.length > 0 ? `- Details:\n  ${failures.join("\n  ").slice(0, 800)}` : ""),
+  );
+};
+
+const sleep = (ms: number) =>
+  new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
+
+const isDockerWorkerContainerRunning = () => {
+  const byName = spawnSync("docker", ["ps", "-q", "--filter", "name=collabsphere-worker"], {
+    encoding: "utf8",
+    windowsHide: true,
+  });
+  return Boolean(byName.stdout?.trim());
+};
+
+const ensureDockerWorkerStopped = async (composeEnv: NodeJS.ProcessEnv) => {
+  if (existsSync(workerComposeFilePath) && isDockerWorkerContainerRunning()) {
+    try {
+      await runCommand(
+        "docker",
+        ["compose", "-f", workerComposeFilePath, "stop", "worker"],
+        {
+          cwd: rootDir,
+          env: composeEnv,
+        },
+      );
+    } catch (error) {
+      logWarn(
+        `could not stop Docker worker service: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  const removed = spawnSync("docker", ["rm", "-f", "collabsphere-worker"], {
+    encoding: "utf8",
+    windowsHide: true,
+  });
+
+  if (removed.status === 0 && removed.stdout?.trim()) {
+    logInfo("removed Docker worker container collabsphere-worker (host worker mode)");
+  } else if (!isDockerWorkerContainerRunning()) {
+    logInfo("no Docker worker container running (host worker mode)");
+  }
+
+  if (isDockerWorkerContainerRunning()) {
+    throw new Error(
+      "Docker worker container collabsphere-worker is still running. " +
+        "Stop it with: docker rm -f collabsphere-worker",
+    );
+  }
+};
+
+const assertHostWorkerProcessAlive = async (child: ReturnType<typeof spawn> | undefined) => {
+  if (!child) {
+    throw new Error("Host worker process was not started by pnpm dev.");
+  }
+
+  const deadline = Date.now() + 20_000;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null) {
+      throw new Error(
+        `Host worker exited during startup (code ${child.exitCode}). ` +
+          "Check the worker output above for MinIO, LibreOffice, Redis, or database errors.",
+      );
+    }
+    await sleep(500);
+  }
+
+  if (child.exitCode !== null) {
+    throw new Error(
+      `Host worker exited during startup (code ${child.exitCode}). ` +
+        "Check the worker output above for MinIO, LibreOffice, Redis, or database errors.",
+    );
+  }
+};
+
+const ensureAppSurfaces = (surfaces = appSurfaces) => {
+  for (const surface of surfaces) {
     if (!existsSync(surface.packageJsonPath)) {
       throw new Error(`Missing package manifest for ${surface.label}: ${surface.packageJsonPath}`);
     }
@@ -548,7 +973,14 @@ const waitForHttpOk = async (url, timeoutMs = 90_000) => {
   throw new Error(`Timed out waiting for ${url}`);
 };
 
-const envForSurface = (surface, appEnv) => {
+const envForSurface = (surface, appEnv, workerEnvValues) => {
+  if (surface.label === "worker") {
+    return {
+      ...appEnv,
+      ...workerEnvValues,
+    };
+  }
+
   if (surface.label !== "collab") {
     return appEnv;
   }
@@ -558,6 +990,31 @@ const envForSurface = (surface, appEnv) => {
     NODE_ENV: rest.NODE_ENV ?? "development",
     COLLAB_PORT: appEnv.COLLAB_PORT ?? "3002",
   };
+};
+
+const probeDockerEngine = () => {
+  const version = spawnSync("docker", ["version", "--format", "{{json .}}"], {
+    encoding: "utf8",
+    windowsHide: true,
+  });
+  const versionText = `${version.stdout ?? ""}${version.stderr ?? ""}`.trim();
+  const server500 = /500 Internal Server Error/i.test(versionText);
+  const enginePipe = /dockerDesktopLinuxEngine/i.test(versionText);
+
+  return { server500, enginePipe, versionText };
+};
+
+const assertDockerEngineHealthy = () => {
+  const probe = probeDockerEngine();
+  if (!probe.server500) {
+    return;
+  }
+
+  throw new Error(
+    "Docker Desktop Linux engine is not responding (HTTP 500 on dockerDesktopLinuxEngine). " +
+      "Restart Docker Desktop and wait until it shows Running, then run `pnpm dev` again. " +
+      "If Postgres and Redis are already running locally, use `pnpm dev --skip-compose` instead.",
+  );
 };
 
 const runCommand = (command, args, options) =>
@@ -593,16 +1050,34 @@ const runCommand = (command, args, options) =>
     });
   });
 
+const isDockerWorkerRunning = (composeEnv: NodeJS.ProcessEnv) => {
+  const result = spawnSync(
+    "docker",
+    ["compose", "-f", workerComposeFilePath, "ps", "-q", "worker"],
+    {
+      cwd: rootDir,
+      env: composeEnv,
+      encoding: "utf8",
+      windowsHide: true,
+    },
+  );
+  return Boolean(result.stdout?.trim());
+};
+
 const main = async () => {
-  const { skipCompose } = parseArgs(process.argv.slice(2));
+  const { skipCompose, buildWorker } = parseArgs(process.argv.slice(2));
 
   if (!existsSync(composeFilePath) && !skipCompose) {
     throw new Error(`Missing docker-compose.yml at ${composeFilePath}`);
   }
 
   logInfo("validating local environment against .env.example");
-  ensureAppSurfaces();
-  const { composeEnv, appEnv, apiPort } = loadValidatedEnv();
+  const { composeEnv, appEnv, apiPort, workerEnvValues, workerDocker, docxImportPaths } =
+    loadValidatedEnv();
+  const surfacesToStart = workerDocker
+    ? appSurfaces.filter((surface) => surface.label !== "worker")
+    : appSurfaces;
+  ensureAppSurfaces(surfacesToStart);
   await assertListenPortAvailable(apiPort);
   const pnpmRunner = resolvePnpmRunner();
   const children = new Map();
@@ -628,6 +1103,16 @@ const main = async () => {
     await Promise.allSettled(
       Array.from(children.entries(), ([label, child]) => terminateChild(child, label))
     );
+    if (workerDocker && existsSync(workerComposeFilePath)) {
+      await runCommand("docker", ["compose", "-f", workerComposeFilePath, "stop"], {
+        cwd: rootDir,
+        env: composeEnv,
+      }).catch((error) => {
+        logWarn(
+          `failed to stop Docker worker: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
+    }
     finish(exitCode);
   };
 
@@ -643,11 +1128,94 @@ const main = async () => {
     logWarn("skipping docker compose startup because --skip-compose was provided");
   } else {
     logInfo("ensuring docker compose services are up and healthy");
-    await runCommand("docker", ["compose", "-f", composeFilePath, "up", "-d", "--wait"], {
-      cwd: rootDir,
-      env: composeEnv
-    });
+    assertDockerEngineHealthy();
+    assertComposePortsBeforeUp(appEnv);
+
+    try {
+      await runCommand("docker", ["compose", "-f", composeFilePath, "up", "-d", "--wait"], {
+        cwd: rootDir,
+        env: composeEnv,
+      });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      const portConflict = /port is already allocated/i.test(detail);
+      const portHint = portConflict
+        ? "\n[dev] A port is in use by another Docker container (often collabsphere-repo-*). " +
+          "Run `docker ps` and stop containers on 6379/5432/9000, or use `pnpm dev --skip-compose`."
+        : "";
+
+      throw new Error(
+        `${detail}${portHint}\n` +
+          "[dev] Docker Compose could not start dependencies. " +
+          "Fix Docker Desktop (restart until `docker version` shows Server without errors), " +
+          "or run `pnpm dev --skip-compose` if postgres/redis/mailhog are already available.",
+      );
+    }
+
     logInfo("docker compose services are ready");
+  }
+
+  assertCollabsphereMinioHostPort(appEnv);
+
+  if (workerDocker) {
+    logWarn(
+      "DEV_WORKER_DOCKER=1 — using Docker worker. Set DEV_WORKER_DOCKER=0 for host worker + local LibreOffice (recommended on Windows).",
+    );
+
+    if (!existsSync(workerComposeFilePath)) {
+      throw new Error(`Missing docker-compose.worker.yml at ${workerComposeFilePath}`);
+    }
+
+    logInfo(
+      `Docker worker DOCX temp: host ${docxImportPaths.hostPath} → container /tmp/collabsphere-docx-imports`,
+    );
+    logWarn(
+      "With DEV_WORKER_DOCKER=1, do not run a host worker (pnpm --filter @collabsphere/worker dev) — " +
+        "only the Docker worker should consume the docx-imports queue.",
+    );
+
+    const workerAlreadyUp = isDockerWorkerRunning(composeEnv);
+    if (workerAlreadyUp && !buildWorker) {
+      logInfo("Docker worker already running; skipping compose up (use --build-worker to rebuild)");
+    } else {
+      const workerArgs = [
+        "compose",
+        "-f",
+        workerComposeFilePath,
+        "up",
+        "-d",
+        "--remove-orphans",
+      ];
+      if (buildWorker) {
+        workerArgs.push("--build");
+        logInfo("rebuilding Docker worker image (--build-worker)");
+      }
+      await runCommand("docker", workerArgs, {
+        cwd: rootDir,
+        env: composeEnv,
+      });
+    }
+
+    try {
+      await verifyDocxImportDockerMount(composeEnv, docxImportPaths.tmpDir);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new Error(`[dev] ${detail}`);
+    }
+
+    logInfo(
+      "Docker worker is up. Logs: docker compose -f docker-compose.worker.yml logs -f worker",
+    );
+  } else {
+    await ensureDockerWorkerStopped(composeEnv);
+    const libreOfficePath = assertLibreOfficeForHostWorker(appEnv);
+    logInfo(
+      `Host worker mode; DOCX temp: ${docxImportPaths.tmpDir}; LibreOffice: ${libreOfficePath}`,
+    );
+    logInfo(
+      "pnpm dev starts the host worker in this terminal (no second terminal needed). " +
+        "Watch for: Worker server is running (BullMQ processors active)",
+    );
   }
 
   const collabPort = Number.parseInt(appEnv.COLLAB_PORT ?? "3002", 10) || 3002;
@@ -666,7 +1234,7 @@ const main = async () => {
     return 8080;
   })();
 
-  for (const surface of appSurfaces) {
+  for (const surface of surfacesToStart) {
     if (surface.label === "api") {
       await assertListenPortAvailable(apiPort, "PORT");
       await assertApiPortNotAlreadyServing(apiPort);
@@ -678,20 +1246,26 @@ const main = async () => {
       await assertListenPortAvailable(collabPort, "COLLAB_PORT");
     }
 
-    logInfo(`starting ${surface.label} via pnpm --filter ${surface.filter} run dev`);
+    const workerScript = surface.label === "worker" ? "dev:once" : "dev";
+    logInfo(`starting ${surface.label} via pnpm --filter ${surface.filter} run ${workerScript}`);
 
     const child = spawn(
       pnpmRunner.command,
-      [...pnpmRunner.baseArgs, "--filter", surface.filter, "run", "dev"],
+      [...pnpmRunner.baseArgs, "--filter", surface.filter, "run", workerScript],
       {
         cwd: rootDir,
-        env: envForSurface(surface, appEnv),
+        env: envForSurface(surface, appEnv, workerEnvValues),
         stdio: "inherit",
         windowsHide: false
       }
     );
 
     children.set(surface.label, child);
+
+    if (surface.label === "worker" && !workerDocker) {
+      await assertHostWorkerProcessAlive(child);
+      logInfo("host worker process is running");
+    }
 
     if (surface.label === "api") {
       const healthUrl = `http://127.0.0.1:${apiPort}/api/v1/health`;
@@ -747,7 +1321,13 @@ const main = async () => {
     });
   }
 
-  logInfo("all local app processes started; press Ctrl+C to stop them");
+  if (workerDocker) {
+    logInfo(
+      "local app processes started (worker runs in Docker); press Ctrl+C to stop host apps and the Docker worker",
+    );
+  } else {
+    logInfo("all local app processes started; press Ctrl+C to stop them");
+  }
 
   await new Promise(() => {});
 };

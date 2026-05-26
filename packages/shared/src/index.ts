@@ -14,5 +14,6 @@ export * from "./enums/index.js";
 export * from "./types/index.js";
 export * from "./jobs/job-types.js";
 export * from "./collab/document-write-policy.js";
+export * from "./collab/document-import-lock.js";
 export * from "./collab/workspace-content-policy.js";
 export * from "./env.js";

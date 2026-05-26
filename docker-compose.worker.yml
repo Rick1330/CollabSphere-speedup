@@ -1,0 +1,29 @@
+# Hybrid local dev: host API + Docker worker (LibreOffice). Requires `pnpm dev` compose (Redis, Postgres, MinIO).
+# Set DEV_WORKER_DOCKER=1 in .env — `pnpm dev` starts this stack automatically.
+services:
+  worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    container_name: collabsphere-worker
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: development
+      REDIS_URL: redis://host.docker.internal:${REDIS_PORT:-6379}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-collab}:${POSTGRES_PASSWORD:-collab}@host.docker.internal:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-collabsphere}
+      DOCX_IMPORT_TMP_DIR: /tmp/collabsphere-docx-imports
+      API_BASE_URL: http://host.docker.internal:${PORT:-3001}
+      S3_ENDPOINT: http://host.docker.internal:${MINIO_API_PORT:-9000}
+      STORAGE_LOCAL_PATH: /tmp/collabsphere-uploads
+    volumes:
+      - type: bind
+        source: ${DOCX_IMPORT_HOST_PATH:-./.tmp/collabsphere-docx-imports}
+        target: /tmp/collabsphere-docx-imports
+      - docx_uploads:/tmp/collabsphere-uploads
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+volumes:
+  docx_uploads:

@@ -35,11 +35,18 @@ export interface CommentReply {
   createdAt: string;
 }
 
+export interface CommentAnchor {
+  snippet: string;
+  status: "ok" | "changed";
+  from?: number;
+  to?: number;
+}
+
 export interface CommentThread {
   id: string;
   documentId: string;
   // null = general document discussion (not anchored to a text range)
-  anchor: { snippet: string; status: "ok" | "changed" } | null;
+  anchor: CommentAnchor | null;
   authorId: string | null;
   author: CommentAuthor;
   body: CommentNode[];

@@ -3,7 +3,10 @@ import { Server } from "@hocuspocus/server";
 import { prisma } from "./lib/prisma.js";
 import { disconnectRedis, getRedis } from "./lib/redis.js";
 import { authExtension } from "./extensions/auth.extension.js";
+import { autoVersionExtension } from "./extensions/auto-version.extension.js";
 import { createPersistenceExtension } from "./extensions/persistence.extension.js";
+import { createRedisYdocCacheExtension } from "./extensions/redis-ydoc-cache.extension.js";
+import { createDocumentRestoreExtension } from "./extensions/document-restore.extension.js";
 
 const host = process.env.HOST ?? "127.0.0.1";
 /** Never use root PORT (API 3001) for collab. */
@@ -73,13 +76,19 @@ const bootstrap = async () => {
     port,
     quiet: isProduction,
     stopOnSignals: false,
-    extensions: [authExtension, createPersistenceExtension({ redis: redisClient })],
-    onConnect: ({ documentName }) => {
+    extensions: [
+      authExtension,
+      createPersistenceExtension({ redis: redisClient }),
+      createRedisYdocCacheExtension({ redis: redisClient }),
+      createDocumentRestoreExtension(),
+      autoVersionExtension,
+    ],
+    onConnect: async ({ documentName }) => {
       if (!isProduction) {
         console.info("[collab] client connecting", { documentName });
       }
     },
-    onDisconnect: ({ documentName }) => {
+    onDisconnect: async ({ documentName }) => {
       if (!isProduction) {
         console.info("[collab] client disconnected", { documentName });
       }

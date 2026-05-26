@@ -1,5 +1,4 @@
-import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, expect, it } from "vitest";
 import { filterTree } from "./document-tree-filter.js";
 import type { TreeNode } from "@/features/documents/components/document-tree";
 
@@ -29,12 +28,12 @@ const sample: TreeNode[] = [
 describe("filterTree", () => {
   it("keeps empty folders when no filters are active", () => {
     const out = filterTree(sample, "", "all");
-    assert.equal(out.length, 2);
-    assert.equal(out[0].type === "folder" && out[0].name, "Empty folder");
+    expect(out.length).toBe(2);
+    expect(out[0].type === "folder" && out[0].name).toBe("Empty folder");
   });
 
   it("hides empty folders when status filter excludes all children", () => {
     const out = filterTree(sample, "", "approved");
-    assert.equal(out.length, 0);
+    expect(out.length).toBe(0);
   });
 });

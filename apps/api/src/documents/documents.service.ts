@@ -9,6 +9,40 @@ import {
   canCreateWorkspaceContent,
   canOrganizeWorkspaceContent,
 } from "../../../../packages/shared/src/collab/workspace-content-policy.js";
+import {
+  safeResolveVersionPlaintext,
+  toUint8Array,
+  yjsStateToBase64,
+} from "./yjs-plaintext.js";
+import { publishDocumentRestored } from "../common/redis/publish-document-restored.js";
+
+const LIST_VERSION_YJS_BACKFILL_MAX_BYTES = 512 * 1024;
+
+// #region agent log
+const agentDebugLog = (
+  hypothesisId: string,
+  location: string,
+  message: string,
+  data: Record<string, unknown>,
+) => {
+  fetch("http://127.0.0.1:7352/ingest/38fbd051-1833-4296-ab67-281907013a27", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Debug-Session-Id": "833b60",
+    },
+    body: JSON.stringify({
+      sessionId: "833b60",
+      hypothesisId,
+      location,
+      message,
+      data,
+      timestamp: Date.now(),
+      runId: process.env.DEBUG_RUN_ID ?? "restore-debug",
+    }),
+  }).catch(() => {});
+};
+// #endregion
 
 const collectTextFromNode = (value: unknown): string[] => {
   if (typeof value === "string") {
@@ -1101,13 +1135,278 @@ export class DocumentsService {
       orderBy: { versionNumber: "desc" },
       select: {
         id: true,
+        documentId: true,
         versionNumber: true,
         reason: true,
         createdAt: true,
         createdById: true,
+        plaintext: true,
+        yjsState: true,
+        versionLabel: true,
+        createdBy: {
+          select: {
+            id: true,
+            fullName: true,
+          },
+        },
       },
     });
-    return { items: versions, total: versions.length };
+    return {
+      items: versions.map((version) => {
+        let storedPlaintext = version.plaintext?.trim() ?? "";
+        if (!storedPlaintext) {
+          const bytes = toUint8Array(version.yjsState);
+          if (bytes.byteLength > 0 && bytes.byteLength <= LIST_VERSION_YJS_BACKFILL_MAX_BYTES) {
+            storedPlaintext = safeResolveVersionPlaintext({
+              plaintext: version.plaintext,
+              yjsState: version.yjsState,
+            });
+          }
+        }
+        return {
+          id: version.id,
+          documentId: version.documentId,
+          versionNumber: version.versionNumber,
+          reason: version.reason,
+          createdAt: version.createdAt,
+          createdById: version.createdById,
+          createdBy: version.createdBy,
+          versionLabel: version.versionLabel,
+          contentExcerpt: storedPlaintext.slice(0, 120),
+          charCount: storedPlaintext.length,
+        };
+      }),
+      total: versions.length,
+    };
+  }
+
+  async createManualDocumentVersion({
+    actorUserId,
+    workspaceId,
+    documentId,
+    versionLabel,
+  }: {
+    actorUserId: string;
+    workspaceId: string;
+    documentId: string;
+    versionLabel?: string;
+  }) {
+    const membership = await this.requireWorkspaceMembership({ actorUserId, workspaceId });
+    const doc = await this.prisma.document.findFirst({
+      where: { id: documentId, workspaceId, deletedAt: null },
+      select: {
+        id: true,
+        contentYjs: true,
+        contentPlaintext: true,
+        status: true,
+        isLocked: true,
+      },
+    });
+    if (!doc) {
+      throw new AppError({ code: "DOCUMENT_NOT_FOUND" });
+    }
+    if (
+      isDocumentReadOnly({
+        status: doc.status,
+        isLocked: doc.isLocked,
+        role: membership.role,
+      })
+    ) {
+      throw new AppError({ code: "DOCUMENT_READONLY_STATUS" });
+    }
+
+    const yjsBytes = toUint8Array(doc.contentYjs);
+    const plaintext = doc.contentPlaintext?.trim() ?? "";
+
+    const created = await this.prisma.$transaction(async (tx) => {
+      const latest = await tx.documentVersion.findFirst({
+        where: { documentId },
+        orderBy: { versionNumber: "desc" },
+        select: { versionNumber: true },
+      });
+      const versionNumber = (latest?.versionNumber ?? 0) + 1;
+      return tx.documentVersion.create({
+        data: {
+          workspaceId,
+          documentId,
+          versionNumber,
+          reason: "manual",
+          yjsState: toPrismaBytes(yjsBytes),
+          plaintext: plaintext || null,
+          versionLabel: versionLabel?.trim() || null,
+          createdById: actorUserId,
+        },
+        select: {
+          id: true,
+          documentId: true,
+          versionNumber: true,
+          reason: true,
+          createdAt: true,
+          createdById: true,
+          plaintext: true,
+          versionLabel: true,
+          createdBy: {
+            select: {
+              id: true,
+              fullName: true,
+            },
+          },
+        },
+      });
+    });
+
+    const resolvedPlaintext = created.plaintext?.trim() ?? "";
+    return {
+      id: created.id,
+      documentId: created.documentId,
+      versionNumber: created.versionNumber,
+      reason: created.reason,
+      createdAt: created.createdAt,
+      createdById: created.createdById,
+      createdBy: created.createdBy,
+      versionLabel: created.versionLabel,
+      contentExcerpt: resolvedPlaintext.slice(0, 120),
+      charCount: resolvedPlaintext.length,
+    };
+  }
+
+  async getDocumentVersionDetail({
+    actorUserId,
+    workspaceId,
+    documentId,
+    versionId,
+  }: {
+    actorUserId: string;
+    workspaceId: string;
+    documentId: string;
+    versionId: string;
+  }) {
+    await this.requireWorkspaceMembership({ actorUserId, workspaceId });
+    const version = await this.prisma.documentVersion.findFirst({
+      where: { id: versionId, documentId, workspaceId },
+      select: {
+        id: true,
+        documentId: true,
+        versionNumber: true,
+        reason: true,
+        createdAt: true,
+        createdById: true,
+        plaintext: true,
+        yjsState: true,
+        versionLabel: true,
+        createdBy: {
+          select: {
+            id: true,
+            fullName: true,
+          },
+        },
+      },
+    });
+    if (!version) {
+      throw new AppError({ code: "NOT_FOUND", message: "Version not found" });
+    }
+    const resolvedPlaintext = safeResolveVersionPlaintext({
+      plaintext: version.plaintext,
+      yjsState: version.yjsState,
+    });
+    return {
+      id: version.id,
+      documentId: version.documentId,
+      versionNumber: version.versionNumber,
+      reason: version.reason,
+      createdAt: version.createdAt,
+      createdById: version.createdById,
+      createdBy: version.createdBy,
+      versionLabel: version.versionLabel,
+      plaintext: resolvedPlaintext,
+      yjsStateBase64: yjsStateToBase64(version.yjsState),
+      charCount: resolvedPlaintext.length,
+    };
+  }
+
+  async updateDocumentVersionLabel({
+    actorUserId,
+    workspaceId,
+    documentId,
+    versionId,
+    versionLabel,
+  }: {
+    actorUserId: string;
+    workspaceId: string;
+    documentId: string;
+    versionId: string;
+    versionLabel: string;
+  }) {
+    await this.requireWorkspaceMembership({ actorUserId, workspaceId });
+    const doc = await this.prisma.document.findFirst({
+      where: { id: documentId, workspaceId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!doc) {
+      throw new AppError({ code: "DOCUMENT_NOT_FOUND" });
+    }
+
+    const trimmed = versionLabel.trim();
+    if (!trimmed) {
+      throw new ValidationAppError({
+        message: "Version label cannot be empty",
+        issues: [
+          {
+            field: "versionLabel",
+            rule: "required",
+            message: "Version label is required",
+          },
+        ],
+      });
+    }
+
+    const existing = await this.prisma.documentVersion.findFirst({
+      where: { id: versionId, documentId, workspaceId },
+      select: { id: true },
+    });
+    if (!existing) {
+      throw new AppError({ code: "NOT_FOUND", message: "Version not found" });
+    }
+
+    const updated = await this.prisma.documentVersion.update({
+      where: { id: versionId },
+      data: { versionLabel: trimmed },
+      select: {
+        id: true,
+        documentId: true,
+        versionNumber: true,
+        reason: true,
+        createdAt: true,
+        createdById: true,
+        plaintext: true,
+        yjsState: true,
+        versionLabel: true,
+        createdBy: {
+          select: {
+            id: true,
+            fullName: true,
+          },
+        },
+      },
+    });
+
+    const resolvedPlaintext = safeResolveVersionPlaintext({
+      plaintext: updated.plaintext,
+      yjsState: updated.yjsState,
+    });
+
+    return {
+      id: updated.id,
+      documentId: updated.documentId,
+      versionNumber: updated.versionNumber,
+      reason: updated.reason,
+      createdAt: updated.createdAt,
+      createdById: updated.createdById,
+      createdBy: updated.createdBy,
+      versionLabel: updated.versionLabel,
+      contentExcerpt: resolvedPlaintext.slice(0, 120),
+      charCount: resolvedPlaintext.length,
+    };
   }
 
   async restoreDocumentVersion({
@@ -1121,77 +1420,132 @@ export class DocumentsService {
     documentId: string;
     versionId: string;
   }) {
+    // #region agent log
+    agentDebugLog("A", "documents.service.ts:restoreDocumentVersion", "restore started", {
+      documentId,
+      versionId,
+      actorUserId,
+    });
+    // #endregion
+
     const membership = await this.requireWorkspaceMembership({ actorUserId, workspaceId });
     if (membership.workspace.status === "archived") {
       throw new AppError({ code: "WORKSPACE_ARCHIVED_READONLY" });
     }
-    assertManagerOrAbove(membership.role);
 
-    const result = await this.prisma.$transaction(async (tx) => {
-      const current = await tx.document.findFirst({
-        where: { id: documentId, workspaceId, deletedAt: null },
-        select: {
-          id: true,
-          status: true,
-          isLocked: true,
-          contentYjs: true,
-          contentPlaintext: true,
-        },
+    let result: { id: string; updatedAt: Date };
+    try {
+      result = await this.prisma.$transaction(async (tx) => {
+        const current = await tx.document.findFirst({
+          where: { id: documentId, workspaceId, deletedAt: null },
+          select: {
+            id: true,
+            status: true,
+            isLocked: true,
+            contentYjs: true,
+            contentPlaintext: true,
+          },
+        });
+        if (!current) {
+          throw new AppError({ code: "DOCUMENT_NOT_FOUND" });
+        }
+        if (
+          isDocumentReadOnly({
+            status: current.status,
+            isLocked: current.isLocked,
+            role: membership.role,
+          })
+        ) {
+          throw new AppError({ code: "DOCUMENT_READONLY_STATUS" });
+        }
+        const target = await tx.documentVersion.findFirst({
+          where: { id: versionId, documentId, workspaceId },
+        });
+        if (!target) {
+          throw new AppError({ code: "NOT_FOUND", message: "Version not found" });
+        }
+        const latest = await tx.documentVersion.findFirst({
+          where: { documentId },
+          orderBy: { versionNumber: "desc" },
+          select: { versionNumber: true },
+        });
+        const nextNum = (latest?.versionNumber ?? 0) + 1;
+        const currentYjs = toPrismaBytes(toUint8Array(current.contentYjs));
+        const targetYjs = toPrismaBytes(toUint8Array(target.yjsState));
+
+        await tx.documentVersion.create({
+          data: {
+            workspaceId,
+            documentId,
+            versionNumber: nextNum,
+            reason: "before_restore",
+            yjsState: currentYjs,
+            plaintext: current.contentPlaintext ?? "",
+            createdById: actorUserId,
+          },
+        });
+        return tx.document.update({
+          where: { id: documentId },
+          data: {
+            contentYjs: targetYjs,
+            contentPlaintext: target.plaintext ?? "",
+            updatedById: actorUserId,
+          },
+          select: {
+            id: true,
+            updatedAt: true,
+          },
+        });
       });
-      if (!current) {
-        throw new AppError({ code: "DOCUMENT_NOT_FOUND" });
-      }
-      if (
-        isDocumentReadOnly({
-          status: current.status,
-          isLocked: current.isLocked,
-          role: membership.role,
-        })
-      ) {
-        throw new AppError({ code: "DOCUMENT_READONLY_STATUS" });
-      }
-      const target = await tx.documentVersion.findFirst({
-        where: { id: versionId, documentId, workspaceId },
+    } catch (error) {
+      const prismaCode =
+        error && typeof error === "object" && "code" in error
+          ? String((error as { code: unknown }).code)
+          : undefined;
+      const message = error instanceof Error ? error.message : String(error);
+
+      // #region agent log
+      agentDebugLog("B", "documents.service.ts:restoreDocumentVersion", "restore transaction failed", {
+        prismaCode,
+        message: message.slice(0, 500),
       });
-      if (!target) {
-        throw new AppError({ code: "NOT_FOUND", message: "Version not found" });
-      }
-      const latest = await tx.documentVersion.findFirst({
-        where: { documentId },
-        orderBy: { versionNumber: "desc" },
-        select: { versionNumber: true },
-      });
-      const nextNum = (latest?.versionNumber ?? 0) + 1;
-      await tx.documentVersion.create({
-        data: {
-          workspaceId,
-          documentId,
-          versionNumber: nextNum,
-          reason: "before_restore",
-          yjsState: current.contentYjs,
-          plaintext: current.contentPlaintext,
-          createdById: actorUserId,
-        },
-      });
-      const restored = await tx.document.update({
-        where: { id: documentId },
-        data: {
-          contentYjs: target.yjsState,
-          contentPlaintext: target.plaintext ?? "",
-          updatedById: actorUserId,
-        },
-        select: {
-          id: true,
-          updatedAt: true,
-        },
-      });
-      return restored;
+      // #endregion
+
+      throw error;
+    }
+
+    // #region agent log
+    agentDebugLog("C", "documents.service.ts:restoreDocumentVersion", "restore transaction ok", {
+      documentId,
+      updatedAt: result.updatedAt.toISOString(),
     });
-    this.eventEmitter.emit("document.updated", {
-      workspaceId,
-      actorId: actorUserId,
+    // #endregion
+
+    void publishDocumentRestored(documentId).catch((error) => {
+      console.warn("[documents] restore collab publish failed", error);
+      // #region agent log
+      agentDebugLog("D", "documents.service.ts:restoreDocumentVersion", "redis publish failed", {
+        message: error instanceof Error ? error.message : String(error),
+      });
+      // #endregion
+    });
+
+    try {
+      this.eventEmitter.emit("document.updated", {
+        workspaceId,
+        actorId: actorUserId,
+        documentId,
+      });
+    } catch (error) {
+      console.warn("[documents] restore event emit failed", error);
+    }
+
+    // #region agent log
+    agentDebugLog("E", "documents.service.ts:restoreDocumentVersion", "restore completed", {
       documentId,
     });
+    // #endregion
+
     return result;
   }
 
@@ -1256,5 +1610,46 @@ export class DocumentsService {
     }
 
     return membership;
+  }
+
+  async debugYDocSize({
+    actorUserId,
+    workspaceId,
+    documentId,
+  }: {
+    actorUserId: string;
+    workspaceId: string;
+    documentId: string;
+  }) {
+    if ((process.env.NODE_ENV ?? "development") === "production") {
+      throw new AppError({ code: "NOT_FOUND", message: "Not found" });
+    }
+
+    await this.requireWorkspaceMembership({ actorUserId, workspaceId });
+
+    const doc = await this.prisma.document.findFirst({
+      where: { id: documentId, workspaceId, deletedAt: null },
+      select: { id: true, contentYjs: true },
+    });
+
+    if (!doc) {
+      throw new AppError({ code: "DOCUMENT_NOT_FOUND" });
+    }
+
+    const buffer = doc.contentYjs ? Buffer.from(doc.contentYjs) : Buffer.alloc(0);
+    const sizeBytes = buffer.length;
+    const scanned = buffer.toString("utf8");
+    const dataImageOccurrences = (scanned.match(/data:image/gi) ?? []).length;
+
+    return {
+      documentId: doc.id,
+      totalSize: sizeBytes,
+      totalSizeMB: (sizeBytes / 1024 / 1024).toFixed(2),
+      dataImageOccurrences,
+      recommendation:
+        dataImageOccurrences > 0 || sizeBytes > 100_000
+          ? "Re-import via server DOCX path or run scripts/shrink-content-yjs-images.mts; ensure images use MinIO/HTTP URLs."
+          : "Y.Doc size is acceptable",
+    };
   }
 }

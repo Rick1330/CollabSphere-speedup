@@ -136,6 +136,7 @@ model User {
   authProviderId    String?               @map("auth_provider_id") @db.VarChar(255)
   passwordHash      String?               @map("password_hash") @db.VarChar(255)
   themePreference   String                @default("system") @map("theme_preference") @db.VarChar(20)
+  editorPreferences Json?                 @map("editor_preferences") @db.JsonB
   isVerified        Boolean               @default(false) @map("is_verified")
   isActive          Boolean               @default(true) @map("is_active")
   lastLoginAt       DateTime?             @map("last_login_at") @db.Timestamptz(6)
@@ -433,6 +434,7 @@ model DocumentVersion {
   reason        String   @db.VarChar(30)
   yjsState      Bytes    @map("yjs_state")
   plaintext     String?  @db.Text
+  versionLabel  String?  @map("version_label") @db.VarChar(200)
   createdById   String?  @map("created_by") @db.Uuid
   createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 

@@ -1,0 +1,306 @@
+/* Canvas chrome — PaginationPlus native stacked A4 pages (mockup-aligned). */
+
+.cs-paginated-canvas-outer {
+  background: var(--surface-2, #e8eaed);
+}
+
+.cs-paginated-scale-wrap {
+  transform-origin: top center;
+}
+
+.cs-paginated-writing-column {
+  position: relative;
+  margin-left: auto;
+  margin-right: auto;
+  background: transparent;
+}
+
+.cs-paginated-canvas-outer .tiptap,
+.cs-paginated-canvas-outer .ProseMirror {
+  background: transparent;
+  outline: none;
+}
+
+.cs-paginated-canvas-outer .ProseMirror {
+  width: 100%;
+  max-width: 100%;
+  font-family: var(--font-doc, "Source Serif 4", Charter, Georgia, serif);
+  font-size: 11pt;
+  line-height: 1.5;
+  color: var(--text-strong);
+}
+
+.cs-paginated-canvas-outer .ProseMirror p {
+  margin: 0 0 0.65em;
+}
+
+/* DOCX import: Word single spacing + no default paragraph gap */
+.cs-paginated-canvas-outer[data-typography="word-import"] .ProseMirror {
+  line-height: 1.15;
+  font-family: Calibri, Carlito, "Liberation Sans", -apple-system, sans-serif;
+}
+
+.cs-paginated-canvas-outer[data-typography="word-import"] .ProseMirror p {
+  margin: 0;
+}
+
+.cs-paginated-canvas-outer[data-typography="word-import"] .ProseMirror h1,
+.cs-paginated-canvas-outer[data-typography="word-import"] .ProseMirror h2,
+.cs-paginated-canvas-outer[data-typography="word-import"] .ProseMirror h3,
+.cs-paginated-canvas-outer[data-typography="word-import"] .ProseMirror h4,
+.cs-paginated-canvas-outer[data-typography="word-import"] .ProseMirror h5,
+.cs-paginated-canvas-outer[data-typography="word-import"] .ProseMirror h6 {
+  line-height: 1.15;
+  font-family: Calibri, Carlito, "Liberation Sans", -apple-system, sans-serif;
+}
+
+.cs-paginated-canvas-outer .ProseMirror h1,
+.cs-paginated-canvas-outer .ProseMirror h2,
+.cs-paginated-canvas-outer .ProseMirror h3,
+.cs-paginated-canvas-outer .ProseMirror h4,
+.cs-paginated-canvas-outer .ProseMirror h5,
+.cs-paginated-canvas-outer .ProseMirror h6 {
+  font-family: var(--font-doc, "Source Serif 4", Charter, Georgia, serif);
+  font-size: 12pt;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.cs-paginated-canvas-outer .ProseMirror h1 {
+  margin: 0 0 0.5em;
+  text-align: center;
+}
+
+.cs-paginated-canvas-outer .ProseMirror h2 {
+  margin: 1em 0 0.4em;
+}
+
+.cs-paginated-canvas-outer .ProseMirror h3 {
+  margin: 0.85em 0 0.35em;
+}
+
+.cs-paginated-canvas-outer .ProseMirror h4,
+.cs-paginated-canvas-outer .ProseMirror h5,
+.cs-paginated-canvas-outer .ProseMirror h6 {
+  margin: 0.75em 0 0.3em;
+}
+
+/* Task lists */
+.cs-paginated-canvas-outer .ProseMirror ul[data-type="taskList"] {
+  list-style: none;
+  padding-left: 0;
+  margin: 0 0 0.65em;
+}
+
+.cs-paginated-canvas-outer .ProseMirror ul[data-type="taskList"] li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5em;
+}
+
+.cs-paginated-canvas-outer .ProseMirror ul[data-type="taskList"] li > label {
+  flex-shrink: 0;
+  margin-top: 0.2em;
+}
+
+.cs-paginated-canvas-outer .ProseMirror ul[data-type="taskList"] li > div {
+  flex: 1;
+}
+
+.cs-paginated-canvas-outer .ProseMirror blockquote {
+  margin: 0.75em 0;
+  padding-left: 1em;
+  border-left: 3px solid var(--brand-200, #b8e0e8);
+  font-style: italic;
+  color: var(--text-default);
+}
+
+.cs-paginated-canvas-outer [data-rm-pagination] {
+  width: 100%;
+}
+
+/* White page column; grey gaps between pages read as separate sheets. */
+.cs-paginated-canvas-outer .rm-with-pagination {
+  background: var(--surface-0, #fff) !important;
+  box-shadow: var(--shadow-md, 0 6px 16px rgba(0, 0, 0, 0.08));
+  border-radius: var(--radius-sm, 6px);
+  border: none !important;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* V2 blocks and wide content — constrain to page column */
+.cs-paginated-canvas-outer .rm-with-pagination > [data-node-view-wrapper],
+.cs-paginated-canvas-outer .rm-with-pagination [data-node-type] {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.cs-paginated-canvas-outer .rm-with-pagination .cover-page-block,
+.cs-paginated-canvas-outer .rm-with-pagination .toc-block,
+.cs-paginated-canvas-outer .rm-with-pagination .section-block,
+.cs-paginated-canvas-outer .rm-with-pagination .page-break-block,
+.cs-paginated-canvas-outer .rm-with-pagination .mermaid-block,
+.cs-paginated-canvas-outer .rm-with-pagination .math-block {
+  width: 100%;
+  max-width: 100%;
+  overflow-wrap: break-word;
+}
+
+.cs-paginated-canvas-outer .rm-with-pagination table {
+  max-width: 100%;
+  table-layout: fixed;
+}
+
+.cs-paginated-canvas-outer .rm-with-pagination img {
+  max-width: 100%;
+  height: auto;
+}
+
+.cs-paginated-canvas-outer .rm-pagination-gap {
+  border: none !important;
+  border-color: transparent !important;
+  background-color: var(--surface-2, #e8eaed) !important;
+}
+
+/* Top margin band — empty header reserves space. */
+.cs-paginated-canvas-outer .rm-page-header {
+  overflow: hidden;
+  min-height: 0;
+}
+
+.cs-paginated-canvas-outer .rm-page-header-content:empty,
+.cs-paginated-canvas-outer .rm-page-header-left:empty,
+.cs-paginated-canvas-outer .rm-page-header-right:empty {
+  display: none;
+}
+
+/* Centered page number in bottom margin band. */
+.cs-paginated-canvas-outer .rm-page-footer {
+  display: flex !important;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  overflow: visible;
+  color: var(--text-muted, #9aa0a6);
+  font-family: var(--font-ui, Inter, system-ui, sans-serif);
+  font-size: var(--text-xs-size, 11px);
+  font-weight: 500;
+  cursor: default;
+}
+
+.cs-paginated-canvas-outer .rm-page-footer-content {
+  display: flex !important;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+}
+
+.cs-paginated-canvas-outer .rm-page-footer-left,
+.cs-paginated-canvas-outer .rm-page-footer-right {
+  float: none !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+  text-align: center;
+  width: 100%;
+}
+
+.cs-paginated-canvas-outer .rm-page-footer-left:empty {
+  display: none;
+}
+
+.cs-focus-dim-block {
+  opacity: 0.5;
+  transition: opacity 0.15s ease;
+}
+
+.cs-focus-toolbar-pill .cs-focus-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 28px;
+  min-width: 28px;
+  padding: 0 8px;
+  border-radius: var(--radius-pill);
+  color: var(--text-default);
+  transition: background 0.12s ease;
+}
+
+.cs-focus-toolbar-pill .cs-focus-pill-btn:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+
+.cs-focus-toolbar-pill .cs-focus-pill-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Dark document page (View → Page appearance → Dark page) */
+.cs-paginated-canvas-outer[data-page-theme="dark"] .rm-with-pagination {
+  background: oklch(0.2 0.02 250) !important;
+  box-shadow: var(--shadow-lg, 0 16px 40px rgba(0, 0, 0, 0.45));
+}
+
+.cs-paginated-canvas-outer[data-page-theme="dark"] .ProseMirror {
+  color: oklch(0.92 0.01 250);
+}
+
+.cs-paginated-canvas-outer[data-page-theme="dark"] .ProseMirror blockquote {
+  color: oklch(0.72 0.02 250);
+  border-left-color: oklch(0.45 0.06 184);
+}
+
+.cs-paginated-canvas-outer[data-page-theme="dark"] .rm-pagination-gap {
+  background-color: var(--surface-2, #141820) !important;
+}
+
+@media print {
+  .cs-editor-shell .editor-print-hide,
+  .cs-editor-shell__topbar,
+  .cs-editor-shell__menubar,
+  .cs-editor-shell__toolbar-row,
+  .cs-editor-shell__statusbar,
+  .cs-editor-shell__left-rail,
+  .cs-editor-shell__left-panel,
+  .cs-editor-shell__right-rail,
+  .cs-editor-shell__right-panel {
+    display: none !important;
+  }
+
+  .cs-editor-shell__canvas,
+  .cs-editor-shell__canvas-inner {
+    width: 100% !important;
+    max-width: none !important;
+  }
+
+  .cs-paginated-canvas-outer {
+    background: #fff !important;
+    overflow: visible !important;
+  }
+
+  .cs-paginated-scale-wrap {
+    transform: none !important;
+  }
+
+  .cs-paginated-canvas-outer .rm-with-pagination {
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    break-after: page;
+    page-break-after: always;
+  }
+
+  .cs-paginated-canvas-outer .rm-with-pagination:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
+
+  .cs-paginated-canvas-outer .rm-pagination-gap {
+    display: none !important;
+    height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    background: transparent !important;
+  }
+}

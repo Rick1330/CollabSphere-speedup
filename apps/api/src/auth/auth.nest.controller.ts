@@ -17,7 +17,11 @@ import { SkipThrottle, Throttle } from "@nestjs/throttler";
 import type { Request, Response } from "express";
 import { Public } from "../common/decorators/public.decorator.js";
 import { CurrentUserId } from "../common/decorators/current-user.decorator.js";
-import { AppError, createErrorResponse } from "../common/filters/app-error.filter.js";
+import {
+  AppError,
+  createErrorResponse,
+  logApiError,
+} from "../common/filters/app-error.filter.js";
 import { ReqRequestId } from "../common/nest/request-id.decorator.js";
 import {
   createActionResponsePayload,
@@ -373,6 +377,9 @@ export class AuthNestController {
       return true;
     };
     const sendOAuthError = (error: unknown) => {
+      const mapped = createErrorResponse({ error, requestId });
+      logApiError({ requestId, normalizedError: mapped.normalizedError });
+
       if (error instanceof AppError) {
         if (error.code === "ACCOUNT_DEACTIVATED" && redirectToSpa("/login?error=account_deactivated")) {
           return;
@@ -380,11 +387,9 @@ export class AuthNestController {
         if (redirectToSpa(`/login?error=${encodeURIComponent(error.code)}`)) {
           return;
         }
-        const mapped = createErrorResponse({ error, requestId });
         res.status(mapped.statusCode).json(mapped.payload);
         return;
       }
-      const mapped = createErrorResponse({ error, requestId });
       res.status(mapped.statusCode).json(mapped.payload);
     };
 
@@ -431,7 +436,10 @@ export class AuthNestController {
           },
         };
         const hash = `oauth=${encodeURIComponent(JSON.stringify(oauthPayload))}`;
-        res.redirect(HttpStatus.FOUND, `${spaOrigin.replace(/\/+$/, "")}/login#${hash}`);
+        const dest = `${spaOrigin.replace(/\/+$/, "")}/login#${hash}`;
+        res.status(HttpStatus.FOUND);
+        res.setHeader("Location", dest);
+        res.end();
         return;
       }
 

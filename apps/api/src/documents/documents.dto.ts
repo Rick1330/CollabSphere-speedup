@@ -74,6 +74,20 @@ export class DocumentVariableEntryDto {
   value?: string | null;
 }
 
+export class PatchDocumentVersionLabelDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(200)
+  versionLabel!: string;
+}
+
+export class CreateDocumentVersionDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  versionLabel?: string;
+}
+
 export class PatchDocumentVariablesDto {
   @IsArray()
   @ValidateNested({ each: true })

@@ -14,7 +14,6 @@ import { SectionBlock } from "@/features/documents/editor-extensions/section-blo
 import { TOCBlock } from "@/features/documents/editor-extensions/toc-block";
 import { CoverPageBlock } from "@/features/documents/editor-extensions/cover-page-block";
 import { PageBreakBlock } from "@/features/documents/editor-extensions/page-break-block";
-import { CommentAnchorExtension } from "@/features/documents/editor-extensions/comment-anchor-extension";
 
 interface UseTiptapEditorProps {
   content: string;
@@ -79,7 +78,6 @@ export function useTiptapEditor({
       TOCBlock,
       CoverPageBlock,
       PageBreakBlock,
-      CommentAnchorExtension,
     ],
     content,
     editable,

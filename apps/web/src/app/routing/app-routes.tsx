@@ -5,13 +5,19 @@
  * authed users back to the app via `RedirectIfAuthed`. Every protected
  * surface is wrapped in `RequireAuth`. Admin pages additionally pass
  * through `AdminGuard`.
+ *
+ * Heavy pages are lazy-loaded so Vite dev does not fetch the entire app
+ * module graph on every navigation (avoids ERR_INSUFFICIENT_RESOURCES).
  */
+import { lazy, Suspense } from "react";
 import { Route, Routes, useParams } from "react-router-dom";
 import { RequireAuth, RedirectIfAuthed } from "./auth-guards";
 import { GlobalShortcuts } from "@/app/shell/global-shortcuts";
 import { ShortcutHelpDialog } from "@/app/shell/shortcut-help-dialog";
+import { lazyPage } from "./lazy-route";
+import { RouteLoadingFallback } from "./route-loading-fallback";
 
-// Landing & auth
+// Landing & auth (eager — small, first paint)
 import Index from "@/features/landing/pages/Index";
 import Login from "@/features/auth/pages/Login";
 import Register from "@/features/auth/pages/Register";
@@ -20,56 +26,62 @@ import ResetPassword from "@/features/auth/pages/ResetPassword";
 import VerifyEmail from "@/features/auth/pages/VerifyEmail";
 import AcceptInvite from "@/features/auth/pages/AcceptInvite";
 
-// Core product slices
+// Core shell (eager)
 import Dashboard from "@/features/dashboard/pages/Dashboard";
 import Workspaces from "@/features/workspace/pages/Workspaces";
-import CreateWorkspace from "@/features/workspace/pages/CreateWorkspace";
-import WorkspaceHome from "@/features/workspace/pages/WorkspaceHome";
-import WorkspaceComingSoon from "@/features/workspace/pages/WorkspaceComingSoon";
-import WorkspaceSettings from "@/features/workspace/pages/WorkspaceSettings";
-import Documents from "@/features/documents/pages/Documents";
-import NewDocument from "@/features/documents/pages/NewDocument";
-import DocumentEditor from "@/features/documents/pages/DocumentEditor";
-import DocumentHistory from "@/features/documents/pages/DocumentHistory";
-import Tasks from "@/features/tasks/pages/Tasks";
-import TasksList from "@/features/tasks/pages/TasksList";
-import TaskDetail from "@/features/tasks/pages/TaskDetail";
+import NotFound from "@/pages/NotFound";
 
-// Governance + support slices
-import Members from "@/features/members/pages/Members";
-import WorkspaceMemberProfile from "@/features/members/pages/WorkspaceMemberProfile";
-import Activity from "@/features/activity/pages/Activity";
-import Notifications from "@/features/notifications/pages/Notifications";
-import Settings from "@/features/settings/pages/Settings";
-import SettingsProfile from "@/features/settings/pages/SettingsProfile";
-import SettingsPassword from "@/features/settings/pages/SettingsPassword";
-import SettingsNotifications from "@/features/settings/pages/SettingsNotifications";
-import SettingsAppearance from "@/features/settings/pages/SettingsAppearance";
-import Files from "@/features/files/pages/Files";
-import Templates from "@/features/templates/pages/Templates";
-import Analytics from "@/features/analytics/pages/Analytics";
-
-// Admin
-import AdminDashboard from "@/features/admin/pages/AdminDashboard";
-import AdminUsers from "@/features/admin/pages/AdminUsers";
-import AdminUserDetail from "@/features/admin/pages/AdminUserDetail";
-import AdminWorkspaces from "@/features/admin/pages/AdminWorkspaces";
-import AdminWorkspaceDetail from "@/features/admin/pages/AdminWorkspaceDetail";
-import AdminAudit from "@/features/admin/pages/AdminAudit";
-
-// Reviewer
-import ReviewQueue from "@/features/review/pages/ReviewQueue";
 import { WorkspaceRealtimeLayout } from "@/app/routing/workspace-realtime-layout";
 
-// Catch-all
-import NotFound from "@/pages/NotFound";
+// Lazy — workspace, editor, tasks, settings, admin, etc.
+const CreateWorkspace = lazyPage(() => import("@/features/workspace/pages/CreateWorkspace"));
+const WorkspaceHome = lazyPage(() => import("@/features/workspace/pages/WorkspaceHome"));
+const WorkspaceSettings = lazyPage(() => import("@/features/workspace/pages/WorkspaceSettings"));
+const Documents = lazyPage(() => import("@/features/documents/pages/Documents"));
+const NewDocument = lazyPage(() => import("@/features/documents/pages/NewDocument"));
+const DocumentHistory = lazyPage(() => import("@/features/documents/pages/DocumentHistory"));
+const Tasks = lazyPage(() => import("@/features/tasks/pages/Tasks"));
+const TasksList = lazyPage(() => import("@/features/tasks/pages/TasksList"));
+const TaskDetail = lazyPage(() => import("@/features/tasks/pages/TaskDetail"));
+const Members = lazyPage(() => import("@/features/members/pages/Members"));
+const WorkspaceMemberProfile = lazyPage(
+  () => import("@/features/members/pages/WorkspaceMemberProfile"),
+);
+const Activity = lazyPage(() => import("@/features/activity/pages/Activity"));
+const Notifications = lazyPage(() => import("@/features/notifications/pages/Notifications"));
+const Settings = lazyPage(() => import("@/features/settings/pages/Settings"));
+const SettingsProfile = lazyPage(() => import("@/features/settings/pages/SettingsProfile"));
+const SettingsPassword = lazyPage(() => import("@/features/settings/pages/SettingsPassword"));
+const SettingsNotifications = lazyPage(
+  () => import("@/features/settings/pages/SettingsNotifications"),
+);
+const SettingsAppearance = lazyPage(() => import("@/features/settings/pages/SettingsAppearance"));
+const Files = lazyPage(() => import("@/features/files/pages/Files"));
+const Templates = lazyPage(() => import("@/features/templates/pages/Templates"));
+const Analytics = lazyPage(() => import("@/features/analytics/pages/Analytics"));
+const AdminDashboard = lazyPage(() => import("@/features/admin/pages/AdminDashboard"));
+const AdminUsers = lazyPage(() => import("@/features/admin/pages/AdminUsers"));
+const AdminUserDetail = lazyPage(() => import("@/features/admin/pages/AdminUserDetail"));
+const AdminWorkspaces = lazyPage(() => import("@/features/admin/pages/AdminWorkspaces"));
+const AdminWorkspaceDetail = lazyPage(
+  () => import("@/features/admin/pages/AdminWorkspaceDetail"),
+);
+const AdminAudit = lazyPage(() => import("@/features/admin/pages/AdminAudit"));
+const ReviewQueue = lazyPage(() => import("@/features/review/pages/ReviewQueue"));
+const KitShowcasePage = lazyPage(() => import("@/features/dev/pages/KitShowcasePage"));
+
+const LazyDocumentEditor = lazy(() => import("@/features/documents/pages/DocumentEditor"));
 
 const protect = (el: JSX.Element) => <RequireAuth>{el}</RequireAuth>;
 const guestOnly = (el: JSX.Element) => <RedirectIfAuthed>{el}</RedirectIfAuthed>;
 
 const DocumentEditorRoute = () => {
   const { workspaceId = "", documentId = "" } = useParams();
-  return <DocumentEditor key={`${workspaceId}:${documentId}`} />;
+  return (
+    <Suspense fallback={<RouteLoadingFallback />}>
+      <LazyDocumentEditor key={`${workspaceId}:${documentId}`} />
+    </Suspense>
+  );
 };
 
 export function AppRoutes() {
@@ -86,6 +98,8 @@ export function AppRoutes() {
         <Route path="/reset-password/:token" element={guestOnly(<ResetPassword />)} />
         <Route path="/verify-email/:token" element={<VerifyEmail />} />
         <Route path="/invite/:token" element={<AcceptInvite />} />
+
+        {import.meta.env.DEV ? <Route path="/_kit" element={<KitShowcasePage />} /> : null}
 
         {/* App shell */}
         <Route path="/dashboard" element={protect(<Dashboard />)} />

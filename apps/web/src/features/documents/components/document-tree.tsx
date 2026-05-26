@@ -27,6 +27,7 @@ import { filterTree } from "./document-tree-filter";
 import { TreeCreateDialog } from "./tree-create-dialog";
 import { TreeMoveDialog } from "./tree-move-dialog";
 import { TreeDocumentRow, TreeFolderRow } from "./tree-rows";
+import { DocumentShadcnFileTree } from "./tree/document-shadcn-file-tree";
 
 type DocStatus = "draft" | "submitted" | "changes_requested" | "approved" | "archived";
 
@@ -55,8 +56,11 @@ export type TreeContentPermissions = {
   canDeleteContent: boolean;
 };
 
+export type TreeRenderMode = "legacy" | "shadcn";
+
 export interface WorkspaceDocumentTreeProps {
   variant?: "page" | "sidebar";
+  renderMode?: TreeRenderMode;
   workspaceId: string;
   workspaceType: "professional" | "academic" | "general";
   tree: TreeNode[];
@@ -102,6 +106,7 @@ const countDocs = (nodes: TreeNode[]): number => {
 
 export const WorkspaceDocumentTree = ({
   variant = "page",
+  renderMode = "legacy",
   workspaceId,
   workspaceType,
   tree,
@@ -114,6 +119,7 @@ export const WorkspaceDocumentTree = ({
 }: WorkspaceDocumentTreeProps) => {
   const navigate = useNavigate();
   const isSidebar = variant === "sidebar";
+  const useShadcnTree = isSidebar && renderMode === "shadcn";
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | DocStatus>("all");
@@ -415,8 +421,35 @@ export const WorkspaceDocumentTree = ({
         )}
 
         {/* Tree */}
-        <div role="tree" aria-label="Document tree" className={cn("py-1", isSidebar && "py-0")}>
-          {showEmpty ? (
+        <div
+          role="tree"
+          aria-label="Document tree"
+          className={cn("py-1", (isSidebar || useShadcnTree) && "py-0")}
+        >
+          {useShadcnTree ? (
+            <DocumentShadcnFileTree
+              tree={displayTree}
+              workspaceId={workspaceId}
+              permissions={permissions}
+              activeDocumentId={activeDocumentId}
+              expanded={expanded}
+              onToggleFolder={toggle}
+              onNavigate={onNavigate}
+              onCreateDoc={(parentId, parentName) =>
+                setCreateDocTarget({ parentId, parentName })
+              }
+              onCreateFolder={(parentId, parentName) =>
+                setCreateFolderTarget({ parentId, parentName })
+              }
+              onRenameFolder={(f) => setRenameFolderTarget(f)}
+              onMoveFolder={(f) => setMoveFolderTarget(f)}
+              onDeleteFolder={handleDeleteFolder}
+              onRenameDocument={(d) => setRenameDocumentTarget(d)}
+              onMoveDocument={(d) => setMoveDocumentTarget(d)}
+              onDeleteDocument={handleDeleteDocument}
+              canCreate={canCreate}
+            />
+          ) : showEmpty ? (
             <div className="py-12 text-center">
               <div className="h-10 w-10 rounded-xl bg-stone-100 border border-stone-200 flex items-center justify-center mx-auto">
                 <FileText className="h-5 w-5 text-stone-400" aria-hidden="true" />

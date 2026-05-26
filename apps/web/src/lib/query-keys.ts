@@ -10,6 +10,10 @@ export const queryKeys = {
     tree: (workspaceId: string) => documentTreeQueryKey(workspaceId),
     detail: (workspaceId: string, documentId: string) =>
       ["workspace", workspaceId, "documents", documentId] as const,
+    versions: (workspaceId: string, documentId: string) =>
+      ["workspace", workspaceId, "documents", documentId, "versions"] as const,
+    versionDetail: (workspaceId: string, documentId: string, versionId: string) =>
+      ["workspace", workspaceId, "documents", documentId, "versions", versionId] as const,
   },
   tasks: {
     board: (workspaceId: string) => ["workspace", workspaceId, "tasks", "board"] as const,
@@ -24,6 +28,8 @@ export const queryKeys = {
   },
   activity: {
     workspace: (workspaceId: string) => ["workspace", workspaceId, "activity"] as const,
+    document: (workspaceId: string, documentId: string) =>
+      ["workspace", workspaceId, "activity", "document", documentId] as const,
     dashboard: () => ["dashboard", "activity"] as const,
   },
   review: {

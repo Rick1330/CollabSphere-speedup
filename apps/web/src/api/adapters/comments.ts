@@ -1,5 +1,6 @@
 import { request } from "@/api/client";
 import type {
+  CommentAnchor,
   CommentAuthor,
   CommentNode,
   CommentReply,
@@ -21,16 +22,30 @@ type ApiComment = {
   createdAt: string;
 };
 
+type ApiThreadAnchor = {
+  snippet?: string;
+  quote?: string;
+  status?: "ok" | "changed";
+  from?: number;
+  to?: number;
+};
+
 type ApiThread = {
   id: string;
   status: "open" | "resolved";
   targetType: "document" | "task";
   targetId: string;
-  anchor?: { snippet?: string; status?: "ok" | "changed" } | null;
+  anchor?: ApiThreadAnchor | null;
   resolvedById?: string | null;
   resolvedAt?: string | null;
   createdById: string;
   comments?: ApiComment[];
+};
+
+export type DocumentThreadAnchorInput = {
+  snippet: string;
+  from?: number;
+  to?: number;
 };
 
 const parseSingleEnvelope = <T,>(payload: unknown): T => {
@@ -39,6 +54,20 @@ const parseSingleEnvelope = <T,>(payload: unknown): T => {
     throw new Error("Invalid API single-resource envelope.");
   }
   return resource;
+};
+
+const mapApiAnchor = (anchor: ApiThreadAnchor | null | undefined): CommentAnchor | null => {
+  if (!anchor) return null;
+  const snippet = (anchor.snippet ?? anchor.quote ?? "").trim();
+  if (!snippet) return null;
+  const from = typeof anchor.from === "number" ? anchor.from : undefined;
+  const to = typeof anchor.to === "number" ? anchor.to : undefined;
+  return {
+    snippet,
+    status: anchor.status ?? "ok",
+    ...(from !== undefined ? { from } : {}),
+    ...(to !== undefined ? { to } : {}),
+  };
 };
 
 const mapApiAuthor = (comment: ApiComment): CommentAuthor => ({
@@ -71,7 +100,7 @@ const mapThread = (documentId: string, thread: ApiThread): CommentThread => {
   return {
     id: thread.id,
     documentId,
-    anchor: thread.anchor?.snippet ? { snippet: thread.anchor.snippet, status: thread.anchor.status ?? "ok" } : null,
+    anchor: mapApiAnchor(thread.anchor),
     authorId: root?.authorId ?? thread.createdById,
     author: rootAuthor,
     body: Array.isArray(root?.content) ? root.content : [],
@@ -103,23 +132,31 @@ export async function createDocumentThread(
   workspaceId: string,
   documentId: string,
   body: CommentNode[],
-  anchorSnippet?: string | null,
-): Promise<void> {
-  await request(
+  anchor?: DocumentThreadAnchorInput | null,
+): Promise<string> {
+  const payload = await request<unknown>(
     `/workspaces/${workspaceId}/comments/threads?targetType=document&targetId=${encodeURIComponent(documentId)}`,
     {
       method: "POST",
       body: {
         content: body,
-        anchor: anchorSnippet
+        anchor: anchor
           ? {
-              snippet: anchorSnippet,
+              snippet: anchor.snippet,
               status: "ok",
+              ...(typeof anchor.from === "number" ? { from: anchor.from } : {}),
+              ...(typeof anchor.to === "number" ? { to: anchor.to } : {}),
             }
           : null,
       },
     },
   );
+  const resource = parseSingleEnvelope<{ thread?: ApiThread }>(payload);
+  const threadId = resource.thread?.id;
+  if (!threadId) {
+    throw new Error("Comment thread created without an id.");
+  }
+  return threadId;
 }
 
 export async function createDocumentReply(workspaceId: string, threadId: string, body: CommentNode[]): Promise<void> {

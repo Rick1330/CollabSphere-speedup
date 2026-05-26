@@ -4,6 +4,7 @@
 export const Queues = {
   EMAIL: "email",
   EXPORT: "export",
+  DOCX_IMPORT: "docx-imports",
   MAINTENANCE: "maintenance",
   SEARCH_INDEX: "search-index",
 } as const;
@@ -17,6 +18,7 @@ export const JobTypes = {
   EMAIL_NOTIFICATION: "email.notification.send",
   EXPORT_PDF: "export.document.pdf",
   EXPORT_MARKDOWN: "export.document.markdown",
+  IMPORT_DOCX_HTML: "import.document.docx.html",
   INDEX_DOCUMENT: "search.document.index",
   INDEX_TASK: "search.task.index",
   PURGE_EXPIRED_TOKENS: "maintenance.tokens.purge",
@@ -68,6 +70,14 @@ export interface ExportJobData {
   format: "pdf" | "markdown";
 }
 
+export interface ImportDocxJobData {
+  importJobId: string;
+  workspaceId: string;
+  documentId: string;
+  actorUserId: string;
+  inputPath: string;
+}
+
 export interface IndexDocumentJobData {
   documentId: string;
   workspaceId: string;
@@ -112,6 +122,7 @@ export type JobPayloadByType = {
   [JobTypes.EMAIL_NOTIFICATION]: EmailNotificationJobData;
   [JobTypes.EXPORT_PDF]: ExportJobData;
   [JobTypes.EXPORT_MARKDOWN]: ExportJobData;
+  [JobTypes.IMPORT_DOCX_HTML]: ImportDocxJobData;
   [JobTypes.INDEX_DOCUMENT]: IndexDocumentJobData;
   [JobTypes.INDEX_TASK]: IndexTaskJobData;
   [JobTypes.PURGE_EXPIRED_TOKENS]: PurgeExpiredTokensJobData;

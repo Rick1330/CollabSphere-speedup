@@ -1,216 +1,67 @@
 /**
- * EditorContextRail
- *
- * Right-side context rail for the document editor, with four tabs:
- *   - Outline    → headings TOC
- *   - Readiness  → template-contract progress
- *   - Properties → document metadata/frontmatter
- *   - Comments   → threaded discussion list
- *
- * The rail is the third pane of the editor's shell:
- *   [doc tree] [writing canvas] [context rail]
+ * EditorContextRail — right context pane: Comments | Team | Tasks | Activity.
+ * @deprecated Prefer RightRail + RightPanel + RightPanelContent in DocumentEditor.
  */
-import type { Editor } from "@tiptap/react";
-import { ScrollText, ListChecks, FileText, MessageSquare } from "lucide-react";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { cn } from "@/lib/utils";
-import { DocumentOutlineRail } from "./editor-outline-rail";
-import { DocumentReadinessPanel } from "./editor-readiness-panel";
-import { DocumentPropertiesPanel } from "./document-properties-panel";
-import { DocumentCommentsRail } from "@/features/documents/components/comments/document-comments-rail";
+import { useEffect } from "react";
+import { CheckSquare, History, MessageSquare, Users } from "lucide-react";
 import {
-  scrollToOutlineNode,
-  type OutlineNode,
-} from "@/features/documents/hooks/use-document-outline";
-import type {
-  DocumentReadiness,
-  TemplateContract,
-} from "@/features/documents/template-schema";
-import type { TaskAssignee } from "@/api/adapters/tasks";
-import type { CommentFilter } from "@/features/documents/hooks/use-document-comments";
-import type { CommentNode, CommentThread } from "@/lib/mock-comments";
+  RightPanelContent,
+  type RightPanelCommentData,
+  type RightPanelContentProps,
+} from "@/components/editor/right/panels/RightPanelContent";
+import {
+  EditorRailShell,
+  EditorRailTabs,
+  type EditorRailTabItem,
+} from "@/features/documents/components/editor/editor-rail-chrome";
+import {
+  useEditorStore,
+  type RightSidebarTab,
+} from "@/features/documents/stores/use-editor-store";
 
-interface EditorContextRailProps {
-  editor: Editor | null;
-  outline: OutlineNode[];
-  contract: TemplateContract | null;
-  readiness: DocumentReadiness | null;
-  properties: any;
-  onUpdateProperties: (props: any) => void;
-  tab: "outline" | "readiness" | "properties" | "comments";
-  onTabChange: (tab: "outline" | "readiness" | "properties" | "comments") => void;
-  commentData: {
-    threads: CommentThread[];
-    filter: CommentFilter;
-    openCount: number;
-    resolvedCount: number;
-    activeThreadId: string | null;
-    canComment: boolean;
-    canResolve: boolean;
-    members: TaskAssignee[];
-    membersById: Map<string, TaskAssignee>;
-    onFilterChange: (f: CommentFilter) => void;
-    onCreate: (body: CommentNode[]) => void;
-    onReply: (threadId: string, body: CommentNode[]) => void;
-    onToggleResolve: (threadId: string) => void;
-    onSelectThread: (threadId: string | null) => void;
-    onJumpToAnchor: (threadId: string) => void;
-  };
-}
+const RIGHT_TABS: EditorRailTabItem[] = [
+  { id: "comments", label: "Comments", icon: MessageSquare },
+  { id: "team", label: "Team", icon: Users },
+  { id: "tasks", label: "Tasks", icon: CheckSquare },
+  { id: "activity", label: "Activity", icon: History },
+];
+
+export type EditorContextRailCommentData = RightPanelCommentData;
+
+type EditorContextRailProps = RightPanelContentProps;
 
 export const EditorContextRail = ({
-  editor,
-  outline,
-  contract,
-  readiness,
-  properties,
-  onUpdateProperties,
-  tab,
+  activeTab: activeTabProp,
   onTabChange,
-  commentData,
+  ...contentProps
 }: EditorContextRailProps) => {
-  const hasContract = contract !== null && readiness !== null;
+  const storeTab = useEditorStore((s) => s.rightSidebarTab);
+  const setStoreTab = useEditorStore((s) => s.setRightSidebarTab);
+  const hydrateRightSidebarTab = useEditorStore((s) => s.hydrateRightSidebarTab);
 
-  const handleJump = (node: OutlineNode) => {
-    if (!editor) return;
-    scrollToOutlineNode(editor, node.pos);
+  useEffect(() => {
+    hydrateRightSidebarTab();
+  }, [hydrateRightSidebarTab]);
+
+  const activeTab = activeTabProp ?? storeTab;
+
+  const handleTabChange = (id: string) => {
+    const tab = id as RightSidebarTab;
+    setStoreTab(tab);
+    onTabChange?.(tab);
   };
 
   return (
-    <aside
-      aria-label="Document context"
-      className="flex h-full flex-col overflow-hidden border-l border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-950"
-    >
-      <Tabs
-        value={tab}
-        onValueChange={(v) => onTabChange(v as typeof tab)}
-        className="flex h-full flex-col"
-      >
-        {/* Tab Header with Icons */}
-        <TabsList className="flex h-14 items-center justify-start gap-0 rounded-none border-b border-stone-200 bg-white p-0 dark:border-stone-800 dark:bg-stone-950">
-          <TabsTrigger
-            value="outline"
-            className={cn(
-              "group relative flex h-full flex-1 flex-col items-center justify-center gap-1 rounded-none border-0 px-4 py-2 transition-all",
-              "data-[state=active]:border-b-2 data-[state=active]:border-teal-600 data-[state=active]:bg-teal-50/40 dark:data-[state=active]:border-teal-400 dark:data-[state=active]:bg-teal-950/20",
-              "text-stone-600 hover:bg-stone-100/60 dark:text-stone-400 dark:hover:bg-stone-900/60"
-            )}
-            title="Document outline and structure"
-          >
-            <ScrollText className="h-4 w-4 transition-colors group-data-[state=active]:text-teal-600 dark:group-data-[state=active]:text-teal-400" />
-            <span className="text-[10px] font-medium">Outline</span>
-          </TabsTrigger>
-
-          <TabsTrigger
-            value="readiness"
-            className={cn(
-              "group relative flex h-full flex-1 flex-col items-center justify-center gap-1 rounded-none border-0 px-4 py-2 transition-all",
-              "data-[state=active]:border-b-2 data-[state=active]:border-teal-600 data-[state=active]:bg-teal-50/40 dark:data-[state=active]:border-teal-400 dark:data-[state=active]:bg-teal-950/20",
-              "text-stone-600 hover:bg-stone-100/60 dark:text-stone-400 dark:hover:bg-stone-900/60"
-            )}
-            title="Readiness checklist"
-          >
-            <ListChecks className="h-4 w-4 transition-colors group-data-[state=active]:text-teal-600 dark:group-data-[state=active]:text-teal-400" />
-            <span className="text-[10px] font-medium">Readiness</span>
-          </TabsTrigger>
-
-          <TabsTrigger
-            value="properties"
-            className={cn(
-              "group relative flex h-full flex-1 flex-col items-center justify-center gap-1 rounded-none border-0 px-4 py-2 transition-all",
-              "data-[state=active]:border-b-2 data-[state=active]:border-teal-600 data-[state=active]:bg-teal-50/40 dark:data-[state=active]:border-teal-400 dark:data-[state=active]:bg-teal-950/20",
-              "text-stone-600 hover:bg-stone-100/60 dark:text-stone-400 dark:hover:bg-stone-900/60"
-            )}
-            title="Document properties and metadata"
-          >
-            <FileText className="h-4 w-4 transition-colors group-data-[state=active]:text-teal-600 dark:group-data-[state=active]:text-teal-400" />
-            <span className="text-[10px] font-medium">Properties</span>
-          </TabsTrigger>
-
-          <TabsTrigger
-            value="comments"
-            className={cn(
-              "group relative flex h-full flex-1 flex-col items-center justify-center gap-1 rounded-none border-0 px-4 py-2 transition-all",
-              "data-[state=active]:border-b-2 data-[state=active]:border-teal-600 data-[state=active]:bg-teal-50/40 dark:data-[state=active]:border-teal-400 dark:data-[state=active]:bg-teal-950/20",
-              "text-stone-600 hover:bg-stone-100/60 dark:text-stone-400 dark:hover:bg-stone-900/60"
-            )}
-            title="Comments and feedback"
-          >
-            <MessageSquare className="h-4 w-4 transition-colors group-data-[state=active]:text-teal-600 dark:group-data-[state=active]:text-teal-400" />
-            <span className="text-[10px] font-medium">Comments</span>
-          </TabsTrigger>
-        </TabsList>
-
-        {/* Tab Content */}
-        <div className="flex-1 min-h-0 overflow-hidden">
-          <TabsContent
-            value="outline"
-            className="h-full overflow-y-auto"
-            asChild
-          >
-            <div>
-              <DocumentOutlineRail outline={outline} onJump={handleJump} />
-            </div>
-          </TabsContent>
-
-          <TabsContent
-            value="readiness"
-            className="h-full overflow-y-auto"
-            asChild
-          >
-            <div>
-              {hasContract ? (
-                <DocumentReadinessPanel
-                  editor={editor}
-                  contract={contract!}
-                  readiness={readiness!}
-                />
-              ) : (
-                <div className="flex flex-col items-center justify-center p-8 text-center">
-                  <ListChecks className="mb-3 h-10 w-10 text-stone-300 dark:text-stone-700" />
-                  <p className="text-sm text-stone-500 dark:text-stone-400">No template contract</p>
-                </div>
-              )}
-            </div>
-          </TabsContent>
-
-          <TabsContent
-            value="properties"
-            className="h-full overflow-y-auto"
-            asChild
-          >
-            <div>
-              <DocumentPropertiesPanel properties={properties} onUpdate={onUpdateProperties} />
-            </div>
-          </TabsContent>
-
-          <TabsContent
-            value="comments"
-            className="h-full overflow-y-auto"
-            asChild
-          >
-            <div>
-              <DocumentCommentsRail
-                threads={commentData.threads}
-                filter={commentData.filter}
-                openCount={commentData.openCount}
-                resolvedCount={commentData.resolvedCount}
-                activeThreadId={commentData.activeThreadId}
-                canComment={commentData.canComment}
-                canResolve={commentData.canResolve}
-                members={commentData.members}
-                membersById={commentData.membersById}
-                onFilterChange={commentData.onFilterChange}
-                onCreate={commentData.onCreate}
-                onReply={commentData.onReply}
-                onToggleResolve={commentData.onToggleResolve}
-                onSelectThread={commentData.onSelectThread}
-                onJumpToAnchor={commentData.onJumpToAnchor}
-              />
-            </div>
-          </TabsContent>
-        </div>
-      </Tabs>
-    </aside>
+    <EditorRailShell aria-label="Document context" showAccentStrip className="border-l">
+      <EditorRailTabs
+        tabs={RIGHT_TABS}
+        activeId={activeTab}
+        onChange={handleTabChange}
+        aria-label="Context panel"
+      />
+      <RightPanelContent {...contentProps} activeTab={activeTab} onTabChange={onTabChange} />
+    </EditorRailShell>
   );
 };
+
+export type { DocumentLinkedTaskEntry } from "@/features/documents/hooks/use-document-linked-tasks";

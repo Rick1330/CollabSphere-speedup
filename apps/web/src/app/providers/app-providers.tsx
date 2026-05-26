@@ -27,6 +27,7 @@ import {
 import { authSession, isAuthFailureSuppressed, useAuthSession } from "@/lib/auth-session";
 import { teardownAuthSession } from "@/lib/auth-teardown";
 import { logDevSessionContext } from "@/lib/dev-auth-troubleshooting";
+import { AuthBootstrapProvider, useAuthBootstrap } from "@/lib/auth-bootstrap-context";
 import { useNotificationRealtime } from "@/hooks/use-notification-realtime";
 
 /** Mount-only component so the theme hook runs once at the root. */
@@ -94,11 +95,12 @@ function RealtimeSocketBridge() {
 /** Sync globalRole and profile fields from GET /users/me on boot and after token refresh. */
 function SessionSyncBridge() {
   const session = useAuthSession();
+  const { isSessionReady } = useAuthBootstrap();
 
   const { data } = useQuery({
     queryKey: ["current-user"],
     queryFn: fetchCurrentUser,
-    enabled: !!session?.accessToken,
+    enabled: isSessionReady && !!session?.accessToken,
     staleTime: 60_000,
     retry: false,
   });
@@ -124,15 +126,17 @@ export function AppProviders({ children }: { children: ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
       <ApiClientAuthBridge queryClient={queryClient} />
-      <RealtimeSocketBridge />
-      <NotificationRealtimeBridge />
-      <SessionSyncBridge />
-      <TooltipProvider>
+      <AuthBootstrapProvider queryClient={queryClient}>
+        <RealtimeSocketBridge />
+        <NotificationRealtimeBridge />
+        <SessionSyncBridge />
+        <TooltipProvider>
         <ThemeListener />
         <Toaster />
         <Sonner />
         {children}
-      </TooltipProvider>
+        </TooltipProvider>
+      </AuthBootstrapProvider>
     </QueryClientProvider>
   );
 }

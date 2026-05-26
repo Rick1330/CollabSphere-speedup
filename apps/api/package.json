@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@collabsphere/docx-import": "workspace:*",
     "@collabsphere/shared": "workspace:*",
+    "@nestjs/bullmq": "^11.0.2",
     "@nestjs/common": "^10.4.20",
     "@nestjs/config": "^4.0.4",
     "@nestjs/core": "^10.4.20",
@@ -20,14 +22,17 @@
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
     "cookie-parser": "^1.4.7",
+    "express": "^4.21.2",
     "helmet": "^8.1.0",
     "ioredis": "^5.6.1",
+    "jszip": "^3.10.1",
     "joi": "^18.2.1",
     "jose": "^5.9.6",
     "redis": "^5.12.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
-    "socket.io": "^4.8.3"
+    "socket.io": "^4.8.3",
+    "yjs": "^13.6.30"
   },
   "scripts": {
     "dev": "tsx watch --tsconfig tsconfig.json src/dev.ts",
@@ -36,6 +41,7 @@
     "test": "pnpm exec tsx --test --test-concurrency=1 ../../tests/unit/api-auth-register.test.ts ../../tests/unit/api-bootstrap-env.test.ts ../../tests/unit/api-email-config.test.ts ../../tests/unit/api-error-filter.test.ts ../../tests/unit/api-notifications-category.test.ts ../../tests/unit/api-pagination.test.ts ../../tests/unit/shared-socket-job-api-contracts.test.ts ../../tests/unit/api-request-id.test.ts ../../tests/unit/api-response-envelope.test.ts ../../tests/unit/api-soft-delete-prisma.test.ts ../../tests/unit/api-workspace-scope-prisma.test.ts ../../tests/unit/document-template-richdocument.test.ts test/pagination.e2e-spec.ts"
   },
   "devDependencies": {
+    "@types/express": "^5.0.0",
     "@types/joi": "^17.2.3"
   }
 }

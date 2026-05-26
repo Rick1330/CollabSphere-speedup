@@ -1,0 +1,30 @@
+/* CollabSphere document editor design tokens (remaster spec Part 4) */
+:root {
+  --editor-accent: #14b8a6;
+  --editor-accent-hover: #0d9488;
+  --editor-accent-light: #ccfbf1;
+  --editor-accent-lighter: #f0fdfa;
+  --editor-accent-text: #0f766e;
+
+  --editor-bg: #f3f4f6;
+  --editor-surface: #ffffff;
+  --editor-surface-hover: #f9fafb;
+  --editor-surface-active: #f0fdfa;
+
+  --editor-border: #e5e7eb;
+  --editor-border-hover: #d1d5db;
+
+  --editor-text-primary: #111827;
+  --editor-text-secondary: #374151;
+  --editor-text-muted: #6b7280;
+  --editor-text-placeholder: #9ca3af;
+
+  --editor-success: #10b981;
+  --editor-warning: #f59e0b;
+  --editor-error: #ef4444;
+  --editor-info: #3b82f6;
+
+  --editor-transition-fast: 100ms ease;
+  --editor-transition-base: 200ms ease-in-out;
+  --editor-transition-slow: 300ms ease;
+}

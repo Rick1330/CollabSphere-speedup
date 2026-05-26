@@ -225,6 +225,11 @@ let refreshSessionInFlight: Promise<boolean> | null = null;
  * Rotate access JWT using refresh cookie + CSRF header (same contract as Nest `POST /auth/refresh`).
  * Does not use `request()` to avoid recursion. Updates `authSession` on success.
  */
+/** Rotate access JWT via refresh cookie (single-flight). Exported for app boot bootstrap. */
+export function tryRefreshSession(): Promise<boolean> {
+  return refreshSessionWithCookie();
+}
+
 function refreshSessionWithCookie(): Promise<boolean> {
   if (!refreshSessionInFlight) {
     refreshSessionInFlight = (async (): Promise<boolean> => {
@@ -269,6 +274,108 @@ function refreshSessionWithCookie(): Promise<boolean> {
     });
   }
   return refreshSessionInFlight;
+}
+
+async function resolveAccessToken(): Promise<{ token: string | null; hadBearer: boolean }> {
+  if (getAuthToken) {
+    const token = await getAuthToken();
+    if (token) return { token, hadBearer: true };
+  }
+  const fallback = authSession.getAccessToken();
+  if (fallback) return { token: fallback, hadBearer: true };
+  return { token: null, hadBearer: false };
+}
+
+const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+/**
+ * Build fetch init with Bearer + CSRF (for mutating methods), matching `request()`.
+ * Does not set Content-Type — caller must omit it for FormData uploads.
+ */
+export async function buildAuthenticatedFetchInit(
+  method: string,
+  init: RequestInit = {},
+): Promise<RequestInit> {
+  const normalizedMethod = method.toUpperCase();
+  const callerHeaders =
+    init.headers instanceof Headers
+      ? Object.fromEntries(init.headers.entries())
+      : { ...(init.headers as Record<string, string> | undefined) };
+
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    ...callerHeaders,
+  };
+
+  const { token, hadBearer } = await resolveAccessToken();
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  if (MUTATING_METHODS.has(normalizedMethod)) {
+    const csrf = authSession.getCsrfToken();
+    if (csrf) {
+      headers["X-CSRF-Token"] = csrf;
+    } else if (hadBearer) {
+      throw new ApiError(
+        403,
+        "Session is missing CSRF protection. Sign out and sign in again.",
+        undefined,
+        "CSRF_TOKEN_MISSING",
+      );
+    }
+  }
+
+  return {
+    ...init,
+    method: normalizedMethod,
+    headers,
+    credentials: init.credentials ?? "include",
+  };
+}
+
+/**
+ * Authenticated `fetch` with one refresh-on-401 retry (for multipart / custom bodies).
+ */
+export async function fetchAuthenticated(url: string, init: RequestInit = {}): Promise<Response> {
+  const method = (init.method ?? "GET").toUpperCase();
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const { hadBearer } = await resolveAccessToken();
+    const fetchInit = await buildAuthenticatedFetchInit(method, init);
+    const res = await fetch(url, fetchInit);
+
+    if (res.ok) return res;
+
+    const canTryRefresh =
+      attempt === 0 &&
+      hadBearer &&
+      res.status === 401 &&
+      !isAuthBootstrapApiPath(url) &&
+      !isAuthFailureSuppressed();
+
+    if (canTryRefresh) {
+      const refreshed = await refreshSessionWithCookie();
+      if (refreshed) continue;
+    }
+
+    if (
+      hadBearer &&
+      isAuthFailure(res.status, res.status === 401 ? "UNAUTHORIZED" : undefined) &&
+      !isAuthBootstrapApiPath(url) &&
+      !isAuthFailureSuppressed()
+    ) {
+      try {
+        onAuthFailure?.();
+      } catch {
+        /* ignore handler errors */
+      }
+    }
+
+    return res;
+  }
+
+  throw new ApiError(0, `${method} ${url}: unexpected retry exhaustion`);
 }
 
 export async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
@@ -357,7 +464,6 @@ export async function request<T>(path: string, opts: RequestOptions = {}): Promi
       attempt === 0 &&
       hadBearer &&
       res.status === 401 &&
-      (code === "TOKEN_EXPIRED" || code === "TOKEN_INVALID") &&
       !isAuthBootstrapApiPath(path) &&
       !isAuthFailureSuppressed();
 

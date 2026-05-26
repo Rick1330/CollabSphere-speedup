@@ -1,101 +1,90 @@
-# Copy .env.example to .env before running Docker Compose if you need to override
-# local service ports or credentials. If a host port is already in use, change
-# the matching `*_PORT` value in `.env`, then rerun `docker compose up -d`.
-# Keep app runtime-only overrides in `.env.local`; Compose reads `.env`
-# automatically for interpolation. MinIO stays disabled unless the `minio`
-# profile is enabled with `docker compose --profile minio up -d`.
+# Local development dependencies for `pnpm dev` (scripts/dev.ts).
+# Ports are driven by repo-root `.env` (POSTGRES_PORT, REDIS_PORT, etc.).
 
 services:
   postgres:
     image: postgres:16-alpine
-    restart: unless-stopped
+    container_name: collabsphere-postgres
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-collab}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-collab}
       POSTGRES_DB: ${POSTGRES_DB:-collabsphere}
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
-    networks:
-      - collabsphere
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test:
-        - CMD-SHELL
-        - pg_isready -U ${POSTGRES_USER:-collab} -d ${POSTGRES_DB:-collabsphere}
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-collab} -d ${POSTGRES_DB:-collabsphere}",
+        ]
       interval: 5s
       timeout: 5s
-      retries: 5
-      start_period: 5s
+      retries: 10
+      start_period: 10s
 
   redis:
     image: redis:7-alpine
-    restart: unless-stopped
-    command:
-      - redis-server
-      - --appendonly
-      - "yes"
+    container_name: collabsphere-redis
     ports:
       - "${REDIS_PORT:-6379}:6379"
-    networks:
-      - collabsphere
     volumes:
-      - redis-data:/data
+      - redis_data:/data
     healthcheck:
-      test:
-        - CMD-SHELL
-        - redis-cli ping | grep PONG
+      test: ["CMD", "redis-cli", "ping"]
       interval: 5s
-      timeout: 5s
-      retries: 5
-      start_period: 5s
+      timeout: 3s
+      retries: 10
 
   mailhog:
     image: mailhog/mailhog:v1.0.1
-    restart: unless-stopped
+    container_name: collabsphere-mailhog
     ports:
-      - "127.0.0.1:${MAILHOG_SMTP_PORT:-1025}:1025"
-      - "127.0.0.1:${MAILHOG_UI_PORT:-8025}:8025"
-    networks:
-      - collabsphere
-    healthcheck:
-      test:
-        - CMD-SHELL
-        - wget --spider --quiet http://127.0.0.1:8025/
-      interval: 5s
-      timeout: 5s
-      retries: 5
-      start_period: 5s
+      - "${MAILHOG_SMTP_PORT:-1025}:1025"
+      - "${MAILHOG_UI_PORT:-8025}:8025"
 
   minio:
-    image: minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
-    restart: unless-stopped
-    profiles:
-      - minio
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    image: minio/minio:latest
+    container_name: collabsphere-minio
     ports:
       - "${MINIO_API_PORT:-9000}:9000"
       - "${MINIO_CONSOLE_PORT:-9001}:9001"
-    networks:
-      - collabsphere
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-collabsphere}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-collabsphere_secret_key_change_in_production}
     volumes:
-      - minio-data:/data
+      - minio_data:/data
+    command: server /data --console-address ":9001"
     healthcheck:
-      test:
-        - CMD-SHELL
-        - curl --fail --silent http://127.0.0.1:9000/minio/health/ready > /dev/null
-      interval: 5s
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9000/minio/health/live || exit 1"]
+      interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 5s
+      start_period: 15s
+
+  minio-setup:
+    image: minio/mc:latest
+    container_name: collabsphere-minio-setup
+    depends_on:
+      minio:
+        condition: service_healthy
+    restart: "no"
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set collabsphere http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD}; do sleep 2; done;
+      mc mb collabsphere/documents --ignore-existing;
+      mc mb collabsphere/exports --ignore-existing;
+      mc mb collabsphere/avatars --ignore-existing;
+      mc anonymous set download collabsphere/documents;
+      mc anonymous set download collabsphere/avatars;
+      echo 'MinIO setup complete';
+      "
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-collabsphere}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-collabsphere_secret_key_change_in_production}
 
 volumes:
-  postgres-data:
-  redis-data:
-  minio-data:
-
-networks:
-  collabsphere:
+  postgres_data:
+  redis_data:
+  minio_data:

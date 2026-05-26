@@ -46,7 +46,12 @@ type ListEnvelope<T> = {
 
 export async function fetchWorkspaceActivityPaginated(
   workspaceId: string,
-  params: { page: number; pageSize: number },
+  params: {
+    page: number;
+    pageSize: number;
+    resourceType?: "document" | "task" | "comment" | "workspace";
+    resourceId?: string;
+  },
 ): Promise<{
   data: { items: ActivityEvent[] };
   meta: { pagination: { page: number; pageSize: number; totalItems: number; totalPages: number } };
@@ -55,6 +60,12 @@ export async function fetchWorkspaceActivityPaginated(
     page: String(params.page),
     pageSize: String(params.pageSize),
   });
+  if (params.resourceType) {
+    query.set("resourceType", params.resourceType);
+  }
+  if (params.resourceId) {
+    query.set("resourceId", params.resourceId);
+  }
   const payload = await request<ListEnvelope<ActivityEvent>>(
     `/workspaces/${workspaceId}/activity?${query.toString()}`,
   );

@@ -1,6 +1,8 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
 
 @import "tailwindcss";
+@import "./components/editor/styles/tokens.css";
+@import "./styles/editor-tokens.css";
 
 @custom-variant dark (&:where(.dark, .dark *));
 
@@ -36,8 +38,6 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);
 }
-
-
 
 @layer base {
   :root {
@@ -1230,6 +1230,81 @@
   color: rgba(180, 83, 9, 0.95);
 }
 
+/* Comment marks: resting highlight always on; hover/active/flash intensify */
+.tiptap .comment-anchor--marker {
+  background: rgba(254, 243, 199, 0.45);
+  box-shadow: inset 0 -2px 0 rgba(245, 158, 11, 0.35);
+  cursor: pointer;
+  border-radius: 2px;
+  transition:
+    background-color 120ms ease,
+    box-shadow 120ms ease;
+}
+.tiptap .comment-anchor--marker.comment-anchor--pending {
+  background: rgba(239, 246, 255, 0.65);
+  border-bottom: 1px dotted #93c5fd;
+  box-shadow: inset 0 -2px 0 rgba(59, 130, 246, 0.25);
+}
+.tiptap .comment-anchor--marker.comment-anchor--resolved {
+  background: rgba(243, 244, 246, 0.8);
+  box-shadow: inset 0 -2px 0 rgba(156, 163, 175, 0.45);
+  opacity: 0.85;
+}
+.tiptap .comment-anchor--marker.comment-anchor--resolved:hover:not(.comment-anchor--active) {
+  background: rgba(229, 231, 235, 0.95);
+}
+.tiptap .comment-anchor--marker:hover:not(.comment-anchor--active):not(.comment-anchor--resolved) {
+  background: rgba(254, 243, 199, 0.85);
+}
+.tiptap .comment-anchor--marker.comment-anchor--active,
+.tiptap .comment-anchor--active {
+  background: rgba(253, 230, 138, 0.9);
+  box-shadow: inset 0 -2px 0 rgba(217, 119, 6, 0.55);
+  opacity: 1;
+}
+.tiptap .comment-anchor--flash {
+  background: rgba(254, 243, 199, 0.75);
+  animation: comment-anchor-flash 1.2s ease-out;
+}
+@keyframes comment-anchor-flash {
+  0% {
+    box-shadow: inset 0 0 0 2px rgba(245, 158, 11, 0.55);
+  }
+  100% {
+    box-shadow: inset 0 0 0 0 rgba(245, 158, 11, 0);
+  }
+}
+
+/* ED.7 — selection formatting bubble (Tiptap BubbleMenu) */
+.selection-bubble-menu {
+  position: relative;
+}
+
+.selection-bubble-menu::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -5px;
+  width: 10px;
+  height: 10px;
+  margin-left: -5px;
+  background: #fff;
+  border-right: 1px solid #e5e7eb;
+  border-bottom: 1px solid #e5e7eb;
+  transform: rotate(45deg);
+  pointer-events: none;
+}
+
+.selection-bubble-btn--active {
+  background-color: #ccfbf1;
+  color: #0f766e;
+}
+
+.selection-bubble-palette button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(20, 184, 166, 0.45);
+}
+
 @layer utilities {
   @keyframes cs-pulse-dot {
     0%, 100% { opacity: 1; }
@@ -1253,6 +1328,158 @@
       animation: none;
     }
   }
+}
+
+/* ─── Editor rail panels (left / right sidebars) ─────────────────────────── */
+.editor-rail {
+  --editor-rail-row-height: 2.25rem;
+  --editor-rail-icon-size: 1rem;
+  --editor-rail-font-size: 0.875rem;
+  background-color: var(--editor-surface);
+  color: var(--editor-text-primary);
+  border-color: var(--editor-border);
+}
+
+.editor-rail-accent-strip {
+  height: 3px;
+  flex-shrink: 0;
+  background: linear-gradient(
+    90deg,
+    var(--editor-accent) 0%,
+    color-mix(in srgb, var(--editor-accent) 40%, transparent) 100%
+  );
+}
+
+.editor-rail-header {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--editor-accent-lighter) 85%, var(--editor-surface)) 0%,
+    var(--editor-surface) 100%
+  );
+  border-bottom: 1px solid var(--editor-border);
+}
+
+.editor-rail-tabs {
+  position: relative;
+  display: flex;
+  gap: 2px;
+  min-height: 44px;
+  padding: 4px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--editor-border) 35%, var(--editor-surface));
+}
+
+.editor-rail-tabs::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc((100% - 6px) / var(--editor-rail-tab-count, 3));
+  border-radius: 7px;
+  background: var(--editor-surface);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.06),
+    0 0 0 1px color-mix(in srgb, var(--editor-border) 80%, transparent);
+  transform: translateX(calc(var(--editor-rail-tab-index, 0) * 100%));
+  transition: transform var(--editor-transition-base);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.editor-rail-tab {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  min-width: 0;
+}
+
+.editor-rail-tab-body {
+  animation: editor-rail-fade-in 150ms ease;
+}
+
+@keyframes editor-rail-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.dark .app-light .editor-rail {
+  background-color: var(--app-surface);
+  color: var(--app-text);
+  border-color: color-mix(in srgb, var(--editor-accent) 22%, transparent);
+}
+
+.dark .app-light .editor-rail-header {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--editor-accent) 12%, var(--app-surface)) 0%,
+    var(--app-surface) 100%
+  );
+}
+
+.dark .app-light .editor-rail-tabs {
+  background: color-mix(in srgb, var(--editor-accent) 10%, var(--app-elevated));
+}
+
+.dark .app-light .editor-rail-tabs::after {
+  background: var(--app-surface);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+
+/* Editor Files + Outline tabs — shadcn sidebar fills the 280px rail */
+.editor-files-sidebar [data-sidebar="sidebar"],
+.editor-outline-sidebar [data-sidebar="sidebar"] {
+  width: 100% !important;
+  min-height: 0;
+}
+
+.editor-files-sidebar .group\\/sidebar-wrapper,
+.editor-outline-sidebar .group\\/sidebar-wrapper {
+  min-height: 0;
+  width: 100%;
+}
+
+.editor-files-sidebar [data-sidebar="menu-button"],
+.editor-files-sidebar [data-sidebar="menu-sub-button"],
+.editor-outline-sidebar [data-sidebar="menu-button"],
+.editor-outline-sidebar [data-sidebar="menu-sub-button"] {
+  min-height: var(--editor-rail-row-height);
+  font-size: var(--editor-rail-font-size);
+}
+
+.editor-files-sidebar [data-sidebar="menu-button"] svg,
+.editor-files-sidebar [data-sidebar="menu-sub-button"] svg,
+.editor-outline-sidebar [data-sidebar="menu-button"] svg,
+.editor-outline-sidebar [data-sidebar="menu-sub-button"] svg {
+  width: var(--editor-rail-icon-size);
+  height: var(--editor-rail-icon-size);
+}
+
+.editor-files-sidebar [data-active="true"][data-sidebar="menu-button"],
+.editor-outline-sidebar [data-active="true"][data-sidebar="menu-button"],
+.editor-outline-sidebar [data-active="true"][data-sidebar="menu-sub-button"] {
+  background-color: var(--editor-surface-active);
+  color: var(--editor-accent-text);
+  font-weight: 500;
+}
+
+.editor-outline-sidebar [data-sidebar="group-label"] {
+  font-size: var(--editor-rail-font-size);
+  padding-top: 0.5rem;
+  padding-bottom: 0.375rem;
+}
+
+/* ─── Document page canvas (V2 template paper feel) ─────────────────────── */
+.editor-page-inner--v2::before {
+  content: "";
+  display: block;
+  height: 1px;
+  background: #e8eaed;
+  margin: -4px 0 12px;
 }
 
 /* ─── Document editor — print stylesheet ──────────────────────────────────
@@ -1289,6 +1516,24 @@
   /* Writing canvas */
   main {
     overflow: visible !important;
+  }
+  .editor-page-canvas-outer {
+    background: #ffffff !important;
+    overflow: visible !important;
+  }
+  .editor-page-inner {
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    min-height: auto !important;
+  }
+  .editor-page-inner--v2::before {
+    display: none !important;
+  }
+  .editor-print-hide {
+    display: none !important;
   }
   .tiptap {
     max-width: 100% !important;
@@ -1344,4 +1589,74 @@
     font-size: 0.85em;
     color: #555;
   }
+}
+
+.version-preview-panel {
+  position: relative;
+}
+
+.version-preview-panel::before {
+  content: "Read-only preview";
+  position: absolute;
+  top: 1rem;
+  right: 1.5rem;
+  z-index: 1;
+  pointer-events: none;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #9ca3af;
+  opacity: 0.85;
+}
+
+.version-preview {
+  cursor: default;
+}
+
+.version-preview * {
+  cursor: default;
+}
+
+.version-diff-insert {
+  background-color: rgb(240 253 250);
+  text-decoration: underline;
+  text-decoration-color: rgb(13 148 136);
+  text-underline-offset: 2px;
+}
+
+.version-diff-modify {
+  background-color: rgb(255 251 235);
+  border-radius: 2px;
+}
+
+.version-diff-delete {
+  display: inline;
+  background-color: rgb(254 242 242);
+  color: rgb(185 28 28);
+  text-decoration: line-through;
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+:root {
+  --sidebar: hsl(0 0% 98%);
+  --sidebar-foreground: hsl(240 5.3% 26.1%);
+  --sidebar-primary: hsl(240 5.9% 10%);
+  --sidebar-primary-foreground: hsl(0 0% 98%);
+  --sidebar-accent: hsl(240 4.8% 95.9%);
+  --sidebar-accent-foreground: hsl(240 5.9% 10%);
+  --sidebar-border: hsl(220 13% 91%);
+  --sidebar-ring: hsl(217.2 91.2% 59.8%);
+}
+
+.dark {
+  --sidebar: hsl(240 5.9% 10%);
+  --sidebar-foreground: hsl(240 4.8% 95.9%);
+  --sidebar-primary: hsl(224.3 76.3% 48%);
+  --sidebar-primary-foreground: hsl(0 0% 100%);
+  --sidebar-accent: hsl(240 3.7% 15.9%);
+  --sidebar-accent-foreground: hsl(240 4.8% 95.9%);
+  --sidebar-border: hsl(240 3.7% 15.9%);
+  --sidebar-ring: hsl(217.2 91.2% 59.8%);
 }

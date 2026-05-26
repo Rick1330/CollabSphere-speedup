@@ -1,132 +1,590 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { Editor } from "@tiptap/react";
-import { ListPlus, MessageSquarePlus } from "lucide-react";
+import { BubbleMenu } from "@tiptap/react";
+import { TextSelection } from "@tiptap/pm/state";
+import {
+  Bold,
+  Check,
+  Highlighter,
+  Italic,
+  Link2,
+  ListPlus,
+  MessageSquarePlus,
+  MoreHorizontal,
+  Strikethrough,
+  Subscript as SubscriptIcon,
+  Superscript as SuperscriptIcon,
+  Underline as UnderlineIcon,
+  X,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+import { dispatchEditorCommentCompose } from "@/features/documents/lib/editor-comment-events";
+import { EDITOR_PALETTE_COLORS } from "@/features/documents/lib/editor-format-palette";
 
 interface InlineCommentTriggerProps {
   editor: Editor | null;
+  /** When false, bubble never shows (e.g. read-only). Component stays mounted. */
   enabled: boolean;
-  /** Called with the selected snippet to start a new anchored thread */
-  onComment: (snippet: string) => void;
-  /** Optional: also offer "Create task" from selection */
+  /** Hide bubble while comment compose or task dialog is open — without unmounting. */
+  hideWhilePending?: boolean;
   onCreateTask?: (snippet: string) => void;
 }
 
-interface BubbleState {
-  visible: boolean;
-  top: number;
-  left: number;
-  snippet: string;
-}
+type PanelMode = "main" | "link";
+type PaletteMode = "text" | "highlight" | null;
 
 const MIN_SELECTION_LENGTH = 2;
 
+function shouldShowBubbleMenu(
+  editor: Editor,
+  enabled: boolean,
+  hideWhilePending: boolean,
+): boolean {
+  if (!enabled || hideWhilePending || !editor.isEditable) return false;
+
+  const { state } = editor;
+  const { empty, from, to } = state.selection;
+  if (!(state.selection instanceof TextSelection) || empty || to - from < MIN_SELECTION_LENGTH) {
+    return false;
+  }
+
+  const text = state.doc.textBetween(from, to, " ").trim();
+  if (text.length < MIN_SELECTION_LENGTH) return false;
+
+  const { $from } = state.selection;
+  if ($from.parent.type.isAtom) return false;
+
+  const node = $from.node();
+  if (node && node.type.isAtom) return false;
+
+  return true;
+}
+
+function transformCase(text: string, mode: "upper" | "lower" | "capitalize"): string {
+  if (mode === "upper") return text.toUpperCase();
+  if (mode === "lower") return text.toLowerCase();
+  return text.replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function BubbleDivider() {
+  return <div className="w-px h-5 bg-[#E5E7EB] mx-0.5 shrink-0" aria-hidden="true" />;
+}
+
+function BubbleBtn({
+  label,
+  isActive = false,
+  onPress,
+  children,
+  className,
+}: {
+  label: string;
+  isActive?: boolean;
+  onPress: () => void;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      aria-pressed={isActive}
+      onMouseDown={(event) => {
+        event.preventDefault();
+        onPress();
+      }}
+      className={cn(
+        "selection-bubble-btn h-7 w-7 rounded flex items-center justify-center text-[13px] font-semibold text-[#374151] border-none bg-transparent cursor-pointer transition-colors",
+        "hover:bg-[#F3F4F6] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-teal-500/40",
+        isActive && "selection-bubble-btn--active bg-[#CCFBF1] text-[#0F766E]",
+        className,
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+function ColorPaletteRow({
+  mode,
+  editor,
+  onClose,
+}: {
+  mode: "text" | "highlight";
+  editor: Editor;
+  onClose: () => void;
+}) {
+  const currentTextColor =
+    (editor.getAttributes("textStyle").color as string | undefined) ?? "#111827";
+  const currentHighlight =
+    (editor.getAttributes("highlight").color as string | undefined) ?? "#FEF08A";
+
+  return (
+    <div className="selection-bubble-palette flex items-center gap-1 px-1 pb-1 pt-0.5 border-t border-[#E5E7EB]">
+      {EDITOR_PALETTE_COLORS.map((swatch) => {
+        const isSelected =
+          mode === "text"
+            ? currentTextColor.toLowerCase() === swatch.value.toLowerCase()
+            : currentHighlight.toLowerCase() === swatch.value.toLowerCase();
+        return (
+          <button
+            key={swatch.id}
+            type="button"
+            aria-label={`${mode === "text" ? "Text" : "Highlight"} color ${swatch.label}`}
+            onMouseDown={(event) => {
+              event.preventDefault();
+              if (mode === "text") {
+                if (swatch.id === "black") {
+                  editor.chain().focus().unsetColor().run();
+                } else {
+                  editor.chain().focus().setColor(swatch.value).run();
+                }
+              } else {
+                editor.chain().focus().toggleHighlight({ color: swatch.value }).run();
+              }
+              onClose();
+            }}
+            className={cn(
+              "relative h-6 w-6 rounded-full border border-stone-200 shrink-0",
+              isSelected && "ring-2 ring-teal-500 ring-offset-1",
+            )}
+            style={{ backgroundColor: swatch.value }}
+          >
+            {isSelected && (
+              <Check
+                className="absolute inset-0 m-auto h-3 w-3 text-white drop-shadow"
+                strokeWidth={3}
+                aria-hidden="true"
+              />
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function BubbleMoreMenu({
+  editor,
+  onClose,
+  onChangeCase,
+}: {
+  editor: Editor;
+  onClose: () => void;
+  onChangeCase: (mode: "upper" | "lower" | "capitalize") => void;
+}) {
+  const itemClass =
+    "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-stone-700 hover:bg-stone-100";
+
+  return (
+    <div
+      role="menu"
+      aria-label="More formatting options"
+      className="absolute right-0 top-full z-[60] mt-1 min-w-[11rem] rounded-md border border-stone-200 bg-white p-1 shadow-lg"
+      onMouseDown={(event) => event.preventDefault()}
+    >
+      <button
+        type="button"
+        role="menuitem"
+        className={itemClass}
+        onMouseDown={(event) => {
+          event.preventDefault();
+          editor.chain().focus().toggleSubscript().run();
+          onClose();
+        }}
+      >
+        <SubscriptIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
+        Subscript
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        className={itemClass}
+        onMouseDown={(event) => {
+          event.preventDefault();
+          editor.chain().focus().toggleSuperscript().run();
+          onClose();
+        }}
+      >
+        <SuperscriptIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
+        Superscript
+      </button>
+      <div className="my-1 h-px bg-stone-200" role="separator" />
+      <button
+        type="button"
+        role="menuitem"
+        className={itemClass}
+        onMouseDown={(event) => {
+          event.preventDefault();
+          onChangeCase("upper");
+          onClose();
+        }}
+      >
+        UPPERCASE
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        className={itemClass}
+        onMouseDown={(event) => {
+          event.preventDefault();
+          onChangeCase("lower");
+          onClose();
+        }}
+      >
+        lowercase
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        className={itemClass}
+        onMouseDown={(event) => {
+          event.preventDefault();
+          onChangeCase("capitalize");
+          onClose();
+        }}
+      >
+        Capitalize
+      </button>
+      <div className="my-1 h-px bg-stone-200" role="separator" />
+      <button
+        type="button"
+        role="menuitem"
+        className={itemClass}
+        onMouseDown={(event) => {
+          event.preventDefault();
+          editor.chain().focus().unsetAllMarks().clearNodes().run();
+          onClose();
+        }}
+      >
+        Clear formatting
+      </button>
+    </div>
+  );
+}
+
 /**
- * Floating affordance shown above a non-empty editor selection. Offers
- * inline anchored comments and (optionally) creating a task from selection.
+ * Floating formatting bubble shown above a non-empty text selection.
+ * Includes B/I/U/S, color, highlight, link, comment, and task actions.
  */
 export const DocumentInlineCommentTrigger = ({
   editor,
   enabled,
-  onComment,
+  hideWhilePending = false,
   onCreateTask,
 }: InlineCommentTriggerProps) => {
-  const [bubble, setBubble] = useState<BubbleState>({
-    visible: false,
-    top: 0,
-    left: 0,
-    snippet: "",
-  });
-  const rafRef = useRef<number | null>(null);
+  const [panel, setPanel] = useState<PanelMode>("main");
+  const [openPalette, setOpenPalette] = useState<PaletteMode>(null);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [linkUrl, setLinkUrl] = useState("");
+  const [, setTick] = useState(0);
+  const selectionSnippetRef = useRef("");
+  const bubbleRootRef = useRef<HTMLDivElement>(null);
+
+  const bump = useCallback(() => setTick((n) => n + 1), []);
+
+  const resetSubPanels = useCallback(() => {
+    setPanel("main");
+    setOpenPalette(null);
+    setMoreOpen(false);
+  }, []);
 
   useEffect(() => {
-    if (!editor || !enabled) {
-      setBubble((b) => ({ ...b, visible: false }));
-      return;
-    }
-
-    const update = () => {
-      const sel = window.getSelection();
-      if (!sel || sel.rangeCount === 0 || sel.isCollapsed) {
-        setBubble((b) => ({ ...b, visible: false }));
-        return;
-      }
-      const range = sel.getRangeAt(0);
-      const text = sel.toString();
-      if (!text || text.trim().length < MIN_SELECTION_LENGTH) {
-        setBubble((b) => ({ ...b, visible: false }));
-        return;
-      }
-      const editorEl = editor.view.dom;
-      if (!editorEl.contains(range.commonAncestorContainer)) {
-        setBubble((b) => ({ ...b, visible: false }));
-        return;
-      }
-      const rect = range.getBoundingClientRect();
-      if (rect.width === 0 && rect.height === 0) {
-        setBubble((b) => ({ ...b, visible: false }));
-        return;
-      }
-      setBubble({
-        visible: true,
-        top: rect.top + window.scrollY - 40,
-        left: rect.left + rect.width / 2 + window.scrollX,
-        snippet: text.trim().slice(0, 200),
-      });
-    };
+    if (!editor) return;
 
     const onSelectionChange = () => {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-      rafRef.current = requestAnimationFrame(update);
+      const { from, to, empty } = editor.state.selection;
+      if (!empty) {
+        selectionSnippetRef.current = editor.state.doc
+          .textBetween(from, to, " ")
+          .trim()
+          .slice(0, 200);
+      }
+
+      if (!shouldShowBubbleMenu(editor, enabled, hideWhilePending)) {
+        resetSubPanels();
+      }
+      bump();
     };
 
-    document.addEventListener("selectionchange", onSelectionChange);
-    window.addEventListener("scroll", onSelectionChange, true);
-    window.addEventListener("resize", onSelectionChange);
+    editor.on("selectionUpdate", onSelectionChange);
+    editor.on("transaction", onSelectionChange);
+
     return () => {
-      document.removeEventListener("selectionchange", onSelectionChange);
-      window.removeEventListener("scroll", onSelectionChange, true);
-      window.removeEventListener("resize", onSelectionChange);
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      editor.off("selectionUpdate", onSelectionChange);
+      editor.off("transaction", onSelectionChange);
     };
-  }, [editor, enabled]);
+  }, [editor, enabled, hideWhilePending, bump, resetSubPanels]);
 
-  if (!bubble.visible) return null;
+  useEffect(() => {
+    if (!moreOpen) return;
+
+    const onPointerDown = (event: MouseEvent) => {
+      const root = bubbleRootRef.current;
+      if (root && !root.contains(event.target as Node)) {
+        setMoreOpen(false);
+      }
+    };
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMoreOpen(false);
+    };
+
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [moreOpen]);
+
+  const handleCommentClick = useCallback(() => {
+    if (!editor) return;
+    const { from, to, empty } = editor.state.selection;
+    if (empty) return;
+
+    const selectedText = editor.state.doc.textBetween(from, to, " ").trim();
+    if (!selectedText) return;
+
+    const pendingId = `pending-${Date.now()}`;
+    const quote = selectedText.slice(0, 280);
+
+    editor
+      .chain()
+      .setMark("commentMark", {
+        threadId: pendingId,
+        isPending: true,
+        resolved: false,
+      })
+      .run();
+
+    resetSubPanels();
+
+    dispatchEditorCommentCompose({
+      pendingId,
+      from,
+      to,
+      quote,
+    });
+  }, [editor, resetSubPanels]);
+
+  const handleCreateTask = useCallback(() => {
+    if (!onCreateTask) return;
+    const snippet = selectionSnippetRef.current;
+    resetSubPanels();
+    queueMicrotask(() => onCreateTask(snippet));
+  }, [onCreateTask, resetSubPanels]);
+
+  const openLinkPanel = useCallback(() => {
+    if (!editor) return;
+    const previous = (editor.getAttributes("link").href as string | undefined) ?? "";
+    setLinkUrl(previous);
+    setPanel("link");
+    setOpenPalette(null);
+    setMoreOpen(false);
+  }, [editor]);
+
+  const applyLink = useCallback(() => {
+    if (!editor) return;
+    const url = linkUrl.trim();
+    if (!url) {
+      (editor.chain().focus().extendMarkRange("link") as ReturnType<Editor["chain"]>)
+        .unsetLink()
+        .run();
+    } else {
+      (editor.chain().focus().extendMarkRange("link") as ReturnType<Editor["chain"]>)
+        .setLink({ href: url })
+        .run();
+    }
+    setPanel("main");
+  }, [editor, linkUrl]);
+
+  const applyChangeCase = useCallback(
+    (mode: "upper" | "lower" | "capitalize") => {
+      if (!editor) return;
+      const { from, to, empty } = editor.state.selection;
+      if (empty) return;
+      const text = editor.state.doc.textBetween(from, to, "");
+      const transformed = transformCase(text, mode);
+      editor
+        .chain()
+        .focus()
+        .insertContentAt({ from, to }, transformed, { updateSelection: true })
+        .run();
+    },
+    [editor],
+  );
+
+  if (!editor) return null;
+
+  const isActive = (name: string, attrs?: Record<string, unknown>) =>
+    editor.isActive(name, attrs);
+
+  const currentTextColor =
+    (editor.getAttributes("textStyle").color as string | undefined) ?? "#111827";
 
   return (
-    <div
-      role="toolbar"
-      aria-label="Selection actions"
-      className="fixed z-40 -translate-x-1/2 animate-in fade-in zoom-in-95 duration-100 flex items-center gap-1 rounded-lg bg-stone-900 text-white shadow-lg p-1"
-      style={{ top: bubble.top, left: bubble.left }}
+    <BubbleMenu
+      editor={editor}
+      shouldShow={({ editor: ed }) =>
+        shouldShowBubbleMenu(ed, enabled, hideWhilePending)
+      }
+      tippyOptions={{
+        placement: "top",
+        offset: [0, 10],
+        maxWidth: "none",
+        duration: [150, 100],
+      }}
     >
-      <button
-        type="button"
-        onMouseDown={(e) => {
-          e.preventDefault();
-          onComment(bubble.snippet);
-        }}
-        className="h-7 px-2.5 rounded-md text-xs font-medium flex items-center gap-1.5 hover:bg-stone-700 transition-colors"
+      <div
+        ref={bubbleRootRef}
+        role="toolbar"
+        aria-label="Text formatting"
+        className="selection-bubble-menu relative flex flex-col rounded-lg border border-[#E5E7EB] bg-white p-1 shadow-[0_4px_16px_rgba(0,0,0,0.12)]"
       >
-        <MessageSquarePlus className="h-3.5 w-3.5" aria-hidden="true" />
-        Comment
-      </button>
-      {onCreateTask && (
-        <>
-          <span className="w-px h-4 bg-stone-700" aria-hidden="true" />
-          <button
-            type="button"
-            onMouseDown={(e) => {
-              e.preventDefault();
-              onCreateTask(bubble.snippet);
-            }}
-            className="h-7 px-2.5 rounded-md text-xs font-medium flex items-center gap-1.5 hover:bg-stone-700 transition-colors"
-            title="Create task from selection"
-          >
-            <ListPlus className="h-3.5 w-3.5" aria-hidden="true" />
-            Task
-          </button>
-        </>
-      )}
-    </div>
+        {panel === "link" ? (
+          <div className="flex items-center gap-1 px-0.5 py-0.5 min-w-[240px]">
+            <Link2 className="h-3.5 w-3.5 text-stone-500 shrink-0 ml-1" aria-hidden="true" />
+            <input
+              type="url"
+              value={linkUrl}
+              onChange={(event) => setLinkUrl(event.target.value)}
+              placeholder="https://..."
+              className="flex-1 h-7 px-2 text-xs border border-[#E5E7EB] rounded focus:outline-none focus:ring-1 focus:ring-teal-500/40"
+              autoFocus
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  applyLink();
+                }
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  setPanel("main");
+                }
+              }}
+            />
+            <BubbleBtn label="Apply link" onPress={applyLink}>
+              <Check className="h-3.5 w-3.5" aria-hidden="true" />
+            </BubbleBtn>
+            <BubbleBtn label="Cancel link" onPress={() => setPanel("main")}>
+              <X className="h-3.5 w-3.5" aria-hidden="true" />
+            </BubbleBtn>
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center gap-0.5">
+              <BubbleBtn
+                label="Bold (Ctrl+B)"
+                isActive={isActive("bold")}
+                onPress={() => editor.chain().focus().toggleBold().run()}
+              >
+                B
+              </BubbleBtn>
+              <BubbleBtn
+                label="Italic (Ctrl+I)"
+                isActive={isActive("italic")}
+                onPress={() => editor.chain().focus().toggleItalic().run()}
+              >
+                I
+              </BubbleBtn>
+              <BubbleBtn
+                label="Underline (Ctrl+U)"
+                isActive={isActive("underline")}
+                onPress={() => (editor.chain().focus() as ReturnType<Editor["chain"]>).toggleUnderline().run()}
+              >
+                <UnderlineIcon className="h-3.5 w-3.5" aria-hidden="true" />
+              </BubbleBtn>
+              <BubbleBtn
+                label="Strikethrough"
+                isActive={isActive("strike")}
+                onPress={() => editor.chain().focus().toggleStrike().run()}
+              >
+                <Strikethrough className="h-3.5 w-3.5" aria-hidden="true" />
+              </BubbleBtn>
+
+              <BubbleDivider />
+
+              <BubbleBtn
+                label="Text color"
+                isActive={openPalette === "text"}
+                onPress={() => {
+                  setMoreOpen(false);
+                  setOpenPalette((p) => (p === "text" ? null : "text"));
+                }}
+                className="w-8"
+              >
+                <span
+                  className="text-[11px] font-bold leading-none"
+                  style={{ color: currentTextColor }}
+                >
+                  A
+                </span>
+                <span className="text-[8px] leading-none ml-0.5 opacity-60">▼</span>
+              </BubbleBtn>
+              <BubbleBtn
+                label="Highlight color"
+                isActive={isActive("highlight") || openPalette === "highlight"}
+                onPress={() => {
+                  setMoreOpen(false);
+                  setOpenPalette((p) => (p === "highlight" ? null : "highlight"));
+                }}
+              >
+                <Highlighter className="h-3.5 w-3.5" aria-hidden="true" />
+              </BubbleBtn>
+
+              <BubbleDivider />
+
+              <BubbleBtn
+                label="Insert link (Ctrl+Shift+K)"
+                isActive={isActive("link")}
+                onPress={openLinkPanel}
+              >
+                <Link2 className="h-3.5 w-3.5" aria-hidden="true" />
+              </BubbleBtn>
+
+              <BubbleBtn label="Add comment" onPress={handleCommentClick}>
+                <MessageSquarePlus className="h-3.5 w-3.5" aria-hidden="true" />
+              </BubbleBtn>
+
+              {onCreateTask && (
+                <BubbleBtn label="Create task from selection" onPress={handleCreateTask}>
+                  <ListPlus className="h-3.5 w-3.5" aria-hidden="true" />
+                </BubbleBtn>
+              )}
+
+              <BubbleDivider />
+
+              <div className="relative">
+                <BubbleBtn
+                  label="More formatting options"
+                  isActive={moreOpen}
+                  onPress={() => {
+                    setOpenPalette(null);
+                    setMoreOpen((open) => !open);
+                  }}
+                >
+                  <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
+                </BubbleBtn>
+                {moreOpen && (
+                  <BubbleMoreMenu
+                    editor={editor}
+                    onClose={() => setMoreOpen(false)}
+                    onChangeCase={applyChangeCase}
+                  />
+                )}
+              </div>
+            </div>
+
+            {openPalette && (
+              <ColorPaletteRow
+                mode={openPalette}
+                editor={editor}
+                onClose={() => setOpenPalette(null)}
+              />
+            )}
+          </>
+        )}
+      </div>
+    </BubbleMenu>
   );
 };

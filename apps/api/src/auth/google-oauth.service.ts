@@ -64,12 +64,32 @@ export class GoogleOAuthService {
       redirect_uri: redirectUri,
       grant_type: "authorization_code",
     });
-    const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body,
-    });
+    let tokenRes: Response;
+    try {
+      tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body,
+      });
+    } catch (err) {
+      if (process.env.NODE_ENV !== "production") {
+        console.warn("[auth][google] token endpoint unreachable", err);
+      }
+      throw new AppError({
+        code: "OAUTH_INVALID_CALLBACK",
+        message: "Failed to reach Google token endpoint",
+        cause: err instanceof Error ? err : undefined,
+      });
+    }
     if (!tokenRes.ok) {
+      const errorBody = await tokenRes.text().catch(() => "");
+      if (process.env.NODE_ENV !== "production") {
+        console.warn("[auth][google] token exchange failed", {
+          status: tokenRes.status,
+          redirectUri,
+          body: errorBody.slice(0, 500),
+        });
+      }
       throw new AppError({
         code: "OAUTH_INVALID_CALLBACK",
         message: "Failed to exchange Google authorization code",
@@ -87,6 +107,13 @@ export class GoogleOAuthService {
       headers: { authorization: `Bearer ${accessToken}` },
     });
     if (!userRes.ok) {
+      const errorBody = await userRes.text().catch(() => "");
+      if (process.env.NODE_ENV !== "production") {
+        console.warn("[auth][google] userinfo failed", {
+          status: userRes.status,
+          body: errorBody.slice(0, 500),
+        });
+      }
       throw new AppError({
         code: "OAUTH_INVALID_CALLBACK",
         message: "Failed to load Google profile",

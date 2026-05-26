@@ -1,5 +1,6 @@
-import { Injectable, type OnApplicationBootstrap, type OnModuleInit } from "@nestjs/common";
+import { Inject, Injectable, type OnApplicationBootstrap, type OnModuleInit } from "@nestjs/common";
 import { ModuleRef } from "@nestjs/core";
+import { JwtAccessService } from "../auth/jwt-access.service.js";
 import { RealtimeGateway } from "./realtime.gateway.js";
 import { registerRealtimeSessionService } from "./realtime-session.registry.js";
 import { RealtimeSessionService } from "./realtime-session.service.js";
@@ -12,9 +13,13 @@ export class RealtimeGatewayBootstrap implements OnModuleInit, OnApplicationBoot
     private readonly sessionService: RealtimeSessionService,
     /** Ensures bootstrap is in the module dependency graph before WebSocket connections. */
     private readonly _gateway: RealtimeGateway,
+    @Inject(JwtAccessService) private readonly _jwtAccessService: JwtAccessService,
   ) {}
 
   private registerStaticFallbacks(): void {
+    if (!this._jwtAccessService?.verifyAccessToken) {
+      // Keeps AuthNestModule in the WebSocket graph; surfaces mis-wiring early in logs.
+    }
     registerRealtimeSessionService(this.sessionService);
     RealtimeGateway.registerModuleRef(this.moduleRef);
     RealtimeGateway.registerSessionService(this.sessionService);

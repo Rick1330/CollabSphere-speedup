@@ -291,6 +291,9 @@ export function useWorkspaceRealtime(workspaceId: string | undefined): void {
         if (!data) return;
         void queryClient.invalidateQueries({ queryKey: queryKeys.activity.workspace(workspaceId) });
         void queryClient.invalidateQueries({ queryKey: queryKeys.activity.dashboard() });
+        void queryClient.invalidateQueries({
+          queryKey: ["workspace", workspaceId, "activity", "document"],
+        });
         invalidateWorkspaceHome();
         break;
       }

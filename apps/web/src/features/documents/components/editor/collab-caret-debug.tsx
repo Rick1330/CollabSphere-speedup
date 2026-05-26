@@ -46,6 +46,7 @@ export function CollabCaretDebug({ status, clients }: CollabCaretDebugProps) {
   const [caretMetrics, setCaretMetrics] = useState<CaretMetrics | null>(null);
 
   useEffect(() => {
+    if (!import.meta.env.DEV) return;
     const tick = () => {
       setDomCaretCount(document.querySelectorAll(".tiptap .collaboration-cursor__caret").length);
       setCaretMetrics(readRemoteCaretMetrics());
@@ -61,12 +62,12 @@ export function CollabCaretDebug({ status, clients }: CollabCaretDebugProps) {
 
   return (
     <div
-      className="group fixed bottom-0 right-0 z-[100] flex flex-col items-end"
-      aria-label="Collab debug hover zone"
+      className="group fixed bottom-1 left-1 z-40 flex flex-col items-start pointer-events-none"
+      aria-label="Collab debug"
     >
       <div
         className={cn(
-          "mb-2 mr-4 max-w-sm rounded-lg border border-stone-300 bg-white/95 p-3 font-mono text-[10px] leading-snug text-stone-800 shadow-lg backdrop-blur-sm",
+          "mb-1 max-w-sm rounded-lg border border-stone-300 bg-white/95 p-3 font-mono text-[10px] leading-snug text-stone-800 shadow-lg backdrop-blur-sm",
           "opacity-0 invisible pointer-events-none",
           "transition-[opacity,visibility] duration-150",
           "group-hover:opacity-100 group-hover:visible group-hover:pointer-events-auto",
@@ -106,13 +107,16 @@ export function CollabCaretDebug({ status, clients }: CollabCaretDebugProps) {
           )}
         </ul>
         <p className="mt-2 text-stone-600">
-          Text caret = colored bar in document. Mouse = Windows-style pointer overlay. Hover this
-          footer corner to show or hide this panel.
+          Text caret = colored bar in document. Mouse = Windows-style pointer overlay. Hover the
+          dev chip in the bottom-left corner to show this panel.
         </p>
       </div>
 
-      {/* Invisible hit target over status bar right (CONNECTED / UNSAVED) */}
-      <div className="h-8 w-36 shrink-0" aria-hidden="true" />
+      <div
+        className="pointer-events-auto h-2 w-2 rounded-full border border-stone-400 bg-stone-300/80 shadow-sm"
+        title="Collab caret debug (dev only)"
+        aria-hidden="true"
+      />
     </div>
   );
 }
