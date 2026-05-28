@@ -53,6 +53,51 @@ export type CreateWorkspaceInput = {
   templateId?: string | null;
 };
 
+export type UpdateWorkspaceSettingsInput = {
+  name?: string;
+  description?: string | null;
+  icon?: string | null;
+};
+
+export type UpdateWorkspaceSettingsResult = {
+  workspaceId: string;
+  updatedAt: string;
+};
+
+export async function updateWorkspaceSettings(
+  workspaceId: string,
+  input: UpdateWorkspaceSettingsInput,
+): Promise<UpdateWorkspaceSettingsResult> {
+  const body: Record<string, string | null> = {};
+  if (input.name !== undefined) {
+    body.name = input.name.trim();
+  }
+  if (input.description !== undefined) {
+    const trimmed = input.description?.trim() ?? "";
+    body.description = trimmed.length > 0 ? trimmed : null;
+  }
+  if (input.icon !== undefined) {
+    const trimmed = input.icon?.trim() ?? "";
+    body.icon = trimmed.length > 0 ? trimmed : null;
+  }
+
+  const payload = await request<unknown>(`/workspaces/${workspaceId}`, {
+    method: "PUT",
+    body,
+  });
+  const data = parseApiSingleEnvelope<{
+    workspaceId?: string;
+    updatedAt?: string;
+  }>(payload);
+  if (!data.workspaceId) {
+    throw new Error("Workspace update response is missing workspaceId.");
+  }
+  return {
+    workspaceId: data.workspaceId,
+    updatedAt: data.updatedAt ?? new Date().toISOString(),
+  };
+}
+
 export async function createWorkspace(input: CreateWorkspaceInput): Promise<WorkspaceCoreDto> {
   const payload = await request<unknown>("/workspaces", {
     method: "POST",

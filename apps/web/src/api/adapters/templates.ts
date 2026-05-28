@@ -5,13 +5,12 @@ import { request } from "@/api/client";
 import { parseApiListEnvelope } from "@/api/client/envelope";
 import {
   DOCUMENT_TEMPLATES,
-  WORKSPACE_TEMPLATES,
   getDocumentTemplate,
-  getWorkspaceTemplate,
   type DocumentTemplate,
   type WorkspaceTemplate,
   type TemplateCategory,
 } from "@/lib/mock-templates";
+import { isLegacyWorkspaceTemplateId } from "@/lib/legacy-workspace-template-ids";
 
 export type { WorkspaceTemplate, DocumentTemplate, TemplateCategory };
 export {
@@ -21,7 +20,7 @@ export {
   clearPendingDoc,
 } from "@/lib/mock-template-seed";
 
-export { getDocumentTemplate, getWorkspaceTemplate, DOCUMENT_TEMPLATES, WORKSPACE_TEMPLATES };
+export { getDocumentTemplate, DOCUMENT_TEMPLATES };
 
 type ApiTemplateRow = {
   id: string;
@@ -165,11 +164,6 @@ export async function listDocumentTemplatesFromApi(
   }
 }
 
-/** True when the wizard is showing mock tpl-* ids (API list missing or empty). */
-export function usesMockWorkspaceTemplateCatalog(templates: WorkspaceTemplate[]): boolean {
-  return templates.length > 0 && templates.every((t) => t.id.startsWith("tpl-"));
-}
-
 export async function listWorkspaceTemplatesFromApi(
   workspaceType: TemplateCategory,
 ): Promise<WorkspaceTemplate[]> {
@@ -178,7 +172,9 @@ export async function listWorkspaceTemplatesFromApi(
       `/templates?kind=workspace&category=${encodeURIComponent(workspaceType)}`,
     );
     const { items } = parseApiListEnvelope<ApiTemplateRow>(payload);
-    return items.map(mapWorkspaceTemplate);
+    return items
+      .filter((row) => !isLegacyWorkspaceTemplateId(row.id))
+      .map(mapWorkspaceTemplate);
   } catch {
     return [];
   }

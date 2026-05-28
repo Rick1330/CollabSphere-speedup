@@ -98,7 +98,21 @@ const defaultFolders = [
   { key: "root-notes", name: "Notes" },
 ];
 
+const LEGACY_WORKSPACE_TEMPLATE_IDS = [
+  "professional-team",
+  "academic-thesis",
+  "academic-coursework",
+  "general-blank",
+];
+
 async function main() {
+  const removedLegacy = await prisma.template.deleteMany({
+    where: { id: { in: LEGACY_WORKSPACE_TEMPLATE_IDS } },
+  });
+  if (removedLegacy.count > 0) {
+    console.log(`Removed ${removedLegacy.count} legacy workspace template(s).`);
+  }
+
   const workspaceTemplates = [
     // Guide-defined templates (new-rev/CollabSphere_Workspace_Templates_Academic_Submission_Addendum.md)
     workspace(

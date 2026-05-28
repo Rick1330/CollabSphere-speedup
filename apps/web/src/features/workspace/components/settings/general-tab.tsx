@@ -1,14 +1,23 @@
+import { useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AlertCircle, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { SettingsSection } from "@/features/settings/components/settings-section";
 import { workspaceStore, type StoredWorkspaceType } from "@/features/workspace/store/workspace-store";
+import {
+  fetchWorkspaceSidebarContext,
+  updateWorkspaceSettings,
+} from "@/api/adapters/workspaces";
+import { ApiError } from "@/api/client";
+import { queryKeys } from "@/lib/query-keys";
+import { isDatabaseWorkspaceId } from "@/lib/workspace-id";
 import { cn } from "@/lib/utils";
 
 const generalSchema = z.object({
-  name: z.string().min(3, "At least 3 characters").max(60, "Max 60 characters"),
+  name: z.string().min(2, "At least 2 characters").max(60, "Max 60 characters"),
   description: z.string().max(280, "Max 280 characters").optional(),
   icon: z.string().max(2).optional(),
 });
@@ -34,6 +43,9 @@ const typeBadgeClass = (t: StoredWorkspaceType) =>
       : "bg-stone-100 text-stone-500 border-stone-200";
 
 export const GeneralTab = ({ workspaceId, workspace, onSaved }: GeneralTabProps) => {
+  const queryClient = useQueryClient();
+  const isDbWorkspace = isDatabaseWorkspaceId(workspaceId);
+
   const form = useForm<GeneralValues>({
     resolver: zodResolver(generalSchema),
     defaultValues: {
@@ -43,12 +55,62 @@ export const GeneralTab = ({ workspaceId, workspace, onSaved }: GeneralTabProps)
     },
   });
 
+  useEffect(() => {
+    form.reset({
+      name: workspace.name,
+      description: workspace.description ?? "",
+      icon: workspace.icon ?? "",
+    });
+  }, [workspace.name, workspace.description, workspace.icon, form]);
+
+  const saveMutation = useMutation({
+    mutationFn: (values: GeneralValues) =>
+      updateWorkspaceSettings(workspaceId, {
+        name: values.name.trim(),
+        description: values.description?.trim() ? values.description.trim() : null,
+        icon: values.icon?.trim() ? values.icon.trim() : null,
+      }),
+    onSuccess: (_result, values) => {
+      queryClient.setQueryData(
+        queryKeys.workspaces.detail(workspaceId),
+        (old: Awaited<ReturnType<typeof fetchWorkspaceSidebarContext>> | undefined) => {
+          if (!old?.sidebar) return old;
+          return {
+            ...old,
+            sidebar: {
+              ...old.sidebar,
+              name: values.name.trim(),
+              description: values.description?.trim() || undefined,
+              icon: values.icon?.trim() || undefined,
+            },
+          };
+        },
+      );
+      void queryClient.invalidateQueries({ queryKey: queryKeys.workspaces.mine() });
+      toast.success("Workspace settings updated");
+      form.reset(values);
+      onSaved();
+    },
+    onError: (error) => {
+      const message =
+        error instanceof ApiError
+          ? error.message
+          : error instanceof Error
+            ? error.message
+            : "Failed to update settings.";
+      toast.error(message);
+    },
+  });
+
   const onSubmit = async (values: GeneralValues) => {
+    if (isDbWorkspace) {
+      saveMutation.mutate(values);
+      return;
+    }
+
     try {
-      await new Promise((r) => setTimeout(r, 400));
       const stored = workspaceStore.getById({ workspaceId });
       if (stored) {
-        // mutate via store API: re-create with new fields
         workspaceStore.remove({ workspaceId });
         workspaceStore.create({
           id: workspaceId,
@@ -68,6 +130,8 @@ export const GeneralTab = ({ workspaceId, workspace, onSaved }: GeneralTabProps)
       toast.error("Failed to update settings.");
     }
   };
+
+  const isSubmitting = form.formState.isSubmitting || saveMutation.isPending;
 
   return (
     <SettingsSection title="General" description="Basic workspace information.">
@@ -172,10 +236,10 @@ export const GeneralTab = ({ workspaceId, workspace, onSaved }: GeneralTabProps)
         <div className="flex justify-end pt-2">
           <button
             type="submit"
-            disabled={form.formState.isSubmitting || !form.formState.isDirty}
+            disabled={isSubmitting || !form.formState.isDirty}
             className="h-9 px-5 rounded-lg bg-teal-600 hover:bg-teal-500 disabled:opacity-40 disabled:cursor-not-allowed text-sm font-medium text-white transition-colors flex items-center gap-1.5"
           >
-            {form.formState.isSubmitting ? (
+            {isSubmitting ? (
               <>
                 <Loader2 className="h-3.5 w-3.5 animate-spin" /> Saving...
               </>

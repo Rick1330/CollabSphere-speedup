@@ -24,7 +24,7 @@ type WorkspaceMembership = {
 export class WorkspacesService {
   constructor(
     @Inject(PrismaClientProvider) private readonly prisma: PrismaClientProvider,
-    private readonly eventEmitter: EventEmitter2,
+    @Inject(EventEmitter2) private readonly eventEmitter: EventEmitter2,
     private readonly redisPublish: RedisPublishService,
   ) {}
 
@@ -205,7 +205,7 @@ export class WorkspacesService {
       },
     });
 
-    this.eventEmitter.emit("workspace.settings_updated", {
+    this.eventEmitter?.emit?.("workspace.settings_updated", {
       workspaceId: updated.id,
       settings: {
         ...(name !== undefined ? { name } : {}),
@@ -238,12 +238,12 @@ export class WorkspacesService {
     });
 
     if (updated.status === "archived") {
-      this.eventEmitter.emit("workspace.archived", {
+      this.eventEmitter?.emit?.("workspace.archived", {
         workspaceId: updated.id,
         actorId: actorUserId,
       });
     } else {
-      this.eventEmitter.emit("workspace.updated", {
+      this.eventEmitter?.emit?.("workspace.updated", {
         workspaceId: updated.id,
         changes: { status: updated.status },
       });
@@ -271,7 +271,7 @@ export class WorkspacesService {
       select: { id: true },
     });
 
-    this.eventEmitter.emit("workspace.updated", {
+    this.eventEmitter?.emit?.("workspace.updated", {
       workspaceId,
       changes: { deleted: true },
     });
@@ -337,7 +337,7 @@ export class WorkspacesService {
       });
     });
 
-    this.eventEmitter.emit("workspace.updated", {
+    this.eventEmitter?.emit?.("workspace.updated", {
       workspaceId,
       changes: { ownerId: newOwnerUserId },
     });
@@ -791,7 +791,7 @@ export class WorkspacesService {
     });
 
     try {
-      this.eventEmitter.emit("workspace.member_role_changed", {
+      this.eventEmitter?.emit?.("workspace.member_role_changed", {
         workspaceId,
         userId: targetMembership.userId,
         newRole: role,
@@ -847,7 +847,7 @@ export class WorkspacesService {
       },
     });
 
-    this.eventEmitter.emit("workspace.member_removed", {
+    this.eventEmitter?.emit?.("workspace.member_removed", {
       workspaceId,
       userId: targetMembership.userId,
     });

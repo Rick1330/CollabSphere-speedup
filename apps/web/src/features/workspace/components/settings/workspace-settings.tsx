@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   AlertCircle,
@@ -25,6 +25,10 @@ import {
   type StoredWorkspaceType,
 } from "@/features/workspace/store/workspace-store";
 import { fetchMembers } from "@/api/adapters/members";
+import { fetchWorkspaceSidebarContext } from "@/api/adapters/workspaces";
+import type { WorkspaceForSidebar } from "@/features/workspace/components/workspace-sidebar";
+import { queryKeys } from "@/lib/query-keys";
+import { isDatabaseWorkspaceId } from "@/lib/workspace-id";
 
 interface WorkspaceSettingsData {
   id: string;
@@ -53,14 +57,22 @@ interface WorkspaceSettingsProps {
   initialTab?: TabKey;
 }
 
+const buildPermissions = (myRole: WorkspaceSettingsProps["myRole"]) => {
+  const isOwner = myRole === "OWNER";
+  const isAdminPlus = isOwner || myRole === "ADMIN";
+  return {
+    canEditSettings: isAdminPlus,
+    canArchive: isAdminPlus,
+    canDelete: isOwner,
+  };
+};
+
 const buildSettings = (
   workspaceId: string,
   fallback: WorkspaceSettingsProps["fallback"],
   myRole: WorkspaceSettingsProps["myRole"],
   stored?: StoredWorkspace,
 ): WorkspaceSettingsData => {
-  const isOwner = myRole === "OWNER";
-  const isAdminPlus = isOwner || myRole === "ADMIN";
   return {
     id: workspaceId,
     name: stored?.name ?? fallback.name,
@@ -68,13 +80,23 @@ const buildSettings = (
     icon: stored?.icon ?? fallback.icon,
     type: stored?.type ?? fallback.type,
     status: stored?.status ?? fallback.status,
-    permissions: {
-      canEditSettings: isAdminPlus,
-      canArchive: isAdminPlus,
-      canDelete: isOwner,
-    },
+    permissions: buildPermissions(myRole),
   };
 };
+
+const buildSettingsFromSidebar = (
+  workspaceId: string,
+  sidebar: WorkspaceForSidebar,
+  myRole: WorkspaceSettingsProps["myRole"],
+): WorkspaceSettingsData => ({
+  id: workspaceId,
+  name: sidebar.name,
+  description: sidebar.description,
+  icon: sidebar.icon,
+  type: sidebar.type,
+  status: sidebar.status,
+  permissions: buildPermissions(myRole),
+});
 
 type TabKey = "general" | "members" | "danger";
 
@@ -112,22 +134,49 @@ export const WorkspaceSettings = ({
   myRole,
   initialTab = "general",
 }: WorkspaceSettingsProps) => {
-  const [refreshKey, setRefreshKey] = useState(0);
   const [activeTab, setActiveTab] = useState<TabKey>(initialTab);
+  const isDbWorkspace = isDatabaseWorkspaceId(workspaceId);
 
-  const {
-    data: workspace,
-    isLoading,
-    isError,
-    refetch,
-  } = useQuery({
-    queryKey: ["workspace-settings", workspaceId, refreshKey],
+  const fallbackSettings = useMemo(
+    () => buildSettings(workspaceId, fallback, myRole),
+    [workspaceId, fallback, myRole],
+  );
+
+  const shellQuery = useQuery({
+    queryKey: queryKeys.workspaces.detail(workspaceId),
+    queryFn: () => fetchWorkspaceSidebarContext(workspaceId),
+    enabled: isDbWorkspace && workspaceId.length > 0,
+    staleTime: 30_000,
+  });
+
+  const localQuery = useQuery({
+    queryKey: ["workspace-settings", workspaceId] as const,
     queryFn: async () => {
-      await new Promise((r) => setTimeout(r, 200));
       const stored = workspaceStore.getById({ workspaceId });
       return buildSettings(workspaceId, fallback, myRole, stored);
     },
+    enabled: !isDbWorkspace && workspaceId.length > 0,
   });
+
+  const workspace = useMemo(() => {
+    if (isDbWorkspace) {
+      if (shellQuery.data?.sidebar) {
+        return buildSettingsFromSidebar(workspaceId, shellQuery.data.sidebar, myRole);
+      }
+      return fallbackSettings;
+    }
+    return localQuery.data;
+  }, [isDbWorkspace, shellQuery.data, localQuery.data, workspaceId, myRole, fallbackSettings]);
+
+  const isLoading = isDbWorkspace ? shellQuery.isLoading : localQuery.isLoading;
+  const isError = isDbWorkspace ? shellQuery.isError : localQuery.isError;
+  const refetch = () => {
+    if (isDbWorkspace) {
+      void shellQuery.refetch();
+    } else {
+      void localQuery.refetch();
+    }
+  };
 
   const { data: memberCount } = useQuery({
     queryKey: ["workspace", workspaceId, "members-count"],
@@ -135,11 +184,11 @@ export const WorkspaceSettings = ({
       const res = await fetchMembers(workspaceId);
       return res.data.items.length;
     },
+    enabled: isDbWorkspace,
   });
 
   const refresh = () => {
-    setRefreshKey((k) => k + 1);
-    refetch();
+    void refetch();
   };
 
   useEffect(() => {

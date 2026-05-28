@@ -6,6 +6,7 @@ import type { WorkspaceRole } from "@/api/adapters/members";
 import type { WorkspaceRoleLabelsMap } from "@/lib/role-labels";
 import { isDatabaseWorkspaceId } from "@/lib/workspace-id";
 import { ApiError } from "@/api/client";
+import { queryKeys } from "@/lib/query-keys";
 export interface WorkspaceRouteContextValue {
   workspaceId: string;
   sidebar: WorkspaceForSidebar | undefined;
@@ -31,7 +32,7 @@ export function useWorkspaceRouteContext(): WorkspaceRouteContextValue {
   const params = useParams<{ workspaceId: string }>();
   const workspaceId = params.workspaceId?.trim() ?? "";
   const q = useQuery({
-    queryKey: ["workspace", workspaceId, "shell"],
+    queryKey: queryKeys.workspaces.detail(workspaceId),
     queryFn: () => fetchWorkspaceSidebarContext(workspaceId),
     enabled: workspaceId.length > 0 && isDatabaseWorkspaceId(workspaceId),
     staleTime: 30_000,

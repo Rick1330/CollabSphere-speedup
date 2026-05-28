@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
@@ -19,9 +19,7 @@ import { createOpaqueId } from "@/lib/secure-random";
 import { ApiError } from "@/api/client";
 import { createWorkspace } from "@/api/adapters/workspaces";
 import {
-  WORKSPACE_TEMPLATES,
   listWorkspaceTemplatesFromApi,
-  getWorkspaceTemplate,
   type WorkspaceTemplate,
   type TemplateCategory,
 } from "@/api/adapters/templates";
@@ -47,6 +45,8 @@ type WizardData = {
   type: WorkspaceType | null;
   templateId: string | null;
   templateName: string | null;
+  templateTagline?: string;
+  templatePreview?: WorkspaceTemplate["preview"];
 };
 
 const ICON_CHOICES = [
@@ -91,6 +91,20 @@ export const CreateWorkspaceWizard = () => {
       : createOpaqueId("idem_"),
   );
 
+  const { data: templateCounts } = useQuery({
+    queryKey: ["templates", "workspace", "counts"],
+    queryFn: async () => {
+      const categories = ["professional", "academic", "general"] as const;
+      const entries = await Promise.all(
+        categories.map(async (category) => [
+          category,
+          (await listWorkspaceTemplatesFromApi(category)).length,
+        ] as const),
+      );
+      return Object.fromEntries(entries) as Record<WorkspaceType, number>;
+    },
+  });
+
   const workspaceType = data.type ?? "general";
   const { data: workspaceTemplates = [] } = useQuery({
     queryKey: ["templates", "workspace", workspaceType],
@@ -110,7 +124,13 @@ export const CreateWorkspaceWizard = () => {
   };
 
   const setWorkspaceType = (type: WorkspaceType) => {
-    updateData({ type, templateId: null, templateName: null });
+    updateData({
+      type,
+      templateId: null,
+      templateName: null,
+      templateTagline: undefined,
+      templatePreview: undefined,
+    });
     goNext();
   };
 
@@ -131,13 +151,12 @@ export const CreateWorkspaceWizard = () => {
         type: wsType,
         templateId: templateIdForApi,
       });
-      const tpl = data.templateId ? getWorkspaceTemplate(data.templateId) : null;
-      const seededFolders = tpl?.preview.folders.length ?? 0;
-      const seededDocs = tpl?.preview.documents.length ?? 0;
+      const seededFolders = data.templatePreview?.folders.length ?? 0;
+      const seededDocs = data.templatePreview?.documents.length ?? 0;
       toast.success(`"${ws.name}" is ready`, {
         description:
           seededFolders + seededDocs > 0
-            ? "Workspace created. Template seeding will appear as API-backed templates are enabled."
+            ? `Includes ${seededFolders} folders and ${seededDocs} starter documents.`
             : "An empty workspace, ready for you to shape.",
       });
       navigate(`/w/${ws.id}`);
@@ -245,6 +264,7 @@ export const CreateWorkspaceWizard = () => {
               {currentStep === 2 && (
                 <StepType
                   selectedType={data.type}
+                  templateCounts={templateCounts}
                   onSelect={setWorkspaceType}
                 />
               )}
@@ -252,8 +272,13 @@ export const CreateWorkspaceWizard = () => {
                 <StepTemplate
                   workspaceType={data.type}
                   selectedTemplateId={data.templateId}
-                  onSelect={(id, name) => {
-                    updateData({ templateId: id, templateName: name });
+                  onSelect={(template) => {
+                    updateData({
+                      templateId: template.id,
+                      templateName: template.name,
+                      templateTagline: template.tagline,
+                      templatePreview: template.preview,
+                    });
                     goNext();
                   }}
                 />
@@ -499,15 +524,17 @@ const TYPE_ACCENTS: Record<WorkspaceType, string> = {
 
 const StepType = ({
   selectedType,
+  templateCounts,
   onSelect,
 }: {
   selectedType: WorkspaceType | null;
+  templateCounts?: Partial<Record<WorkspaceType, number>>;
   onSelect: (type: WorkspaceType) => void;
 }) => (
   <ul className="divide-y divide-stone-200 border-y border-stone-200">
     {TYPE_OPTIONS.map((opt, idx) => {
       const isSelected = selectedType === opt.type;
-      const templateCount = WORKSPACE_TEMPLATES.filter((t) => t.category === opt.type).length;
+      const templateCount = templateCounts?.[opt.type] ?? 0;
       return (
         <li key={opt.type}>
           <button
@@ -585,7 +612,7 @@ const StepTemplate = ({
 }: {
   workspaceType: WorkspaceType;
   selectedTemplateId: string | null;
-  onSelect: (id: string, name: string) => void;
+  onSelect: (template: WorkspaceTemplate) => void;
 }) => {
   const [previewId, setPreviewId] = useState<string | null>(null);
 
@@ -622,7 +649,7 @@ const StepTemplate = ({
                 <div className="flex-1 min-w-0">
                   <button
                     type="button"
-                    onClick={() => onSelect(template.id, template.name)}
+                    onClick={() => onSelect(template)}
                     aria-pressed={selectedTemplateId === template.id}
                     className="text-left w-full focus-visible:outline-none focus-visible:underline"
                   >
@@ -666,7 +693,7 @@ const StepTemplate = ({
                 </div>
                 <button
                   type="button"
-                  onClick={() => onSelect(template.id, template.name)}
+                  onClick={() => onSelect(template)}
                   className="self-center inline-flex items-center gap-1.5 text-[12px] font-medium text-stone-900 border-b border-stone-300 hover:border-stone-900 pb-0.5 transition-colors duration-150 focus-visible:outline-none focus-visible:text-teal-700 focus-visible:border-teal-700"
                 >
                   Choose
@@ -682,7 +709,7 @@ const StepTemplate = ({
         template={previewTemplate}
         onClose={() => setPreviewId(null)}
         onChoose={(t) => {
-          onSelect(t.id, t.name);
+          onSelect(t);
           setPreviewId(null);
         }}
       />
@@ -861,7 +888,7 @@ const StepReview = ({
   onCreate: () => void;
   onEdit: (step: WizardStep) => void;
 }) => {
-  const tpl = data.templateId ? getWorkspaceTemplate(data.templateId) : null;
+  const preview = data.templatePreview;
 
   return (
     <div className="space-y-12">
@@ -910,8 +937,8 @@ const StepReview = ({
               <span className="text-[14px] text-stone-900">
                 {data.templateName ?? "Blank"}
               </span>
-              {tpl && (
-                <p className="text-[12px] text-stone-500 mt-0.5 italic">{tpl.tagline}</p>
+              {data.templateTagline && (
+                <p className="text-[12px] text-stone-500 mt-0.5 italic">{data.templateTagline}</p>
               )}
             </div>
           }
@@ -921,7 +948,7 @@ const StepReview = ({
           value={
             <span className="text-[14px] text-stone-600">
               You · <span className="font-mono text-[11px] tracking-[0.15em] uppercase">
-                {tpl?.preview.settings.roleLabel ?? "OWNER"}
+                {preview?.settings.roleLabel ?? "OWNER"}
               </span>
             </span>
           }
@@ -929,7 +956,7 @@ const StepReview = ({
       </dl>
 
       {/* What we'll create — seeded outputs summary */}
-      {tpl && (
+      {preview && (
         <section aria-labelledby="seeded-heading" className="space-y-5">
           <div className="flex items-baseline justify-between">
             <h2
@@ -945,12 +972,12 @@ const StepReview = ({
           </div>
 
           <dl className="space-y-4 border-l border-stone-200 pl-5">
-            <SeededRow label="Folders" count={tpl.preview.folders.length}>
-              {tpl.preview.folders.length === 0 ? (
+            <SeededRow label="Folders" count={preview.folders.length}>
+              {preview.folders.length === 0 ? (
                 <span className="text-[13px] text-stone-400 italic">None — start with an empty tree</span>
               ) : (
                 <div className="flex flex-wrap gap-1.5">
-                  {tpl.preview.folders.map((f) => (
+                  {preview.folders.map((f) => (
                     <span
                       key={f}
                       className="text-[12px] text-stone-700 border border-stone-200 px-2 py-0.5 rounded bg-stone-50/60"
@@ -962,12 +989,12 @@ const StepReview = ({
               )}
             </SeededRow>
 
-            <SeededRow label="Starter docs" count={tpl.preview.documents.length}>
-              {tpl.preview.documents.length === 0 ? (
+            <SeededRow label="Starter docs" count={preview.documents.length}>
+              {preview.documents.length === 0 ? (
                 <span className="text-[13px] text-stone-400 italic">None</span>
               ) : (
                 <ul className="space-y-0.5">
-                  {tpl.preview.documents.map((d) => (
+                  {preview.documents.map((d) => (
                     <li key={d.title} className="text-[12.5px] text-stone-700">
                       <span className="text-stone-900">{d.title}</span>
                       <span className="text-stone-400"> · {d.folder}</span>
@@ -977,9 +1004,9 @@ const StepReview = ({
               )}
             </SeededRow>
 
-            <SeededRow label="Task board" count={tpl.preview.taskColumns.length}>
+            <SeededRow label="Task board" count={preview.taskColumns.length}>
               <div className="flex flex-wrap gap-1.5">
-                {tpl.preview.taskColumns.map((col) => (
+                {preview.taskColumns.map((col) => (
                   <span
                     key={col}
                     className="font-mono text-[10px] tracking-wider uppercase text-stone-600 border border-stone-200 px-1.5 py-0.5 rounded"
@@ -993,7 +1020,7 @@ const StepReview = ({
             <SeededRow label="Workflow">
               <div className="space-y-1">
                 <div className="flex items-center gap-2 text-[13px]">
-                  {tpl.preview.settings.submissionWorkflowEnabled ? (
+                  {preview.settings.submissionWorkflowEnabled ? (
                     <>
                       <Check className="h-3.5 w-3.5 text-amber-700" aria-hidden="true" />
                       <span className="text-stone-800">Submission workflow enabled</span>
@@ -1002,7 +1029,7 @@ const StepReview = ({
                     <span className="text-stone-500">Direct publish — no submission gate</span>
                   )}
                 </div>
-                {tpl.preview.settings.supervisorReviewEnabled && (
+                {preview.settings.supervisorReviewEnabled && (
                   <div className="flex items-center gap-2 text-[13px]">
                     <Check className="h-3.5 w-3.5 text-amber-700" aria-hidden="true" />
                     <span className="text-stone-800">Supervisor review chain on tasks</span>
@@ -1014,7 +1041,7 @@ const StepReview = ({
         </section>
       )}
 
-      {!tpl && data.type && (
+      {!preview && data.type && (
         <section className="border-l border-stone-200 pl-5">
           <p className="text-[13px] text-stone-500 leading-relaxed">
             No template selected. We'll create an empty workspace with a default

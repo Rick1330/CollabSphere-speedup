@@ -149,16 +149,20 @@ export function useWorkspaceRealtime(workspaceId: string | undefined): void {
             const settings = data.settings ?? {};
             const nextSidebar = { ...old.sidebar };
             if (typeof settings.name === "string") nextSidebar.name = settings.name;
-            if (typeof settings.description === "string") {
-              nextSidebar.description = settings.description;
+            if ("description" in settings) {
+              nextSidebar.description =
+                typeof settings.description === "string" ? settings.description : undefined;
             }
-            if (typeof settings.icon === "string") nextSidebar.icon = settings.icon;
+            if ("icon" in settings) {
+              nextSidebar.icon = typeof settings.icon === "string" ? settings.icon : undefined;
+            }
             if (settings.status === "active" || settings.status === "archived") {
               nextSidebar.status = settings.status;
             }
             return { ...old, sidebar: nextSidebar };
           },
         );
+        void queryClient.invalidateQueries({ queryKey: queryKeys.workspaces.mine() });
         break;
       }
       case "workspace:archived": {

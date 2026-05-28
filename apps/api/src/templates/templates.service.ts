@@ -2,6 +2,10 @@ import { Inject, Injectable } from "@nestjs/common";
 import { AppError } from "../common/filters/app-error.filter.js";
 import { PrismaClientProvider } from "../common/prisma/prisma-client.provider.js";
 import type { Prisma } from "@prisma/client";
+import {
+  isLegacyWorkspaceTemplateId,
+  LEGACY_WORKSPACE_TEMPLATE_IDS,
+} from "./legacy-workspace-template-ids.js";
 
 @Injectable()
 export class TemplatesService {
@@ -11,6 +15,7 @@ export class TemplatesService {
     const where: Prisma.TemplateWhereInput = {
       scope: "system",
       isEnabled: true,
+      id: { notIn: [...LEGACY_WORKSPACE_TEMPLATE_IDS] },
       ...(filters?.kind ? { kind: filters.kind } : {}),
       ...(filters?.category ? { category: filters.category } : {}),
       ...(filters?.schemaVersion !== undefined && Number.isFinite(filters.schemaVersion)
@@ -38,6 +43,9 @@ export class TemplatesService {
   }
 
   async getById(id: string) {
+    if (isLegacyWorkspaceTemplateId(id)) {
+      throw new AppError({ code: "TEMPLATE_NOT_FOUND", message: "Template not found" });
+    }
     const template = await this.prisma.template.findFirst({
       where: {
         id,

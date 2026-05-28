@@ -163,6 +163,53 @@ describe("useWorkspaceRealtime", () => {
     });
   });
 
+  it("patches shell cache on workspace:settings_updated", async () => {
+    const shellKey = queryKeys.workspaces.detail(WORKSPACE_ID);
+    queryClient.setQueryData(shellKey, {
+      sidebar: {
+        id: WORKSPACE_ID,
+        name: "Old Name",
+        description: "Old desc",
+        icon: "📦",
+        type: "academic" as const,
+        status: "active" as const,
+        roleLabel: "OWNER",
+        permissions: {
+          canCreateContent: true,
+          canEditSettings: true,
+          canViewAnalytics: true,
+        },
+      },
+      myRole: "OWNER" as const,
+    });
+
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+
+    renderHook(() => useWorkspaceRealtime(WORKSPACE_ID), {
+      wrapper: createWrapper(queryClient),
+    });
+
+    await waitFor(() => expect(handlers.has("workspace:settings_updated")).toBe(true));
+    handlers.get("workspace:settings_updated")?.({
+      workspaceId: WORKSPACE_ID,
+      settings: {
+        name: "New Name",
+        description: "Updated description",
+        icon: "🎓",
+      },
+    });
+
+    const shell = queryClient.getQueryData<{
+      sidebar: { name: string; description?: string; icon?: string };
+    }>(shellKey);
+    expect(shell?.sidebar.name).toBe("New Name");
+    expect(shell?.sidebar.description).toBe("Updated description");
+    expect(shell?.sidebar.icon).toBe("🎓");
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: queryKeys.workspaces.mine(),
+    });
+  });
+
   it("re-joins on reconnect callback", async () => {
     renderHook(() => useWorkspaceRealtime(WORKSPACE_ID), {
       wrapper: createWrapper(queryClient),

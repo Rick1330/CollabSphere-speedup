@@ -38,36 +38,6 @@ export function resolveMockDocumentTemplateForApi(
   return seedId;
 }
 
-const MOCK_WORKSPACE_ID_TO_SEED_ID: Record<string, string> = {
-  "tpl-sw-dev": "professional-team",
-  "tpl-client-work": "professional-team",
-  "tpl-product-launch": "professional-team",
-  "tpl-thesis": "academic-thesis",
-  "tpl-research": "academic-thesis",
-  "tpl-coursework": "academic-coursework",
-  "tpl-personal": "general-blank",
-  "tpl-blank": "general-blank",
-};
-
-const SEEDED_WORKSPACE_TEMPLATE_TYPE: Record<string, TemplateCategory> = {
-  "general-blank": "general",
-  "professional-team": "professional",
-  "academic-thesis": "academic",
-  "academic-coursework": "academic",
-};
-
-export function resolveWizardWorkspaceTemplateForApi(
-  mockTemplateId: string | null | undefined,
-  workspaceType: TemplateCategory,
-): string | null {
-  if (!mockTemplateId) return null;
-  const seedId = MOCK_WORKSPACE_ID_TO_SEED_ID[mockTemplateId];
-  if (!seedId) return null;
-  const bucket = SEEDED_WORKSPACE_TEMPLATE_TYPE[seedId];
-  if (!bucket || bucket !== workspaceType) return null;
-  return seedId;
-}
-
 export function documentTemplateCategoriesForWorkspace(
   workspaceType: TemplateCategory,
 ): ReadonlySet<DocumentTemplate["category"]> {

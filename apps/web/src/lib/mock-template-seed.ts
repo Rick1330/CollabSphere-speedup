@@ -7,7 +7,7 @@
 // inside the tree-create dialog actually do something — picking a template
 // changes the content the editor opens with.
 
-import { getDocumentTemplate, getWorkspaceTemplate } from "./mock-templates";
+import { getDocumentTemplate } from "./mock-templates";
 
 const STORAGE_PREFIX = "collabsphere.pendingDoc.v1:";
 
@@ -92,14 +92,9 @@ export function clearPendingDoc(docId: string): void {
   }
 }
 
-/**
- * Returns the workspace-template seed (folders, starter docs, columns, …) for
- * a workspace stored in workspaceStore — null for the built-in mock workspaces
- * that weren't created from a template.
- */
-export function getWorkspaceSeed(templateId: string | null | undefined) {
-  if (!templateId) return null;
-  return getWorkspaceTemplate(templateId) ?? null;
+/** Workspace templates are applied server-side when creating via API `templateId`. */
+export function getWorkspaceSeed(_templateId: string | null | undefined) {
+  return null;
 }
 
 function escapeHtml(s: string): string {
