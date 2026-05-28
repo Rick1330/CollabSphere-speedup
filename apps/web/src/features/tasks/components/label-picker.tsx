@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Plus, X } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
@@ -6,13 +7,14 @@ import {
   createWorkspaceLabel,
   getLabelClasses,
   getLabelName,
-  getWorkspaceLabels,
+  listWorkspaceLabels,
 } from "@/api/adapters/labels";
 
 interface LabelPickerProps {
   workspaceId: string;
   value: string[];
   onChange: (next: string[]) => void;
+  suggestedLabels?: string[];
   /** Optional compact display when no labels are selected. */
   emptyLabel?: string;
   /** Disable the picker (read-only contexts). */
@@ -27,12 +29,34 @@ export const LabelPicker = ({
   workspaceId,
   value,
   onChange,
+  suggestedLabels = [],
   emptyLabel = "Add labels",
   disabled = false,
 }: LabelPickerProps) => {
+  const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const all = getWorkspaceLabels(workspaceId);
+  const labelsQuery = useQuery({
+    queryKey: ["workspace", workspaceId, "task-labels"],
+    queryFn: () => listWorkspaceLabels(workspaceId),
+    staleTime: 60_000,
+  });
+  const all = useMemo(() => {
+    const apiLabels = labelsQuery.data ?? [];
+    if (apiLabels.length > 0) {
+      return apiLabels;
+    }
+    const fallback = new Set([...suggestedLabels, ...value]);
+    return Array.from(fallback)
+      .filter(Boolean)
+      .sort((left, right) => left.localeCompare(right))
+      .map((slug) => ({
+        value: slug,
+        name: slug.charAt(0).toUpperCase() + slug.slice(1),
+        tone: "stone" as const,
+        description: null,
+      }));
+  }, [labelsQuery.data, suggestedLabels, value]);
   const q = query.trim().toLowerCase();
   const filtered = q
     ? all.filter((l) => l.name.toLowerCase().includes(q) || l.value.includes(q))
@@ -62,15 +86,15 @@ export const LabelPicker = ({
           key={slug}
           className={cn(
             "group inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full border tabular-nums",
-            getLabelClasses(slug),
+            getLabelClasses(workspaceId, slug),
           )}
         >
-          {getLabelName(slug)}
+          {getLabelName(workspaceId, slug)}
           {!disabled && (
             <button
               type="button"
               onClick={() => toggle(slug)}
-              aria-label={`Remove ${getLabelName(slug)}`}
+              aria-label={`Remove ${getLabelName(workspaceId, slug)}`}
               className="opacity-50 hover:opacity-100 -mr-0.5"
             >
               <X className="h-3 w-3" />
@@ -110,9 +134,12 @@ export const LabelPicker = ({
                 <li>
                   <button
                     type="button"
-                    onClick={() => {
-                      const created = createWorkspaceLabel(workspaceId, query.trim());
+                    onClick={async () => {
+                      const created = await createWorkspaceLabel(workspaceId, query.trim());
                       if (!created) return;
+                      void queryClient.invalidateQueries({
+                        queryKey: ["workspace", workspaceId, "task-labels"],
+                      });
                       if (!value.includes(created.value)) {
                         onChange([...value, created.value]);
                       }
@@ -129,7 +156,12 @@ export const LabelPicker = ({
                   </button>
                 </li>
               )}
-              {filtered.length === 0 && (
+              {labelsQuery.isError && (
+                <li className="px-3 py-3 text-[12px] text-rose-500 text-center">
+                  Could not load workspace labels.
+                </li>
+              )}
+              {filtered.length === 0 && !labelsQuery.isError && (
                 <li className="px-3 py-4 text-[12px] text-stone-400 italic text-center">
                   No labels found.
                 </li>
@@ -149,7 +181,7 @@ export const LabelPicker = ({
                       <span
                         className={cn(
                           "inline-flex items-center text-[10.5px] font-medium px-1.5 py-0.5 rounded-full border",
-                          getLabelClasses(l.value),
+                          getLabelClasses(workspaceId, l.value),
                         )}
                       >
                         {l.name}

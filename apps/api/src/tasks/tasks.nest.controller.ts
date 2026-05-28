@@ -96,6 +96,27 @@ class AssignTaskBodyDto {
   assigneeId!: string | null;
 }
 
+class UpdateTaskRelationshipsBodyDto {
+  @IsOptional()
+  @IsUUID()
+  parentTaskId?: string | null;
+
+  @IsOptional()
+  @IsArray()
+  @IsUUID("4", { each: true })
+  blockedByTaskIds?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @IsUUID("4", { each: true })
+  blockingTaskIds?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @IsUUID("4", { each: true })
+  subtaskIds?: string[];
+}
+
 class UpdateTaskStatusBodyDto {
   @IsEnum(["backlog", "todo", "in_progress", "in_review", "done"])
   status!: TaskStatus;
@@ -205,6 +226,26 @@ export class TasksNestController {
     @Body() body: UpdateTaskBodyDto,
   ) {
     const task = await this.tasksService.updateTask({ actorUserId, workspaceId, taskId, ...body });
+    return wrapSuccessResponse({
+      payload: createSingleResourcePayload({ task }),
+      requestId,
+    });
+  }
+
+  @Patch(":taskId/relationships")
+  async updateTaskRelationships(
+    @Param("workspaceId") workspaceId: string,
+    @Param("taskId") taskId: string,
+    @CurrentUserId() actorUserId: string,
+    @ReqRequestId() requestId: string,
+    @Body() body: UpdateTaskRelationshipsBodyDto,
+  ) {
+    const task = await this.tasksService.updateTaskRelationships({
+      actorUserId,
+      workspaceId,
+      taskId,
+      ...body,
+    });
     return wrapSuccessResponse({
       payload: createSingleResourcePayload({ task }),
       requestId,

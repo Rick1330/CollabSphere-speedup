@@ -88,6 +88,11 @@ type ApiTask = {
   createdAt?: string | Date;
   updatedAt?: string | Date;
   position?: number | string | null;
+  parentId?: string | null;
+  parentTaskId?: string | null;
+  subtaskIds?: string[];
+  blockedByTaskIds?: string[];
+  blockingTaskIds?: string[];
 };
 
 type ApiComment = {
@@ -140,10 +145,10 @@ function toTaskDetail(task: ApiTask): TaskDetail {
     updatedAt: toIsoOrNow(task.updatedAt),
     linkedResources: [],
     comments: [],
-    parentTaskId: null,
-    subtaskIds: [],
-    blockedByTaskIds: [],
-    blockingTaskIds: [],
+    parentTaskId: task.parentTaskId ?? task.parentId ?? null,
+    subtaskIds: Array.isArray(task.subtaskIds) ? task.subtaskIds : [],
+    blockedByTaskIds: Array.isArray(task.blockedByTaskIds) ? task.blockedByTaskIds : [],
+    blockingTaskIds: Array.isArray(task.blockingTaskIds) ? task.blockingTaskIds : [],
   };
 }
 
@@ -309,4 +314,99 @@ export async function listWorkspaceMembers(
   return members
     .map((member) => toTaskAssignee(member.user))
     .filter((member): member is TaskAssignee => Boolean(member));
+}
+
+type ApiTaskColumn = {
+  id: string;
+  name: string;
+  status: string;
+  position?: string | number | null;
+};
+
+const toneByStatus: Record<string, TaskBoardColumnConfig["tone"]> = {
+  backlog: "stone",
+  todo: "stone",
+  in_progress: "teal",
+  in_review: "amber",
+  done: "emerald",
+};
+
+export type UpdateTaskInput = {
+  title?: string;
+  description?: string | null;
+  priority?: TaskDetail["priority"];
+  dueDate?: string | null;
+  labels?: string[];
+};
+
+export type UpdateTaskRelationshipsInput = {
+  parentTaskId?: string | null;
+  blockedByTaskIds?: string[];
+  blockingTaskIds?: string[];
+  subtaskIds?: string[];
+};
+
+export async function assignTask(
+  workspaceId: string,
+  taskId: string,
+  assigneeId: string | null,
+): Promise<TaskDetail> {
+  const payload = await request<unknown>(`/workspaces/${workspaceId}/tasks/${taskId}/assign`, {
+    method: "PATCH",
+    body: { assigneeId },
+  });
+  const resource = parseSingleEnvelope<{ task?: ApiTask }>(payload);
+  if (!resource.task) {
+    throw new Error("Invalid API task assign envelope.");
+  }
+  return toTaskDetail(resource.task);
+}
+
+export async function updateTask(
+  workspaceId: string,
+  taskId: string,
+  patch: UpdateTaskInput,
+): Promise<TaskDetail> {
+  const payload = await request<unknown>(`/workspaces/${workspaceId}/tasks/${taskId}`, {
+    method: "PATCH",
+    body: patch,
+  });
+  const resource = parseSingleEnvelope<{ task?: ApiTask }>(payload);
+  if (!resource.task) {
+    throw new Error("Invalid API task update envelope.");
+  }
+  return toTaskDetail(resource.task);
+}
+
+export async function updateTaskRelationships(
+  workspaceId: string,
+  taskId: string,
+  patch: UpdateTaskRelationshipsInput,
+): Promise<TaskDetail> {
+  const payload = await request<unknown>(
+    `/workspaces/${workspaceId}/tasks/${taskId}/relationships`,
+    {
+      method: "PATCH",
+      body: patch,
+    },
+  );
+  const resource = parseSingleEnvelope<{ task?: ApiTask }>(payload);
+  if (!resource.task) {
+    throw new Error("Invalid API task relationships envelope.");
+  }
+  return toTaskDetail(resource.task);
+}
+
+export async function listTaskColumns(workspaceId: string): Promise<TaskBoardColumnConfig[]> {
+  const payload = await request<unknown>(`/workspaces/${workspaceId}/task-columns`);
+  const items = parseListEnvelope<ApiTaskColumn>(payload);
+  const mapped = items.map((column) => ({
+    status: column.status as TaskBoardColumnConfig["status"],
+    label: column.name,
+    tone: toneByStatus[column.status] ?? "violet",
+    isDone: column.status === "done",
+    position: typeof column.position === "number" ? column.position : Number(column.position ?? 0),
+  }));
+  mapped.sort((a, b) => a.position - b.position);
+  return mapped.map(({ position: _position, ...rest }) => rest);
 }

@@ -41,7 +41,7 @@ function mineRowToSummary(row: MineWorkspaceRow, lastAccessedAt: string): Worksp
     tasks: row.taskCount,
     memberCount: row.memberCount,
     recentMembers: row.recentMembers,
-    roleLabel: getWorkspaceRoleLabel(row.workspace.type, row.role),
+    roleLabel: getWorkspaceRoleLabel(row.workspace.type, row.role, row.roleLabels),
     lastAccessedAt,
     isAdminOrOwner: row.role === "OWNER" || row.role === "ADMIN",
   };

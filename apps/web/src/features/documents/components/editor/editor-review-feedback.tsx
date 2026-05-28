@@ -21,25 +21,25 @@ export const EditorReviewFeedback = ({
   onResubmit,
 }: EditorReviewFeedbackProps) => {
   return (
-    <div
+    <section
       role="region"
       aria-label="Reviewer feedback"
-      className="flex-shrink-0 border-b border-red-200 bg-gradient-to-b from-red-50/70 to-white"
+      className="rounded-xl border border-red-200 bg-gradient-to-b from-red-50/70 to-white p-3"
     >
-      <div className="max-w-3xl mx-auto px-6 md:px-10 lg:px-16 py-4 space-y-3">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex items-start gap-3 min-w-0">
-            <div className="h-10 w-10 rounded-lg bg-red-100 border border-red-300 flex items-center justify-center flex-shrink-0">
-              <MessageSquareWarning className="h-4.5 w-4.5 text-red-700" />
+      <div className="space-y-2.5">
+        <div className="flex items-start justify-between gap-2.5">
+          <div className="flex items-start gap-2.5 min-w-0">
+            <div className="h-8 w-8 rounded-lg bg-red-100 border border-red-300 flex items-center justify-center flex-shrink-0">
+              <MessageSquareWarning className="h-4 w-4 text-red-700" />
             </div>
             <div className="min-w-0">
-              <p className="font-mono text-[10px] text-red-700 tracking-[0.22em] uppercase font-semibold">
+              <p className="font-mono text-[9px] text-red-700 tracking-[0.16em] uppercase font-semibold">
                 Changes requested
               </p>
-              <h2 className="text-[15px] font-semibold text-stone-900 mt-0.5 leading-snug">
-                Address the feedback below, then resubmit
+              <h2 className="text-[13px] font-semibold text-stone-900 mt-0.5 leading-snug">
+                Revise and resubmit
               </h2>
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5 text-[12px] text-stone-600">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1 text-[11px] text-stone-600">
                 {lastDecision.decidedByName && (
                   <span className="inline-flex items-center gap-1.5">
                     <span
@@ -75,7 +75,7 @@ export const EditorReviewFeedback = ({
             <button
               type="button"
               onClick={onResubmit}
-              className="flex-shrink-0 h-9 px-3 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-semibold transition-colors flex items-center gap-1.5 shadow-sm"
+              className="flex-shrink-0 h-8 px-3 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold transition-colors flex items-center gap-1.5 shadow-sm"
             >
               <RotateCcw className="h-3.5 w-3.5" />
               Resubmit
@@ -84,14 +84,14 @@ export const EditorReviewFeedback = ({
         </div>
 
         {lastDecision.decisionNote && (
-          <blockquote className="border-l-2 border-red-400 pl-3 text-[13px] text-stone-800 leading-relaxed bg-white/70 py-2 rounded-r">
-            <span className="font-mono text-[9px] text-stone-400 tracking-[0.2em] uppercase block mb-0.5">
+          <blockquote className="border-l-2 border-red-400 pl-2.5 text-[12px] text-stone-800 leading-relaxed bg-white/70 py-2 rounded-r">
+            <span className="font-mono text-[9px] text-stone-400 tracking-[0.16em] uppercase block mb-0.5">
               Reviewer feedback
             </span>
             {lastDecision.decisionNote}
           </blockquote>
         )}
       </div>
-    </div>
+    </section>
   );
 };

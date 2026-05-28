@@ -2,16 +2,19 @@ import {
   Activity,
   BarChart3,
   CheckSquare,
+  ClipboardCheck,
   FileText,
   FolderOpen,
   LayoutDashboard,
   LayoutTemplate,
   Lock,
+  Send,
   Settings,
   Users,
   type LucideIcon,
 } from "lucide-react";
 import type { WorkspaceForSidebar } from "./workspace-sidebar";
+import { canReviewAcademic, canSubmitAcademic } from "@/lib/academic-capabilities";
 
 export type WorkspaceNavItem = {
   to: string;
@@ -20,9 +23,18 @@ export type WorkspaceNavItem = {
   end?: boolean;
   locked?: boolean;
   lockedTitle?: string;
+  badgeCount?: number;
 };
 
-export function getWorkspaceNavItems(workspace: WorkspaceForSidebar): WorkspaceNavItem[] {
+type WorkspaceNavBadges = {
+  reviewPending?: number;
+  submissionActive?: number;
+};
+
+export function getWorkspaceNavItems(
+  workspace: WorkspaceForSidebar,
+  badges?: WorkspaceNavBadges,
+): WorkspaceNavItem[] {
   const base = `/w/${workspace.id}`;
   const items: WorkspaceNavItem[] = [
     { to: base, label: "Overview", icon: LayoutDashboard, end: true },
@@ -56,6 +68,33 @@ export function getWorkspaceNavItems(workspace: WorkspaceForSidebar): WorkspaceN
       icon: Settings,
       locked: true,
       lockedTitle: "Admin+ only",
+    });
+  }
+
+  const canReview = canReviewAcademic({
+    workspaceType: workspace.type,
+    myRole: workspace.role,
+  });
+  if (canReview) {
+    items.push({
+      to: `${base}/review`,
+      label: "Review queue",
+      icon: ClipboardCheck,
+      badgeCount: badges?.reviewPending ?? 0,
+    });
+  }
+
+  const canSubmit = canSubmitAcademic({
+    workspaceType: workspace.type,
+    myRole: workspace.role,
+    canCreateContent: workspace.permissions.canCreateContent,
+  });
+  if (canSubmit) {
+    items.push({
+      to: `${base}/submissions`,
+      label: "Submission center",
+      icon: Send,
+      badgeCount: badges?.submissionActive ?? 0,
     });
   }
 

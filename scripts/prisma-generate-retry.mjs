@@ -42,7 +42,14 @@ for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
 
   if (result.status === 0) {
     if (backupPath && existsSync(backupPath)) {
-      rmSync(backupPath, { force: true });
+      try {
+        rmSync(backupPath, { force: true });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        process.stderr.write(
+          `[prisma-generate-retry] Prisma generate succeeded; could not remove engine backup (safe to delete manually): ${message}\n`,
+        );
+      }
     }
     process.exit(0);
   }

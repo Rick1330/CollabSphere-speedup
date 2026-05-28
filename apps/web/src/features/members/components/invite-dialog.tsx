@@ -19,8 +19,10 @@ import {
 } from "@/api/adapters/members";
 import { ApiError as ClientApiError } from "@/api/client";
 import {
+  getOwnerRoleInviteHint,
   getWorkspaceRoleDescription,
   getWorkspaceRoleLabel,
+  type WorkspaceRoleLabelsMap,
   type WorkspaceTypeForLabels,
 } from "@/lib/role-labels";
 
@@ -28,6 +30,7 @@ interface InviteDialogProps {
   workspaceId: string;
   currentUserRole: WorkspaceRole;
   workspaceType: WorkspaceTypeForLabels;
+  roleLabels?: WorkspaceRoleLabelsMap;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onInvited: () => void;
@@ -44,6 +47,7 @@ export const InviteDialog = ({
   workspaceId,
   currentUserRole,
   workspaceType,
+  roleLabels,
   open,
   onOpenChange,
   onInvited,
@@ -126,6 +130,7 @@ export const InviteDialog = ({
   };
 
   const watchedRole = form.watch("role");
+  const ownerInviteHint = getOwnerRoleInviteHint(roleLabels);
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
@@ -189,13 +194,18 @@ export const InviteDialog = ({
             >
               {assignable.map((role) => (
                 <option key={role} value={role}>
-                  {getWorkspaceRoleLabel(workspaceType, role)}
+                  {getWorkspaceRoleLabel(workspaceType, role, roleLabels)}
                 </option>
               ))}
             </select>
             <p className="text-xs text-stone-400 mt-1.5">
-              {getWorkspaceRoleDescription(workspaceType, watchedRole)}
+              {getWorkspaceRoleDescription(workspaceType, watchedRole, roleLabels)}
             </p>
+            {ownerInviteHint && (
+              <p className="text-xs text-amber-700/90 mt-2 rounded-md border border-amber-200/80 bg-amber-50/60 px-2.5 py-2">
+                {ownerInviteHint}
+              </p>
+            )}
           </div>
 
           {serverError && (

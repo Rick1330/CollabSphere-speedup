@@ -88,3 +88,50 @@ export function checkComposeServicePort(
 export function formatComposePortCheckFailure(result: ComposePortCheckResult): string {
   return result.hint ?? `Port ${result.hostPort} check failed for ${result.expectedContainer}`;
 }
+
+export function collectForeignContainers(
+  hostPort: number,
+  expectedContainer: string,
+): string[] {
+  return findContainersOnHostPort(hostPort).filter((name) => name !== expectedContainer);
+}
+
+export function collectForeignContainersForPorts(
+  checks: Array<{ hostPort: number; expectedContainer: string }>,
+): string[] {
+  const names = new Set<string>();
+  for (const { hostPort, expectedContainer } of checks) {
+    for (const name of collectForeignContainers(hostPort, expectedContainer)) {
+      names.add(name);
+    }
+  }
+  return [...names];
+}
+
+/** Stops containers by name; ignores already-stopped / missing containers. */
+export function stopDockerContainers(
+  names: string[],
+  onLog: (message: string) => void = () => {},
+): void {
+  for (const name of names) {
+    const result = spawnSync("docker", ["stop", name], {
+      encoding: "utf8",
+      windowsHide: true,
+    });
+
+    if (result.status === 0) {
+      onLog(`stopped ${name}`);
+      continue;
+    }
+
+    const detail = `${result.stderr ?? ""}${result.stdout ?? ""}`.trim();
+    if (/is not running|no such container|not found/i.test(detail)) {
+      onLog(`skip ${name} (not running)`);
+      continue;
+    }
+
+    throw new Error(
+      `docker stop ${name} failed: ${detail || `exit code ${result.status ?? "unknown"}`}`,
+    );
+  }
+}

@@ -3,6 +3,7 @@ import { Module } from "@nestjs/common";
 import { EventEmitterModule } from "@nestjs/event-emitter";
 import { Queues } from "@collabsphere/shared/jobs";
 import { PrismaModule } from "../common/prisma/prisma.module.js";
+import { DocumentSubmissionsNestController } from "./document-submissions.nest.controller.js";
 import { DocumentsNestController } from "./documents.nest.controller.js";
 import { DocxImportService } from "./docx-import.service.js";
 import { DocumentsService } from "./documents.service.js";
@@ -21,7 +22,7 @@ import { DocumentsService } from "./documents.service.js";
     }),
     BullModule.registerQueue({ name: Queues.DOCX_IMPORT }),
   ],
-  controllers: [DocumentsNestController],
+  controllers: [DocumentsNestController, DocumentSubmissionsNestController],
   providers: [DocumentsService, DocxImportService],
 })
 export class DocumentsNestModule {}

@@ -256,6 +256,7 @@ model Workspace {
   documentUpdates     DocumentUpdate[]
   documentRegionVariables DocumentRegionVariable[]
   tasks               Task[]
+  taskDependencies    TaskDependency[]
   taskDocumentLinks   TaskDocumentLink[]
   commentThreads      CommentThread[]
   comments            Comment[]
@@ -518,6 +519,7 @@ model Task {
   priority     TaskPriority             @default(medium)
   assigneeId   String?                  @map("assignee_id") @db.Uuid
   reporterId   String                   @map("reporter_id") @db.Uuid
+  parentId     String?                  @map("parent_id") @db.Uuid
   dueDate      DateTime?                @map("due_date") @db.Date
   labels       String[]                 @default([])
   position     Decimal                  @db.Decimal(20, 10)
@@ -526,12 +528,33 @@ model Task {
   updatedAt    DateTime                 @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt    DateTime?                @map("deleted_at") @db.Timestamptz(6)
 
-  workspace     Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  assignee      User?              @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
-  reporter      User               @relation("TaskReporter", fields: [reporterId], references: [id], onDelete: Restrict)
-  documentLinks TaskDocumentLink[]
+  workspace              Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  assignee               User?              @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  reporter               User               @relation("TaskReporter", fields: [reporterId], references: [id], onDelete: Restrict)
+  parent                 Task?              @relation("TaskHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  subtasks               Task[]             @relation("TaskHierarchy")
+  dependenciesAsDependent TaskDependency[]  @relation("DependentTask")
+  dependenciesAsBlocking  TaskDependency[]  @relation("BlockingTask")
+  documentLinks          TaskDocumentLink[]
 
+  @@index([workspaceId, parentId], map: "idx_tasks_workspace_parent")
   @@map("tasks")
+}
+
+model TaskDependency {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId     String   @map("workspace_id") @db.Uuid
+  dependentTaskId String   @map("dependent_task_id") @db.Uuid
+  blockingTaskId  String   @map("blocking_task_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  dependent Task      @relation("DependentTask", fields: [dependentTaskId], references: [id], onDelete: Cascade)
+  blocking  Task      @relation("BlockingTask", fields: [blockingTaskId], references: [id], onDelete: Cascade)
+
+  @@unique([dependentTaskId, blockingTaskId], map: "uq_task_dependencies_pair")
+  @@index([workspaceId], map: "idx_task_dependencies_workspace")
+  @@map("task_dependencies")
 }
 
 model TaskDocumentLink {

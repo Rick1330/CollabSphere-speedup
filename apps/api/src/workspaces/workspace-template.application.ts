@@ -1,6 +1,7 @@
 import type { Prisma, TaskStatus, WorkspaceType } from "@prisma/client";
 import { AppError } from "../common/filters/app-error.filter.js";
 import { parseTemplateEnvelopeV2 } from "../common/templates/template-schema.js";
+import { parseDocumentTemplateContent } from "../common/templates/template-schema.js";
 
 type TemplateFolderSpec = {
   key: string;
@@ -9,13 +10,24 @@ type TemplateFolderSpec = {
 };
 
 type TemplateDocumentSpec = {
+  key?: string;
   title: string;
   folderKey?: string | null;
+  documentTemplateId?: string | null;
+  submissionEnabled?: boolean;
+  initialStatus?: "draft";
 };
 
 type TemplateTaskColumnSpec = {
   name: string;
   status: TaskStatus;
+  position?: number;
+};
+
+type TemplateTaskLabelSpec = {
+  name: string;
+  color: string;
+  description?: string;
 };
 
 export type WorkspaceTemplateContentV2 = {
@@ -30,6 +42,7 @@ export type WorkspaceTemplateContentV2 = {
   documents?: TemplateDocumentSpec[];
   taskColumns?: TemplateTaskColumnSpec[];
   settings?: Record<string, unknown>;
+  taskLabels?: TemplateTaskLabelSpec[];
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -129,7 +142,15 @@ export const parseWorkspaceTemplateContent = (raw: unknown): WorkspaceTemplateCo
   const foldersRaw = payload.folders;
   const documentsRaw = payload.documents;
   const taskColumnsRaw = payload.taskColumns;
+  const taskBoardRaw = payload.taskBoard;
   const settingsRaw = payload.settings;
+  const defaultsRaw = payload.defaults;
+
+  const taskLabelsRawFromDefaults =
+    isRecord(defaultsRaw) && isRecord(defaultsRaw.taskLabels) ? defaultsRaw.taskLabels : undefined;
+  const taskLabelsRaw =
+    (isRecord(defaultsRaw) && Array.isArray(defaultsRaw.taskLabels) ? defaultsRaw.taskLabels : undefined) ??
+    (Array.isArray(payload.taskLabels) ? payload.taskLabels : undefined);
 
   const folders: TemplateFolderSpec[] | undefined = Array.isArray(foldersRaw)
     ? foldersRaw.map((entry) => {
@@ -162,7 +183,12 @@ export const parseWorkspaceTemplateContent = (raw: unknown): WorkspaceTemplateCo
         if (folderKey !== undefined && folderKey !== null && !isNonEmptyString(folderKey)) {
           throw new AppError({ code: "TEMPLATE_INVALID" });
         }
+        const docTemplateId = entry.documentTemplateId;
+        if (docTemplateId !== undefined && docTemplateId !== null && !isNonEmptyString(docTemplateId)) {
+          throw new AppError({ code: "TEMPLATE_INVALID" });
+        }
         return {
+          key: typeof entry.key === "string" ? sanitizeTemplateString(entry.key) : undefined,
           title: sanitizeTemplateString(entry.title),
           folderKey:
             folderKey === undefined
@@ -170,21 +196,40 @@ export const parseWorkspaceTemplateContent = (raw: unknown): WorkspaceTemplateCo
               : folderKey === null
                 ? null
                 : sanitizeTemplateString(folderKey),
+          documentTemplateId:
+            docTemplateId === undefined
+              ? undefined
+              : docTemplateId === null
+                ? null
+                : sanitizeTemplateString(docTemplateId),
+          submissionEnabled: Boolean(entry.submissionEnabled),
+          initialStatus: "draft",
         };
       })
     : undefined;
 
-  const taskColumns: TemplateTaskColumnSpec[] | undefined = Array.isArray(taskColumnsRaw)
-    ? taskColumnsRaw.map((entry) => {
+  const taskColumnsSource =
+    Array.isArray(taskColumnsRaw)
+      ? taskColumnsRaw
+      : isRecord(taskBoardRaw) && Array.isArray(taskBoardRaw.columns)
+        ? taskBoardRaw.columns
+        : undefined;
+
+  const taskColumns: TemplateTaskColumnSpec[] | undefined = Array.isArray(taskColumnsSource)
+    ? taskColumnsSource.map((entry) => {
         if (!isRecord(entry) || !isNonEmptyString(entry.name) || typeof entry.status !== "string") {
           throw new AppError({ code: "TEMPLATE_INVALID" });
         }
         if (!validTaskStatuses.includes(entry.status as TaskStatus)) {
           throw new AppError({ code: "TEMPLATE_INVALID" });
         }
+        const pos = entry.position;
+        const position =
+          typeof pos === "number" && Number.isFinite(pos) ? pos : undefined;
         return {
           name: sanitizeTemplateString(entry.name),
           status: entry.status as TaskStatus,
+          position,
         };
       })
     : undefined;
@@ -192,6 +237,44 @@ export const parseWorkspaceTemplateContent = (raw: unknown): WorkspaceTemplateCo
   if (settingsRaw !== undefined && settingsRaw !== null && !isRecord(settingsRaw)) {
     throw new AppError({ code: "TEMPLATE_INVALID" });
   }
+
+  // Guide v2 defaults: merge defaults.workspaceSettings + defaults.roleLabels into settings.
+  const defaultSettings =
+    isRecord(defaultsRaw) && isRecord(defaultsRaw.workspaceSettings)
+      ? defaultsRaw.workspaceSettings
+      : undefined;
+  const defaultRoleLabels =
+    isRecord(defaultsRaw) && isRecord(defaultsRaw.roleLabels)
+      ? defaultsRaw.roleLabels
+      : undefined;
+  const onboardingDocKey =
+    isRecord(defaultsRaw) && typeof defaultsRaw.onboardingDocKey === "string"
+      ? defaultsRaw.onboardingDocKey.trim()
+      : undefined;
+
+  const mergedSettingsRaw = {
+    ...(defaultSettings && isRecord(defaultSettings) ? defaultSettings : {}),
+    ...(defaultRoleLabels && isRecord(defaultRoleLabels) ? { roleLabels: defaultRoleLabels } : {}),
+    ...(onboardingDocKey ? { onboardingDocKey } : {}),
+    ...(settingsRaw && isRecord(settingsRaw) ? settingsRaw : {}),
+  };
+
+  const taskLabels: TemplateTaskLabelSpec[] | undefined = Array.isArray(taskLabelsRaw)
+    ? taskLabelsRaw.map((entry) => {
+        if (!isRecord(entry) || !isNonEmptyString(entry.name) || !isNonEmptyString(entry.color)) {
+          throw new AppError({ code: "TEMPLATE_INVALID" });
+        }
+        const desc = entry.description;
+        if (desc !== undefined && desc !== null && typeof desc !== "string") {
+          throw new AppError({ code: "TEMPLATE_INVALID" });
+        }
+        return {
+          name: sanitizeTemplateString(entry.name),
+          color: sanitizeTemplateString(entry.color),
+          description: typeof desc === "string" ? sanitizeTemplateString(desc) : undefined,
+        };
+      })
+    : undefined;
 
   return {
     schemaVersion: 2,
@@ -216,17 +299,72 @@ export const parseWorkspaceTemplateContent = (raw: unknown): WorkspaceTemplateCo
     folders,
     documents,
     taskColumns,
-    settings: settingsRaw ? (settingsRaw as Record<string, unknown>) : undefined,
+    settings: Object.keys(mergedSettingsRaw).length > 0 ? mergedSettingsRaw : undefined,
+    taskLabels,
   };
+};
+
+const WORKSPACE_ROLE_KEYS = ["OWNER", "ADMIN", "MANAGER", "MEMBER", "VIEWER"] as const;
+
+export type WorkspaceRoleLabelsMap = Partial<
+  Record<(typeof WORKSPACE_ROLE_KEYS)[number], string>
+>;
+
+export const extractRoleLabelsFromSettings = (
+  settings: unknown,
+): WorkspaceRoleLabelsMap | undefined => {
+  if (!settings || typeof settings !== "object" || Array.isArray(settings)) return undefined;
+  const raw = (settings as Record<string, unknown>).roleLabels;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const out: WorkspaceRoleLabelsMap = {};
+  for (const role of WORKSPACE_ROLE_KEYS) {
+    const label = (raw as Record<string, unknown>)[role];
+    if (typeof label === "string" && label.trim().length > 0) {
+      out[role] = label.trim();
+    }
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+};
+
+export const resolveRoleLabel = (
+  role: (typeof WORKSPACE_ROLE_KEYS)[number],
+  roleLabels?: WorkspaceRoleLabelsMap,
+): string => {
+  const fromSettings = roleLabels?.[role];
+  if (fromSettings) return fromSettings;
+  if (role === "OWNER") return "Owner";
+  return role
+    .toLowerCase()
+    .split("_")
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(" ");
 };
 
 export const buildDefaultWorkspaceSettings = (type: WorkspaceType) => {
   const roleLabels =
     type === "academic"
-      ? { OWNER: "OWNER", ADMIN: "ADVISOR", MANAGER: "SUPERVISOR", MEMBER: "STUDENT", VIEWER: "REVIEWER" }
+      ? {
+          OWNER: "Instructor",
+          ADMIN: "Advisor",
+          MANAGER: "Supervisor",
+          MEMBER: "Student",
+          VIEWER: "Reviewer",
+        }
       : type === "professional"
-        ? { OWNER: "OWNER", ADMIN: "TECH LEAD", MANAGER: "PROJECT MANAGER", MEMBER: "DEVELOPER", VIEWER: "STAKEHOLDER" }
-        : { OWNER: "OWNER", ADMIN: "ADMIN", MANAGER: "MANAGER", MEMBER: "MEMBER", VIEWER: "VIEWER" };
+        ? {
+            OWNER: "Owner",
+            ADMIN: "Tech Lead",
+            MANAGER: "Project Manager",
+            MEMBER: "Developer",
+            VIEWER: "Stakeholder",
+          }
+        : {
+            OWNER: "Owner",
+            ADMIN: "Admin",
+            MANAGER: "Manager",
+            MEMBER: "Member",
+            VIEWER: "Viewer",
+          };
 
   return {
     submissionWorkflowEnabled: type === "academic",
@@ -289,6 +427,37 @@ export const applyWorkspaceTemplate = async ({
   }
 
   const documents = templateContent.documents ?? [];
+  const templateIds = Array.from(
+    new Set(
+      documents
+        .map((d) => (typeof d.documentTemplateId === "string" ? d.documentTemplateId.trim() : ""))
+        .filter(Boolean),
+    ),
+  );
+  const templatesById =
+    templateIds.length > 0
+      ? new Map(
+          (
+            await tx.template.findMany({
+              where: {
+                id: { in: templateIds },
+                kind: "document",
+                isEnabled: true,
+              },
+              select: {
+                id: true,
+                kind: true,
+                category: true,
+                version: true,
+                schemaVersion: true,
+                contentFormat: true,
+                content: true,
+              },
+            })
+          ).map((t) => [t.id, t]),
+        )
+      : new Map();
+
   for (let i = 0; i < documents.length; i += 1) {
     const spec = documents[i];
     const folderId =
@@ -299,15 +468,66 @@ export const applyWorkspaceTemplate = async ({
       throw new AppError({ code: "TEMPLATE_INVALID" });
     }
 
+    const title = substituteTemplateVariables({
+      value: spec.title,
+      variables,
+    });
+
+    const templateId = spec.documentTemplateId?.trim() || null;
+    const template = templateId ? templatesById.get(templateId) ?? null : null;
+    if (templateId && !template) {
+      throw new AppError({ code: "TEMPLATE_NOT_FOUND" });
+    }
+    if (template && template.category !== workspaceType && template.category !== "general") {
+      throw new AppError({ code: "TEMPLATE_CATEGORY_MISMATCH" });
+    }
+
+    let parsedTemplate: ReturnType<typeof parseDocumentTemplateContent> | null = null;
+    if (template) {
+      parsedTemplate = parseDocumentTemplateContent(template.content);
+    }
+
+    const templateProperties =
+      parsedTemplate && template
+        ? {
+            template: {
+              id: template.id,
+              version: template.version,
+              schemaVersion: template.schemaVersion,
+              format: parsedTemplate.format ?? template.contentFormat ?? null,
+              metadata: parsedTemplate.metadata ?? null,
+              properties: parsedTemplate.properties ?? null,
+            },
+            blocks: parsedTemplate.blocks,
+            ...(parsedTemplate.regions ? { regions: parsedTemplate.regions } : {}),
+            ...(parsedTemplate.variables ? { variables: parsedTemplate.variables } : {}),
+          }
+        : null;
+    const propertiesWithSubmission =
+      spec.submissionEnabled === undefined
+        ? templateProperties
+        : {
+            ...(templateProperties ?? {}),
+            workflow: {
+              ...((templateProperties as Record<string, unknown> | null)?.workflow as
+                | Record<string, unknown>
+                | undefined),
+              submissionEnabled: Boolean(spec.submissionEnabled),
+            },
+          };
+
     await tx.document.create({
       data: {
         workspaceId,
         folderId,
-        title: substituteTemplateVariables({
-          value: spec.title,
-          variables,
-        }),
+        title,
         position: i + 1,
+        properties: propertiesWithSubmission
+          ? (JSON.parse(JSON.stringify(propertiesWithSubmission)) as Prisma.InputJsonValue)
+          : undefined,
+        templateId: template?.id ?? null,
+        templateVersion: template?.version ?? null,
+        templateSchemaVersion: template?.schemaVersion ?? null,
         createdById: actorUserId,
       },
       select: { id: true },
@@ -330,8 +550,22 @@ export const applyWorkspaceTemplate = async ({
           variables,
         }),
         status: col.status,
-        position: index + 1,
+        position: col.position ?? index + 1,
       })),
+    });
+  }
+
+  const taskLabels = templateContent.taskLabels;
+  if (taskLabels && taskLabels.length > 0) {
+    await tx.taskLabel.createMany({
+      data: taskLabels.map((label) => ({
+        workspaceId,
+        name: label.name,
+        color: label.color,
+        description: label.description ?? null,
+        createdById: actorUserId,
+      })),
+      skipDuplicates: true,
     });
   }
 

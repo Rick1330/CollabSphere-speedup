@@ -13,84 +13,102 @@ import type { WorkspaceRole } from "@/api/adapters/members";
 
 export type WorkspaceTypeForLabels = "professional" | "academic" | "general";
 
+export type WorkspaceRoleLabelsMap = Partial<Record<WorkspaceRole, string>>;
+
 /**
  * Default role-label map per workspace type. Workspaces can override
- * specific labels per-membership (the existing `roleLabel` field on
- * `WorkspaceMember`); when not overridden, this provides the truthful
- * default for the workspace type.
+ * specific labels via `settings.roleLabels` from the template.
  */
 const TYPE_LABEL_MAP: Record<WorkspaceTypeForLabels, Record<WorkspaceRole, string>> = {
   professional: {
-    OWNER: "OWNER",
-    ADMIN: "TECH LEAD",
-    MANAGER: "PROJECT MANAGER",
-    MEMBER: "MEMBER",
-    VIEWER: "STAKEHOLDER",
+    OWNER: "Owner",
+    ADMIN: "Tech Lead",
+    MANAGER: "Project Manager",
+    MEMBER: "Developer",
+    VIEWER: "Stakeholder",
   },
   academic: {
-    OWNER: "INSTRUCTOR",
-    ADMIN: "ADVISOR",
-    MANAGER: "SUPERVISOR",
-    MEMBER: "STUDENT",
-    VIEWER: "AUDITOR",
+    OWNER: "Instructor",
+    ADMIN: "Advisor",
+    MANAGER: "Supervisor",
+    MEMBER: "Student",
+    VIEWER: "Reviewer",
   },
   general: {
-    OWNER: "OWNER",
-    ADMIN: "ADMIN",
-    MANAGER: "MANAGER",
-    MEMBER: "MEMBER",
-    VIEWER: "VIEWER",
+    OWNER: "Owner",
+    ADMIN: "Admin",
+    MANAGER: "Manager",
+    MEMBER: "Member",
+    VIEWER: "Viewer",
   },
 };
 
 export function getWorkspaceRoleLabel(
   workspaceType: WorkspaceTypeForLabels,
   role: WorkspaceRole,
+  roleLabels?: WorkspaceRoleLabelsMap,
 ): string {
+  const fromSettings = roleLabels?.[role]?.trim();
+  if (fromSettings) return fromSettings;
   return TYPE_LABEL_MAP[workspaceType]?.[role] ?? role;
 }
 
-/**
- * Resolve the alias displayed in domain-specific contexts. The persona
- * "SUPERVISOR" is a domain alias; on the permission layer it maps to
- * MANAGER (academic workspaces) or ADMIN (research workspaces) and is
- * displayed as "Advisor" / "Reviewer" depending on the template.
- */
-export function getSupervisorAlias(workspaceType: WorkspaceTypeForLabels): string {
-  if (workspaceType === "academic") return "ADVISOR";
-  return "REVIEWER";
+/** True when the workspace template labels OWNER as a lead persona (e.g. Supervisor). */
+export function isOwnerLeadPersonaLabel(roleLabels?: WorkspaceRoleLabelsMap): boolean {
+  const ownerLabel = roleLabels?.OWNER?.trim().toLowerCase() ?? "";
+  return (
+    ownerLabel.includes("supervisor") ||
+    ownerLabel.includes("instructor") ||
+    ownerLabel.includes("advisor") ||
+    ownerLabel.includes("project manager")
+  );
+}
+
+export function getOwnerRoleInviteHint(roleLabels?: WorkspaceRoleLabelsMap): string | null {
+  if (!isOwnerLeadPersonaLabel(roleLabels)) return null;
+  const ownerLabel = roleLabels?.OWNER ?? "Owner";
+  const adminLabel = roleLabels?.ADMIN ?? "Admin";
+  const managerLabel = roleLabels?.MANAGER ?? "Manager";
+  return `The workspace creator holds the ${ownerLabel} role. Invite additional leads as ${adminLabel} or ${managerLabel}.`;
 }
 
 export function getWorkspaceRoleDescription(
   workspaceType: WorkspaceTypeForLabels,
   role: WorkspaceRole,
+  roleLabels?: WorkspaceRoleLabelsMap,
 ): string {
+  const label = getWorkspaceRoleLabel(workspaceType, role, roleLabels).toLowerCase();
+
   if (workspaceType === "academic") {
     switch (role) {
       case "OWNER":
+        return `${getWorkspaceRoleLabel(workspaceType, role, roleLabels)} controls grading flow, membership, and workspace policy.`;
       case "ADMIN":
-        return "Lead instructor controls grading flow, membership, and workspace policy.";
+        return `${getWorkspaceRoleLabel(workspaceType, role, roleLabels)} can support instruction, manage members, and moderate content.`;
       case "MANAGER":
-        return "Supervisor/advisor can guide reviews, assign tasks, and moderate submissions.";
+        if (label.includes("lead") || label.includes("supervisor")) {
+          return `${getWorkspaceRoleLabel(workspaceType, role, roleLabels)} can guide reviews, assign tasks, and coordinate submissions.`;
+        }
+        return `${getWorkspaceRoleLabel(workspaceType, role, roleLabels)} can guide reviews, assign tasks, and moderate submissions.`;
       case "MEMBER":
-        return "Student can submit work, collaborate on documents, and complete tasks.";
+        return `${getWorkspaceRoleLabel(workspaceType, role, roleLabels)} can submit work, collaborate on documents, and complete tasks.`;
       case "VIEWER":
-        return "Observer can review activity and read artifacts without editing.";
+        return `${getWorkspaceRoleLabel(workspaceType, role, roleLabels)} can review activity and read artifacts without editing.`;
     }
   }
 
   if (workspaceType === "professional") {
     switch (role) {
       case "OWNER":
-        return "Workspace owner with full governance, billing, and transfer rights.";
+        return "Workspace owner with full governance and transfer rights.";
       case "ADMIN":
-        return "Tech lead/admin can manage team membership and workspace settings.";
+        return `${getWorkspaceRoleLabel(workspaceType, role, roleLabels)} can manage team membership and workspace settings.`;
       case "MANAGER":
-        return "Manager can coordinate delivery, assign work, and review outcomes.";
+        return `${getWorkspaceRoleLabel(workspaceType, role, roleLabels)} can coordinate delivery, assign work, and review outcomes.`;
       case "MEMBER":
-        return "Contributor can create and edit documents/tasks.";
+        return `${getWorkspaceRoleLabel(workspaceType, role, roleLabels)} can create and edit documents and tasks.`;
       case "VIEWER":
-        return "Stakeholder has read-only visibility.";
+        return `${getWorkspaceRoleLabel(workspaceType, role, roleLabels)} has read-only visibility.`;
     }
   }
 

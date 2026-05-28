@@ -31,6 +31,7 @@ export class TemplatesService {
         version: true,
         schemaVersion: true,
         contentFormat: true,
+        content: true,
       },
     });
     return { items, total: items.length };

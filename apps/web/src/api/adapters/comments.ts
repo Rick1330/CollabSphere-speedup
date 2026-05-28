@@ -48,6 +48,15 @@ export type DocumentThreadAnchorInput = {
   to?: number;
 };
 
+export type DocumentCommentThread = {
+  id: string;
+  status: "open" | "resolved";
+  resolvedAt: string | null;
+  commentCount: number;
+  latestCommentAt: string | null;
+  preview: string;
+};
+
 const parseSingleEnvelope = <T,>(payload: unknown): T => {
   const resource = (payload as SingleEnvelope<T> | null | undefined)?.data?.resource;
   if (!resource) {
@@ -112,6 +121,15 @@ const mapThread = (documentId: string, thread: ApiThread): CommentThread => {
   };
 };
 
+function threadPreview(content: CommentNode[] | null | undefined): string {
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((node) => ("text" in node ? String(node.text ?? "") : ""))
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function mockAuthorFromThreadCreator(createdById: string): CommentAuthor {
   return {
     id: createdById,
@@ -126,6 +144,25 @@ export async function listDocumentThreads(workspaceId: string, documentId: strin
   );
   const resource = parseSingleEnvelope<{ threads?: ApiThread[] }>(payload);
   return (resource.threads ?? []).map((thread) => mapThread(documentId, thread));
+}
+
+export async function fetchDocumentCommentThreads(params: {
+  workspaceId: string;
+  documentId: string;
+}): Promise<DocumentCommentThread[]> {
+  const threads = await listDocumentThreads(params.workspaceId, params.documentId);
+  return threads.map((thread) => {
+    const allComments = [thread, ...thread.replies];
+    const latest = allComments[allComments.length - 1];
+    return {
+      id: thread.id,
+      status: thread.resolved ? "resolved" : "open",
+      resolvedAt: thread.resolvedAt ?? null,
+      commentCount: allComments.length,
+      latestCommentAt: latest?.createdAt ?? null,
+      preview: latest ? threadPreview(latest.body) : "",
+    };
+  });
 }
 
 export async function createDocumentThread(

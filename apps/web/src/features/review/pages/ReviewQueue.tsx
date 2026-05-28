@@ -8,7 +8,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, Navigate } from "react-router-dom";
+import { Link, Navigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useHotkey } from "@/hooks/use-hotkey";
 import {
@@ -28,13 +28,15 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { ApiError } from "@/api/client";
 import { AppSidebar } from "@/app/shell/app-sidebar";
 import { TopNav } from "@/app/shell/top-nav";
 import { CommandPalette } from "@/app/shell/command-palette";
+import { WorkspaceSidebar } from "@/features/workspace/components/workspace-sidebar";
+import { WorkspaceMobileNav } from "@/features/workspace/components/workspace-mobile-nav";
 import { useSidebar } from "@/hooks/use-sidebar";
 import { useCommandPalette } from "@/hooks/use-command-palette";
 import { useCurrentAccount } from "@/lib/auth-session";
-import { getSessionRole } from "@/lib/session-role";
 import { fullDateTime, getAvatarColor, getInitials, relativeTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -47,27 +49,100 @@ import {
   type ReviewedItem,
 } from "@/api/adapters/review";
 import type { SubmissionRecord } from "@/lib/mock-academic";
+import { canReviewAcademic } from "@/lib/academic-capabilities";
+import { listMineWorkspaceRows } from "@/api/adapters/workspaces";
+import { useWorkspaceRouteContext } from "@/hooks/use-workspace-route-context";
+import { ensureRealtimeConnected, joinWorkspaceRoom, onRealtimeReconnect } from "@/api/realtime/socket-client";
 
 const ReviewQueuePage = () => {
+  const params = useParams<{ workspaceId: string }>();
+  const workspaceId = params.workspaceId?.trim() ?? "";
   const { collapsed, toggle, width, startResize } = useSidebar();
   const palette = useCommandPalette();
   const account = useCurrentAccount();
-  const sessionRole = getSessionRole(account);
+  const routeCtx = useWorkspaceRouteContext();
+  const queryClient = useQueryClient();
+  const inWorkspaceRoute = workspaceId.length > 0;
+  const myWorkspacesQ = useQuery({
+    queryKey: ["workspaces", "mine", "rows"],
+    queryFn: listMineWorkspaceRows,
+    enabled: !!account,
+    staleTime: 30_000,
+  });
+  const accessCheckReady = !account || myWorkspacesQ.isFetched;
+  const canAccess =
+    !account ||
+    (myWorkspacesQ.data ?? []).some((row) =>
+      canReviewAcademic({ workspaceType: row.workspace.type, myRole: row.role }),
+    );
+
+  useEffect(() => {
+    if (!account) return;
+    const reviewableWorkspaceIds = (myWorkspacesQ.data ?? [])
+      .filter((row) => canReviewAcademic({ workspaceType: row.workspace.type, myRole: row.role }))
+      .map((row) => row.workspace.id);
+    if (reviewableWorkspaceIds.length === 0) return;
+
+    let cancelled = false;
+    const cleanups: Array<() => void> = [];
+    void ensureRealtimeConnected()
+      .then((socket) => {
+        if (cancelled) return;
+        for (const id of reviewableWorkspaceIds) {
+          void joinWorkspaceRoom(id).catch(() => undefined);
+        }
+        const onSubmissionMutation = () => {
+          if (cancelled) return;
+          void queryClient.invalidateQueries({ queryKey: ["review-queue"] });
+          void queryClient.invalidateQueries({ queryKey: ["review-counts"] });
+        };
+        socket.on("submission:created", onSubmissionMutation);
+        socket.on("submission:updated", onSubmissionMutation);
+        cleanups.push(() => socket.off("submission:created", onSubmissionMutation));
+        cleanups.push(() => socket.off("submission:updated", onSubmissionMutation));
+      })
+      .catch(() => undefined);
+
+    const offReconnect = onRealtimeReconnect(() => {
+      for (const id of reviewableWorkspaceIds) {
+        void joinWorkspaceRoom(id);
+      }
+    });
+    cleanups.push(offReconnect);
+
+    return () => {
+      cancelled = true;
+      for (const fn of cleanups) fn();
+    };
+  }, [account, myWorkspacesQ.data, queryClient]);
 
   useEffect(() => {
     document.title = "Review queue — CollabSphere";
   }, []);
 
-  if (account && (!sessionRole.canReview || sessionRole.isPlatformAdmin)) {
+  if (account && accessCheckReady && !canAccess) {
     return <Navigate to="/dashboard" replace />;
   }
 
   return (
     <div className="app-light min-h-screen flex">
-      <AppSidebar collapsed={collapsed} onToggle={toggle} width={width} onResizeStart={startResize} />
+      {inWorkspaceRoute && routeCtx.sidebar ? (
+        <WorkspaceSidebar workspace={routeCtx.sidebar} collapsed={collapsed} onToggle={toggle} />
+      ) : (
+        <AppSidebar
+          collapsed={collapsed}
+          onToggle={toggle}
+          width={width}
+          onResizeStart={startResize}
+        />
+      )}
       <div className="flex-1 min-w-0 flex flex-col">
         <TopNav onOpenPalette={palette.toggle} />
-        <ReviewQueueBody />
+        {inWorkspaceRoute && routeCtx.sidebar ? <WorkspaceMobileNav workspace={routeCtx.sidebar} /> : null}
+        <ReviewQueueBody
+          preferredWorkspaceId={workspaceId || undefined}
+          accessCheckReady={accessCheckReady}
+        />
       </div>
       <CommandPalette open={palette.open} onOpenChange={palette.setOpen} />
     </div>
@@ -78,18 +153,22 @@ export default ReviewQueuePage;
 
 type SortKey = "newest" | "oldest" | "title" | "workspace";
 
-const ReviewQueueBody = () => {
+const ReviewQueueBody = ({
+  preferredWorkspaceId,
+  accessCheckReady,
+}: {
+  preferredWorkspaceId?: string;
+  accessCheckReady: boolean;
+}) => {
+  const queueErrorToastShown = useRef(false);
+  const queryClient = useQueryClient();
   const query = useQuery({
     queryKey: ["review-queue"],
     queryFn: fetchReviewQueue,
+    enabled: accessCheckReady,
+    retry: false,
+    refetchOnWindowFocus: false,
   });
-
-  const filterTabs = [
-    { key: "all", label: "All" },
-    { key: "academic", label: "Academic" },
-    { key: "professional", label: "Professional" },
-  ] as const;
-  const [filter, setFilter] = useState<(typeof filterTabs)[number]["key"]>("all");
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortKey>("oldest");
   const searchRef = useRef<HTMLInputElement>(null);
@@ -97,7 +176,9 @@ const ReviewQueueBody = () => {
 
   const pending = useMemo(() => {
     let list = query.data?.pending ?? [];
-    if (filter !== "all") list = list.filter((p) => p.workspaceType === filter);
+    if (preferredWorkspaceId) {
+      list = list.filter((p) => p.workspaceId === preferredWorkspaceId);
+    }
     const q = search.trim().toLowerCase();
     if (q) {
       list = list.filter(
@@ -117,7 +198,7 @@ const ReviewQueueBody = () => {
       return a.workspaceName.localeCompare(b.workspaceName);
     });
     return sorted;
-  }, [query.data, filter, search, sort]);
+  }, [query.data, preferredWorkspaceId, search, sort]);
 
   const reviewed = query.data?.reviewed ?? [];
   const overdueCount = pending.filter(
@@ -208,32 +289,11 @@ const ReviewQueueBody = () => {
         </div>
       </header>
 
-      {/* Filter tabs */}
-      <div
-        role="tablist"
-        aria-label="Filter by workspace type"
-        className="flex items-center gap-1 mb-4 border-b border-stone-200"
-      >
-        {filterTabs.map((t) => {
-          const active = filter === t.key;
-          return (
-            <button
-              key={t.key}
-              role="tab"
-              aria-selected={active}
-              type="button"
-              onClick={() => setFilter(t.key)}
-              className={cn(
-                "h-9 px-3 text-xs font-medium border-b-2 -mb-px transition-colors",
-                active
-                  ? "border-teal-600 text-teal-700"
-                  : "border-transparent text-stone-500 hover:text-stone-900",
-              )}
-            >
-              {t.label}
-            </button>
-          );
-        })}
+      <div className="mb-4">
+        <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-800">
+          <GraduationCap className="h-3.5 w-3.5" aria-hidden="true" />
+          Academic
+        </span>
       </div>
 
       {/* Search + sort */}
@@ -379,26 +439,44 @@ const PendingRow = ({
   const mutation = useMutation({
     mutationFn: () =>
       decideOnSubmission({
+        workspaceId: item.workspaceId,
         documentId: item.documentId,
         decision: pendingDecision!,
         note: note.trim() || undefined,
       }),
-    onSuccess: (result) => {
-      toast.success(
-        result.decision === "approved"
-          ? `Approved · ${result.documentTitle}`
-          : `Changes requested · ${result.documentTitle}`,
-      );
+    onSuccess: () => {
+      toast.success(pendingDecision === "approved" ? "Approved submission" : "Requested changes");
       setOpen(false);
       setNote("");
       setNoteError(null);
       setPendingDecision(null);
       queryClient.invalidateQueries({ queryKey: ["review-queue"] });
       queryClient.invalidateQueries({ queryKey: ["review-counts"] });
-      queryClient.invalidateQueries({ queryKey: ["doc-history", item.documentId] });
+      queryClient.invalidateQueries({ queryKey: ["doc-history", item.workspaceId, item.documentId] });
     },
-    onError: () => {
-      toast.error("Could not record your decision.");
+    onError: (error) => {
+      const apiError = error instanceof ApiError ? error : null;
+      const fallback =
+        pendingDecision === "approved"
+          ? "Could not approve submission."
+          : "Could not request changes.";
+      const message =
+        apiError?.status === 401 ||
+        apiError?.code === "TOKEN_INVALID" ||
+        apiError?.code === "TOKEN_EXPIRED"
+          ? "Your session expired. Sign out and sign in again."
+          : apiError?.code === "VALIDATION_ERROR"
+            ? apiError.message || "Feedback note did not pass validation."
+            : apiError?.code === "NOTE_REQUIRED"
+              ? apiError.message || "A feedback note is required."
+              : apiError?.code === "INVALID_TRANSITION"
+                ? apiError.message || "This document is not in a reviewable state."
+                : apiError?.code === "INSUFFICIENT_ROLE"
+                  ? "Your role does not allow review decisions."
+                  : error instanceof Error && error.message
+                    ? error.message
+                    : fallback;
+      toast.error(message);
     },
   });
 
@@ -525,7 +603,7 @@ const PendingRow = ({
         </div>
       </div>
 
-      {historyOpen && <DecisionHistory documentId={item.documentId} />}
+      {historyOpen && <DecisionHistory item={item} />}
 
       {!open && (
         <div className="px-4 pb-4 flex items-center gap-2 justify-end">
@@ -637,10 +715,10 @@ const PendingRow = ({
   );
 };
 
-const DecisionHistory = ({ documentId }: { documentId: string }) => {
+const DecisionHistory = ({ item }: { item: Pick<ReviewItem, "documentId" | "workspaceId"> }) => {
   const { data, isLoading, isError } = useQuery({
-    queryKey: ["doc-history", documentId],
-    queryFn: () => fetchDocumentHistory(documentId),
+    queryKey: ["doc-history", item.workspaceId, item.documentId],
+    queryFn: () => fetchDocumentHistory({ workspaceId: item.workspaceId, documentId: item.documentId }),
   });
 
   return (

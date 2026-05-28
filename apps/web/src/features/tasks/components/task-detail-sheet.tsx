@@ -241,6 +241,17 @@ const DetailBody = ({
   const subtaskIds = task.subtaskIds ?? [];
   const blockedByTaskIds = task.blockedByTaskIds ?? [];
   const blockingTaskIds = task.blockingTaskIds ?? [];
+  const suggestedLabels = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          Object.values(allTasks)
+            .flatMap((candidate) => candidate.labels ?? [])
+            .filter((label) => label.trim().length > 0),
+        ),
+      ).sort((left, right) => left.localeCompare(right)),
+    [allTasks],
+  );
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -507,6 +518,7 @@ const DetailBody = ({
             workspaceId={workspaceId}
             value={task.labels}
             onChange={(next) => onUpdate(task.id, { labels: next })}
+            suggestedLabels={suggestedLabels}
             disabled={!canEdit}
           />
         </div>

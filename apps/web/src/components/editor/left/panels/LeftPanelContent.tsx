@@ -1,4 +1,4 @@
-import { useEffect, type RefObject } from "react";
+import { useEffect, type ReactNode, type RefObject } from "react";
 import type { Editor } from "@tiptap/react";
 import { DocumentTreePanel } from "@/features/documents/components/tree/document-tree-panel";
 import type {
@@ -12,12 +12,18 @@ import { BookmarksPanel } from "./BookmarksPanel";
 import {
   useEditorStore,
   type LeftSidebarTab,
-} from "@/components/editor/state/editorStore";
+} from "@/features/documents/stores/use-editor-store";
+import type { WorkspaceRole } from "@/api/adapters/members";
 
 export type LeftPanelContentProps = {
   workspaceId: string;
   workspaceName: string;
   workspaceType: "professional" | "academic" | "general";
+  myRole: WorkspaceRole;
+  reviewTabContent?: ReactNode;
+  submissionsTabContent?: ReactNode;
+  showReviewTab?: boolean;
+  showSubmissionsTab?: boolean;
   tree: TreeNode[];
   activeDocumentId: string | null;
   permissions: TreeContentPermissions;
@@ -37,6 +43,11 @@ export function LeftPanelContent({
   workspaceId,
   workspaceName,
   workspaceType,
+  myRole,
+  reviewTabContent,
+  submissionsTabContent,
+  showReviewTab = false,
+  showSubmissionsTab = false,
   tree,
   activeDocumentId,
   permissions,
@@ -53,14 +64,25 @@ export function LeftPanelContent({
 }: LeftPanelContentProps) {
   const storeTab = useEditorStore((s) => s.leftSidebarTab);
   const hydrateLeftSidebarTab = useEditorStore((s) => s.hydrateLeftSidebarTab);
+  const setLeftSidebarTab = useEditorStore((s) => s.setLeftSidebarTab);
   const activeTab = activeTabProp ?? storeTab;
+  void workspaceType;
+  void myRole;
 
   useEffect(() => {
     hydrateLeftSidebarTab();
   }, [hydrateLeftSidebarTab]);
 
+  useEffect(() => {
+    const tabHidden =
+      (activeTab === "review" && !showReviewTab) ||
+      (activeTab === "submissions" && !showSubmissionsTab);
+    if (!tabHidden) return;
+    setLeftSidebarTab("files");
+  }, [activeTab, setLeftSidebarTab, showReviewTab, showSubmissionsTab]);
+
   return (
-    <div className="flex h-full min-h-0 w-[var(--left-panel-w)] flex-col overflow-hidden">
+    <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden">
       {activeTab === "files" && (
         <div
           key="files"
@@ -109,6 +131,20 @@ export function LeftPanelContent({
             openCommentCount={openCommentCount}
             openTaskCount={openTaskCount}
           />
+        </div>
+      )}
+      {activeTab === "review" && showReviewTab && (
+        <div key="review" className="editor-rail-tab-body flex min-h-0 flex-1 flex-col overflow-y-auto">
+          {reviewTabContent ?? (
+            <div className="p-3 text-sm text-stone-500">No pending reviews in this document context.</div>
+          )}
+        </div>
+      )}
+      {activeTab === "submissions" && showSubmissionsTab && (
+        <div key="submissions" className="editor-rail-tab-body flex min-h-0 flex-1 flex-col overflow-y-auto">
+          {submissionsTabContent ?? (
+            <div className="p-3 text-sm text-stone-500">No submission activity yet.</div>
+          )}
         </div>
       )}
     </div>

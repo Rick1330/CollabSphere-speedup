@@ -25,6 +25,8 @@ import {
   type DocumentStatusChangedPayload,
   type DocumentSubmittedPayload,
   type DocumentUnlockedPayload,
+  type SubmissionCreatedPayload,
+  type SubmissionUpdatedPayload,
   type TaskAssignedPayload,
   type TaskCompletedPayload,
   type TaskDeletedPayload,
@@ -42,7 +44,6 @@ import {
   applyTaskDeleted,
   applyTaskMoved,
 } from "@/features/tasks/lib/task-board-cache";
-import type { TaskDetail } from "@/features/tasks/mocks/tasks";
 
 const WORKSPACE_ROOM_EVENTS = [
   "workspace:role_changed",
@@ -56,6 +57,8 @@ const WORKSPACE_ROOM_EVENTS = [
   "document:unlocked",
   "document:submitted",
   "document:approved",
+  "submission:created",
+  "submission:updated",
   "task:created",
   "task:moved",
   "task:assigned",
@@ -131,6 +134,9 @@ export function useWorkspaceRealtime(workspaceId: string | undefined): void {
         const data = workspacePayload<WorkspaceMemberJoinedPayload>(workspaceId, payload);
         if (!data) return;
         void queryClient.invalidateQueries({ queryKey: queryKeys.workspaces.members(workspaceId) });
+        if (data.userId === currentUserId) {
+          void queryClient.invalidateQueries({ queryKey: queryKeys.workspaces.mine() });
+        }
         break;
       }
       case "workspace:settings_updated": {
@@ -183,17 +189,49 @@ export function useWorkspaceRealtime(workspaceId: string | undefined): void {
         const data = workspacePayload<DocumentSubmittedPayload>(workspaceId, payload);
         if (!data) return;
         void queryClient.invalidateQueries({ queryKey: queryKeys.review.queue() });
+        void queryClient.invalidateQueries({ queryKey: ["review-counts"] });
+        void queryClient.invalidateQueries({ queryKey: ["workspace", workspaceId, "submission-center"] });
+        void queryClient.invalidateQueries({
+          queryKey: ["workspace", workspaceId, "document-submissions", data.documentId],
+        });
         break;
       }
       case "document:approved": {
         const data = workspacePayload<DocumentApprovedPayload>(workspaceId, payload);
         if (!data) return;
         void queryClient.invalidateQueries({ queryKey: queryKeys.review.queue() });
+        void queryClient.invalidateQueries({ queryKey: ["review-counts"] });
+        void queryClient.invalidateQueries({ queryKey: ["workspace", workspaceId, "submission-center"] });
+        void queryClient.invalidateQueries({
+          queryKey: ["workspace", workspaceId, "document-submissions", data.documentId],
+        });
         queryClient.setQueryData<DocumentDetailCache>(
           queryKeys.documents.detail(workspaceId, data.documentId),
           (old) => (old ? { ...old, status: "approved" } : old),
         );
         toast.success("Document approved");
+        break;
+      }
+      case "submission:created": {
+        const data = workspacePayload<SubmissionCreatedPayload>(workspaceId, payload);
+        if (!data) return;
+        void queryClient.invalidateQueries({ queryKey: queryKeys.review.queue() });
+        void queryClient.invalidateQueries({ queryKey: ["review-counts"] });
+        void queryClient.invalidateQueries({ queryKey: ["workspace", workspaceId, "submission-center"] });
+        void queryClient.invalidateQueries({
+          queryKey: ["workspace", workspaceId, "document-submissions", data.documentId],
+        });
+        break;
+      }
+      case "submission:updated": {
+        const data = workspacePayload<SubmissionUpdatedPayload>(workspaceId, payload);
+        if (!data) return;
+        void queryClient.invalidateQueries({ queryKey: queryKeys.review.queue() });
+        void queryClient.invalidateQueries({ queryKey: ["review-counts"] });
+        void queryClient.invalidateQueries({ queryKey: ["workspace", workspaceId, "submission-center"] });
+        void queryClient.invalidateQueries({
+          queryKey: ["workspace", workspaceId, "document-submissions", data.documentId],
+        });
         break;
       }
       case "document:locked": {
@@ -224,9 +262,15 @@ export function useWorkspaceRealtime(workspaceId: string | undefined): void {
       case "task:moved": {
         const data = workspacePayload<TaskMovedPayload>(workspaceId, payload);
         if (!data) return;
-        queryClient.setQueryData<Record<string, TaskDetail>>(
+        queryClient.setQueryData(
           queryKeys.tasks.board(workspaceId),
-          (prev) => (prev ? applyTaskMoved(prev, data) : prev),
+          (prev) =>
+            prev
+              ? applyTaskMoved(
+                  prev as Parameters<typeof applyTaskMoved>[0],
+                  data,
+                )
+              : prev,
         );
         invalidateWorkspaceHome();
         break;
@@ -234,9 +278,15 @@ export function useWorkspaceRealtime(workspaceId: string | undefined): void {
       case "task:deleted": {
         const data = workspacePayload<TaskDeletedPayload>(workspaceId, payload);
         if (!data) return;
-        queryClient.setQueryData<Record<string, TaskDetail>>(
+        queryClient.setQueryData(
           queryKeys.tasks.board(workspaceId),
-          (prev) => (prev ? applyTaskDeleted(prev, data) : prev),
+          (prev) =>
+            prev
+              ? applyTaskDeleted(
+                  prev as Parameters<typeof applyTaskDeleted>[0],
+                  data,
+                )
+              : prev,
         );
         invalidateWorkspaceHome();
         break;
@@ -252,9 +302,15 @@ export function useWorkspaceRealtime(workspaceId: string | undefined): void {
       case "task:completed": {
         const data = workspacePayload<TaskCompletedPayload>(workspaceId, payload);
         if (!data) return;
-        queryClient.setQueryData<Record<string, TaskDetail>>(
+        queryClient.setQueryData(
           queryKeys.tasks.board(workspaceId),
-          (prev) => (prev ? applyTaskCompleted(prev, data) : prev),
+          (prev) =>
+            prev
+              ? applyTaskCompleted(
+                  prev as Parameters<typeof applyTaskCompleted>[0],
+                  data,
+                )
+              : prev,
         );
         invalidateWorkspaceHome();
         break;
@@ -321,21 +377,25 @@ export function useWorkspaceRealtime(workspaceId: string | undefined): void {
       }
     };
 
-    void ensureRealtimeConnected().then((connectedSocket) => {
-      if (cancelled) return;
-      socket = connectedSocket;
-      if (!joinedRef.current) {
-        joinedRef.current = true;
-        void joinWorkspaceRoom(workspaceId).catch(() => undefined);
-      }
-      registerHandlers(connectedSocket);
-    });
+    void ensureRealtimeConnected()
+      .then((connectedSocket) => {
+        if (cancelled) return;
+        socket = connectedSocket;
+        if (!joinedRef.current) {
+          joinedRef.current = true;
+          void joinWorkspaceRoom(workspaceId).catch(() => undefined);
+        }
+        registerHandlers(connectedSocket);
+      })
+      .catch(() => undefined);
 
     const offReconnect = onRealtimeReconnect(() => {
       joinedRef.current = false;
-      void joinWorkspaceRoom(workspaceId).then(() => {
-        joinedRef.current = true;
-      });
+      void joinWorkspaceRoom(workspaceId)
+        .then(() => {
+          joinedRef.current = true;
+        })
+        .catch(() => undefined);
     });
 
     return () => {

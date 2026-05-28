@@ -38,7 +38,7 @@ import {
 import { MemberTable } from "./member-table";
 import { MemberCard } from "./member-card";
 import { InviteDialog } from "./invite-dialog";
-import type { WorkspaceTypeForLabels } from "@/lib/role-labels";
+import type { WorkspaceRoleLabelsMap, WorkspaceTypeForLabels } from "@/lib/role-labels";
 import { authSession } from "@/lib/auth-session";
 
 interface MemberListProps {
@@ -48,6 +48,7 @@ interface MemberListProps {
   currentUserId: string;
   currentUserRole: WorkspaceRole;
   workspaceType: WorkspaceTypeForLabels;
+  roleLabels?: WorkspaceRoleLabelsMap;
 }
 
 export const MemberList = ({
@@ -57,6 +58,7 @@ export const MemberList = ({
   currentUserId,
   currentUserRole,
   workspaceType,
+  roleLabels,
 }: MemberListProps) => {
   const queryClient = useQueryClient();
   const isArchived = workspaceStatus === "archived";
@@ -67,14 +69,16 @@ export const MemberList = ({
 
   const [showInviteDialog, setShowInviteDialog] = useState(false);
 
+  const labelCtx = { workspaceType, roleLabels };
+
   const membersQuery = useQuery({
-    queryKey: ["workspace", workspaceId, "members"],
-    queryFn: () => fetchMembers(workspaceId),
+    queryKey: ["workspace", workspaceId, "members", roleLabels],
+    queryFn: () => fetchMembers(workspaceId, labelCtx),
   });
 
   const invitationsQuery = useQuery({
-    queryKey: ["workspace", workspaceId, "invitations"],
-    queryFn: () => fetchPendingInvitations(workspaceId),
+    queryKey: ["workspace", workspaceId, "invitations", roleLabels],
+    queryFn: () => fetchPendingInvitations(workspaceId, labelCtx),
     enabled: canManage,
   });
 
@@ -126,14 +130,25 @@ export const MemberList = ({
       toast.success(`${member.user.fullName}'s role updated to ${newRole}`);
     } catch (err) {
       const apiErr = err as ApiError;
+      const httpStatus =
+        err && typeof err === "object" && "status" in err
+          ? Number((err as { status?: unknown }).status)
+          : undefined;
       if (apiErr?.code === "CANNOT_DEMOTE_OWNER") {
         toast.error("Cannot change the Owner's role.");
       } else if (apiErr?.code === "FORBIDDEN_ROLE_ASSIGNMENT") {
         toast.error("You don't have permission to assign this role.");
-      } else if (apiErr?.code === "WORKSPACE_ARCHIVED") {
+      } else if (
+        apiErr?.code === "WORKSPACE_ARCHIVED" ||
+        apiErr?.code === "WORKSPACE_ARCHIVED_READONLY"
+      ) {
         toast.error("Workspace is archived. Membership changes are locked.");
+      } else if (apiErr?.code === "MEMBER_NOT_FOUND") {
+        toast.error("That member no longer exists in this workspace.");
+      } else if (httpStatus === 500) {
+        toast.error("Role update failed due to a server error. Please retry.");
       } else {
-        toast.error("Failed to update role.");
+        toast.error(apiErr?.code ? `Failed to update role (${apiErr.code}).` : "Failed to update role.");
       }
       refetchMembers();
     }
@@ -543,6 +558,7 @@ export const MemberList = ({
         onOpenChange={setShowInviteDialog}
         onInvited={refetchMembers}
         workspaceType={workspaceType}
+        roleLabels={roleLabels}
       />
     </div>
   );

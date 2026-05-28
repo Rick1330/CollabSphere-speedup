@@ -40,10 +40,12 @@ export class TasksService {
         orderBy: [{ status: "asc" }, { position: "asc" }, { createdAt: "desc" }],
       }),
     ]);
+    const graph = await this.loadRelationshipGraph(input.workspaceId);
+    const enrichedTasks = tasks.map((task) => this.enrichTaskWithRelationships(task, graph));
     if (input.view === "board") {
-      return { view: "board" as const, columns, tasks };
+      return { view: "board" as const, columns, tasks: enrichedTasks };
     }
-    return { view: "list" as const, tasks };
+    return { view: "list" as const, tasks: enrichedTasks };
   }
 
   async getTaskById(input: { actorUserId: string; workspaceId: string; taskId: string }) {
@@ -58,7 +60,8 @@ export class TasksService {
     if (!task) {
       throw new AppError({ code: "TASK_NOT_FOUND" });
     }
-    return task;
+    const graph = await this.loadRelationshipGraph(input.workspaceId);
+    return this.enrichTaskWithRelationships(task, graph);
   }
 
   async createTask(input: {
@@ -152,7 +155,120 @@ export class TasksService {
       actionKey: "task.updated",
       summary: `Task updated: ${updated.title}`,
     });
-    return updated;
+    return this.enrichTaskWithRelationships(
+      updated,
+      await this.loadRelationshipGraph(input.workspaceId),
+    );
+  }
+
+  async updateTaskRelationships(input: {
+    actorUserId: string;
+    workspaceId: string;
+    taskId: string;
+    parentTaskId?: string | null;
+    blockedByTaskIds?: string[];
+    blockingTaskIds?: string[];
+    subtaskIds?: string[];
+  }) {
+    await this.requireWorkspaceMembership(input.actorUserId, input.workspaceId);
+    const task = await this.prisma.task.findFirst({
+      where: { id: input.taskId, workspaceId: input.workspaceId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!task) {
+      throw new AppError({ code: "TASK_NOT_FOUND" });
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      if (input.parentTaskId !== undefined) {
+        const parentId = input.parentTaskId;
+        if (parentId === input.taskId) {
+          throw new ValidationAppError({
+            message: "A task cannot be its own parent.",
+            issues: [{ field: "parentTaskId", rule: "invalid", message: "A task cannot be its own parent." }],
+          });
+        }
+        if (parentId) {
+          await this.assertTaskInWorkspace(tx, parentId, input.workspaceId);
+          await this.assertNoParentCycle(tx, input.taskId, parentId);
+        }
+        await tx.task.update({
+          where: { id: input.taskId },
+          data: { parentId },
+        });
+      }
+
+      if (input.blockedByTaskIds !== undefined) {
+        const ids = [...new Set(input.blockedByTaskIds)].filter((id) => id !== input.taskId);
+        for (const blockingId of ids) {
+          await this.assertTaskInWorkspace(tx, blockingId, input.workspaceId);
+          await this.assertNoDependencyCycle(tx, input.taskId, blockingId);
+        }
+        await tx.taskDependency.deleteMany({ where: { dependentTaskId: input.taskId, workspaceId: input.workspaceId } });
+        if (ids.length > 0) {
+          await tx.taskDependency.createMany({
+            data: ids.map((blockingTaskId) => ({
+              workspaceId: input.workspaceId,
+              dependentTaskId: input.taskId,
+              blockingTaskId,
+            })),
+            skipDuplicates: true,
+          });
+        }
+      }
+
+      if (input.blockingTaskIds !== undefined) {
+        const ids = [...new Set(input.blockingTaskIds)].filter((id) => id !== input.taskId);
+        for (const dependentId of ids) {
+          await this.assertTaskInWorkspace(tx, dependentId, input.workspaceId);
+          await this.assertNoDependencyCycle(tx, dependentId, input.taskId);
+        }
+        await tx.taskDependency.deleteMany({ where: { blockingTaskId: input.taskId, workspaceId: input.workspaceId } });
+        if (ids.length > 0) {
+          await tx.taskDependency.createMany({
+            data: ids.map((dependentTaskId) => ({
+              workspaceId: input.workspaceId,
+              dependentTaskId,
+              blockingTaskId: input.taskId,
+            })),
+            skipDuplicates: true,
+          });
+        }
+      }
+
+      if (input.subtaskIds !== undefined) {
+        const ids = [...new Set(input.subtaskIds)].filter((id) => id !== input.taskId);
+        for (const subId of ids) {
+          await this.assertTaskInWorkspace(tx, subId, input.workspaceId);
+          await this.assertNoParentCycle(tx, subId, input.taskId);
+        }
+        await tx.task.updateMany({
+          where: {
+            workspaceId: input.workspaceId,
+            parentId: input.taskId,
+            id: { notIn: ids },
+            deletedAt: null,
+          },
+          data: { parentId: null },
+        });
+        if (ids.length > 0) {
+          await tx.task.updateMany({
+            where: { id: { in: ids }, workspaceId: input.workspaceId },
+            data: { parentId: input.taskId },
+          });
+        }
+      }
+    });
+
+    const refreshed = await this.getTaskById(input);
+    await this.emitTaskMutation({
+      task: refreshed,
+      actorUserId: input.actorUserId,
+      event: "task:updated",
+      actionKey: "task.updated",
+      summary: `Task relationships updated`,
+    });
+    return refreshed;
   }
 
   async assignTask(input: {
@@ -585,5 +701,106 @@ export class TasksService {
       select: { position: true },
     });
     return maxTask ? Number(maxTask.position) + 1 : 1;
+  }
+
+  private async loadRelationshipGraph(workspaceId: string) {
+    const [deps, subtasks] = await Promise.all([
+      this.prisma.taskDependency.findMany({
+        where: { workspaceId },
+        select: { dependentTaskId: true, blockingTaskId: true },
+      }),
+      this.prisma.task.findMany({
+        where: { workspaceId, deletedAt: null, parentId: { not: null } },
+        select: { id: true, parentId: true },
+      }),
+    ]);
+    return { deps, subtasks };
+  }
+
+  private enrichTaskWithRelationships<T extends { id: string; parentId?: string | null }>(
+    task: T,
+    graph: Awaited<ReturnType<TasksService["loadRelationshipGraph"]>>,
+  ) {
+    const blockedByTaskIds = graph.deps
+      .filter((dep: { dependentTaskId: string; blockingTaskId: string }) => dep.dependentTaskId === task.id)
+      .map((dep: { dependentTaskId: string; blockingTaskId: string }) => dep.blockingTaskId);
+    const blockingTaskIds = graph.deps
+      .filter((dep: { dependentTaskId: string; blockingTaskId: string }) => dep.blockingTaskId === task.id)
+      .map((dep: { dependentTaskId: string; blockingTaskId: string }) => dep.dependentTaskId);
+    const subtaskIds = graph.subtasks
+      .filter((sub: { id: string; parentId: string | null }) => sub.parentId === task.id)
+      .map((sub: { id: string; parentId: string | null }) => sub.id);
+    return {
+      ...task,
+      parentTaskId: task.parentId ?? null,
+      blockedByTaskIds,
+      blockingTaskIds,
+      subtaskIds,
+    };
+  }
+
+  private async assertTaskInWorkspace(
+    tx: Prisma.TransactionClient,
+    taskId: string,
+    workspaceId: string,
+  ) {
+    const row = await tx.task.findFirst({
+      where: { id: taskId, workspaceId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!row) {
+      throw new AppError({ code: "TASK_NOT_FOUND", message: "Related task was not found in this workspace." });
+    }
+  }
+
+  private async assertNoParentCycle(
+    tx: Prisma.TransactionClient,
+    taskId: string,
+    newParentId: string,
+  ) {
+    let cursor: string | null = newParentId;
+    const visited = new Set<string>();
+    while (cursor) {
+      if (cursor === taskId) {
+        throw new ValidationAppError({
+          message: "Parent assignment would create a cycle.",
+          issues: [{ field: "parentTaskId", rule: "cycle", message: "Parent assignment would create a cycle." }],
+        });
+      }
+      if (visited.has(cursor)) break;
+      visited.add(cursor);
+      const parentRow: { parentId: string | null } | null = await tx.task.findFirst({
+        where: { id: cursor, deletedAt: null },
+        select: { parentId: true },
+      });
+      cursor = parentRow?.parentId ?? null;
+    }
+  }
+
+  private async assertNoDependencyCycle(
+    tx: Prisma.TransactionClient,
+    dependentTaskId: string,
+    blockingTaskId: string,
+  ) {
+    const stack = [blockingTaskId];
+    const visited = new Set<string>();
+    while (stack.length > 0) {
+      const current = stack.pop()!;
+      if (current === dependentTaskId) {
+        throw new ValidationAppError({
+          message: "Dependency would create a cycle.",
+          issues: [{ field: "blockedByTaskIds", rule: "cycle", message: "Dependency would create a cycle." }],
+        });
+      }
+      if (visited.has(current)) continue;
+      visited.add(current);
+      const blockers = await tx.taskDependency.findMany({
+        where: { dependentTaskId: current },
+        select: { blockingTaskId: true },
+      });
+      for (const row of blockers) {
+        stack.push(row.blockingTaskId);
+      }
+    }
   }
 }

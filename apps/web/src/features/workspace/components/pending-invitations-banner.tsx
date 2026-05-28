@@ -2,10 +2,15 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Mail, X } from "lucide-react";
 import { toast } from "sonner";
-import { acceptMyPendingInvitation, fetchMyPendingInvitations } from "@/api/adapters/invitations";
+import {
+  acceptMyPendingInvitation,
+  fetchMyPendingInvitations,
+  type AcceptInvitationResult,
+} from "@/api/adapters/invitations";
 import { ApiError } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { queryKeys } from "@/lib/query-keys";
 import { getWorkspaceRoleLabel } from "@/lib/role-labels";
 import type { WorkspaceRole } from "@/api/adapters/members";
 
@@ -30,11 +35,18 @@ export function PendingInvitationsBanner({ className }: PendingInvitationsBanner
 
   const acceptMutation = useMutation({
     mutationFn: acceptMyPendingInvitation,
-    onSuccess: async (_, invitationId) => {
+    onSuccess: async (result: AcceptInvitationResult, invitationId) => {
       setDismissed((prev) => new Set(prev).add(invitationId));
-      toast.success("Invitation accepted", { description: "Opening the workspace from your list." });
+      toast.success("Invitation accepted", {
+        description: "The workspace is now in your list.",
+      });
       await queryClient.invalidateQueries({ queryKey: PENDING_INVITATIONS_QUERY_KEY });
-      await queryClient.invalidateQueries({ queryKey: ["workspaces", "mine"] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.workspaces.mine() });
+      if (result.workspaceId) {
+        await queryClient.invalidateQueries({
+          queryKey: queryKeys.workspaces.detail(result.workspaceId),
+        });
+      }
     },
     onError: (err: unknown) => {
       const msg = err instanceof ApiError ? err.message : "Could not accept this invitation.";
@@ -61,6 +73,7 @@ export function PendingInvitationsBanner({ className }: PendingInvitationsBanner
           const roleLabel = getWorkspaceRoleLabel(
             inv.workspace.type as "professional" | "academic" | "general",
             inv.role as WorkspaceRole,
+            inv.workspace.roleLabels,
           );
           const expires = new Date(inv.expiresAt);
           return (

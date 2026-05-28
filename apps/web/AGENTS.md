@@ -47,6 +47,9 @@ Local hard rules for `apps/web` implementation work. These are the Tier A fronte
 - Hardcode role assumptions; always use RBAC responses.
 - Treat Socket.IO app events as document collaboration events (distinct services).
 
+## Local dev
+- Vite binds `127.0.0.1:8080` (`strictPort: true`). If `pnpm dev` reports **Port 8080 is already in use**, a stale Vite/Node process is usually still running: `netstat -ano | findstr :8080`, then `taskkill /PID <pid> /F`, and restart `pnpm dev` from the repo root.
+
 ## Tests / Validation
 - Add/update unit and component tests for UI behavior changes.
 - For interactive web surfaces, place behavior tests under `apps/web/src/**` using Vitest + Testing Library; do not add new root `tests/unit/web-*.test.tsx` static-markup tests for those interactions.

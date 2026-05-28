@@ -1,14 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import {
   AlertCircle,
   Archive,
   KanbanSquare,
-  Settings2,
   Plus,
   RefreshCw,
-  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useHotkey } from "@/hooks/use-hotkey";
@@ -19,10 +17,15 @@ import {
   canTransition,
   getStatusLabel,
   getWorkspaceWorkflowColumns,
+  getTaskDetail,
   getAllLabels,
+  listTaskColumns,
   listWorkspaceMembers,
   setWorkspaceWorkflowColumns,
   transitionReason,
+  assignTask,
+  updateTask,
+  updateTaskRelationships,
   type TaskAssignee,
   type TaskBoardColumn,
   type TaskComment,
@@ -39,6 +42,8 @@ import {
   EMPTY_FILTERS,
   type AdvancedFilterState,
 } from "./task-advanced-filters";
+import { listWorkspaceLabels } from "@/api/adapters/labels";
+import { ApiError } from "@/api/client";
 import { subscribeRealtimeStatus } from "@/api/realtime/socket-client";
 import { useCurrentAccount } from "@/lib/auth-session";
 import {
@@ -143,8 +148,15 @@ export const TaskBoard = ({
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [sheetLoading, setSheetLoading] = useState(false);
   const [columns, setColumns] = useState(() => getWorkspaceWorkflowColumns(workspaceId));
-  const [columnEditorOpen, setColumnEditorOpen] = useState(false);
-  const [newColumnLabel, setNewColumnLabel] = useState("");
+  const taskColumnsQuery = useQuery({
+    queryKey: ["workspace-task-columns", workspaceId],
+    queryFn: () => listTaskColumns(workspaceId),
+  });
+  const workspaceLabelsQuery = useQuery({
+    queryKey: ["workspace", workspaceId, "task-labels"],
+    queryFn: () => listWorkspaceLabels(workspaceId),
+    staleTime: 60_000,
+  });
 
   useEffect(() => {
     if (!selectedTaskId) return;
@@ -154,14 +166,25 @@ export const TaskBoard = ({
   }, [selectedTaskId]);
 
   useEffect(() => {
+    if (taskColumnsQuery.data && taskColumnsQuery.data.length > 0) {
+      setColumns(taskColumnsQuery.data);
+      setWorkspaceWorkflowColumns(workspaceId, taskColumnsQuery.data);
+      return;
+    }
     setColumns(getWorkspaceWorkflowColumns(workspaceId));
-  }, [workspaceId]);
+  }, [workspaceId, taskColumnsQuery.data]);
 
   const isArchived = workspaceStatus === "archived";
   const canCreate =
     !isArchived && ["OWNER", "ADMIN", "MANAGER", "MEMBER"].includes(myRole);
 
-  const allLabels = useMemo(() => getAllLabels(tasks), [tasks]);
+  const allLabels = useMemo(() => {
+    const fromTasks = getAllLabels(tasks);
+    const fromCatalog = (workspaceLabelsQuery.data ?? []).map((l) => l.value);
+    return Array.from(new Set([...fromCatalog, ...fromTasks])).sort((a, b) =>
+      a.localeCompare(b),
+    );
+  }, [tasks, workspaceLabelsQuery.data]);
 
   const boardColumns: TaskBoardColumn[] = useMemo(
     () => buildBoardData(tasks, columns),
@@ -253,21 +276,99 @@ export const TaskBoard = ({
   };
 
   const handleUpdate = (taskId: string, patch: Partial<TaskDetail>) => {
+    const cur = tasks[taskId];
+    if (!cur) return;
+
+    if (patch.status && !canTransition(cur.status, patch.status)) {
+      toast.error("Move not allowed", {
+        description: transitionReason(cur.status, patch.status),
+      });
+      return;
+    }
+
+    const previous = { ...cur };
     patchTasks((prev) => {
-      const cur = prev[taskId];
-      if (!cur) return prev;
-      // Enforce status transition rules at the data layer too
-      if (patch.status && !canTransition(cur.status, patch.status)) {
-        toast.error("Move not allowed", {
-          description: transitionReason(cur.status, patch.status),
-        });
-        return prev;
-      }
+      const current = prev[taskId];
+      if (!current) return prev;
       return {
         ...prev,
-        [taskId]: { ...cur, ...patch, updatedAt: new Date().toISOString() },
+        [taskId]: { ...current, ...patch, updatedAt: new Date().toISOString() },
       };
     });
+
+    const relationshipKeys = [
+      "parentTaskId",
+      "subtaskIds",
+      "blockedByTaskIds",
+      "blockingTaskIds",
+    ] as const;
+    const hasRelationshipPatch = relationshipKeys.some((key) => key in patch);
+
+    void (async () => {
+      try {
+        if (hasRelationshipPatch) {
+          const updatedTask = await updateTaskRelationships(workspaceId, taskId, {
+            parentTaskId: patch.parentTaskId,
+            subtaskIds: patch.subtaskIds,
+            blockedByTaskIds: patch.blockedByTaskIds,
+            blockingTaskIds: patch.blockingTaskIds,
+          });
+          const relatedTaskIds = Array.from(
+            new Set([
+              ...(previous.subtaskIds ?? []),
+              ...(previous.blockedByTaskIds ?? []),
+              ...(previous.blockingTaskIds ?? []),
+              ...(patch.subtaskIds ?? []),
+              ...(patch.blockedByTaskIds ?? []),
+              ...(patch.blockingTaskIds ?? []),
+              patch.parentTaskId ?? "",
+              previous.parentTaskId ?? "",
+            ].filter((id) => id && id !== taskId)),
+          );
+          const relatedTasks = await Promise.all(
+            relatedTaskIds.map(async (relatedTaskId) => {
+              try {
+                return await getTaskDetail(workspaceId, relatedTaskId);
+              } catch {
+                return null;
+              }
+            }),
+          );
+          patchTasks((prev) => {
+            const next = {
+              ...prev,
+              [taskId]: { ...prev[taskId], ...updatedTask },
+            };
+            for (const relatedTask of relatedTasks) {
+              if (!relatedTask) continue;
+              next[relatedTask.id] = { ...next[relatedTask.id], ...relatedTask };
+            }
+            return next;
+          });
+        } else {
+          if (patch.assignee !== undefined) {
+            await assignTask(workspaceId, taskId, patch.assignee?.id ?? null);
+          }
+          const scalarPatch: Parameters<typeof updateTask>[2] = {};
+          if (patch.title !== undefined) scalarPatch.title = patch.title;
+          if (patch.description !== undefined) scalarPatch.description = patch.description;
+          if (patch.priority !== undefined) scalarPatch.priority = patch.priority;
+          if (patch.dueDate !== undefined) scalarPatch.dueDate = patch.dueDate;
+          if (patch.labels !== undefined) scalarPatch.labels = patch.labels;
+          if (Object.keys(scalarPatch).length > 0) {
+            await updateTask(workspaceId, taskId, scalarPatch);
+          }
+        }
+      } catch (err: unknown) {
+        if (hasRelationshipPatch) {
+          void tasksQuery.refetch();
+        } else {
+          patchTasks((prev) => ({ ...prev, [taskId]: previous }));
+        }
+        const msg = err instanceof ApiError ? err.message : "Could not save task changes.";
+        toast.error(msg);
+      }
+    })();
   };
 
   const handleAddComment = (taskId: string, body: CommentNode[]) => {
@@ -353,50 +454,6 @@ export const TaskBoard = ({
 
   const sourceLink: SourceDocumentLink | null = null;
 
-  const handleUpdateColumnLabel = (status: TaskStatus, label: string) => {
-    const trimmed = label.trim();
-    if (!trimmed) return;
-    setColumns((prev) => {
-      const next = prev.map((c) => (c.status === status ? { ...c, label: trimmed } : c));
-      setWorkspaceWorkflowColumns(workspaceId, next);
-      return next;
-    });
-  };
-
-  const handleRemoveColumn = (status: TaskStatus) => {
-    setColumns((prev) => {
-      if (prev.length <= 2) return prev;
-      const fallback = prev[0]?.status ?? "todo";
-      patchTasks((taskState) => {
-        const nextTasks = { ...taskState };
-        for (const task of Object.values(nextTasks)) {
-          if (task.status === status) task.status = fallback;
-        }
-        return nextTasks;
-      });
-      const next = prev.filter((c) => c.status !== status);
-      setWorkspaceWorkflowColumns(workspaceId, next);
-      return next;
-    });
-  };
-
-  const handleAddColumn = () => {
-    const trimmed = newColumnLabel.trim();
-    if (!trimmed) return;
-    const slug = trimmed
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "_")
-      .replace(/^_+|_+$/g, "");
-    if (!slug) return;
-    setColumns((prev) => {
-      if (prev.some((c) => c.status === slug)) return prev;
-      const next = [...prev, { status: slug, label: trimmed, tone: "violet" as const }];
-      setWorkspaceWorkflowColumns(workspaceId, next);
-      return next;
-    });
-    setNewColumnLabel("");
-  };
-
   return (
     <div className="flex flex-col h-full min-h-0" aria-busy={isLoading}>
       {isArchived && (
@@ -452,59 +509,6 @@ export const TaskBoard = ({
           onCreateTask={() => setCreateDialogStatus(columns[0]?.status ?? "todo")}
           realtime={realtime}
           statusOptions={columns.map((c) => ({ status: c.status, label: c.label }))}
-          statusActions={
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setColumnEditorOpen((v) => !v)}
-                className="h-8 px-2.5 rounded-lg border border-stone-200 bg-white text-[12px] font-medium text-stone-600 hover:text-stone-900 hover:bg-stone-50 dark:border-teal-900/70 dark:bg-teal-950/30 dark:text-teal-100 dark:hover:bg-teal-900/35 dark:hover:text-teal-50 transition-colors inline-flex items-center gap-1.5"
-              >
-                <Settings2 className="h-3.5 w-3.5" />
-                Columns
-              </button>
-              {columnEditorOpen && (
-                <div className="absolute right-0 z-20 mt-1.5 w-80 rounded-lg border border-stone-200 bg-white p-3 shadow-xl dark:border-teal-900/70 dark:bg-stone-950">
-                  <div className="text-[10px] font-mono uppercase tracking-wider text-stone-500 dark:text-teal-200/85 mb-2">
-                    Workflow columns
-                  </div>
-                  <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-                    {columns.map((col) => (
-                      <div key={col.status} className="flex items-center gap-1.5">
-                        <input
-                          value={col.label}
-                          onChange={(e) => handleUpdateColumnLabel(col.status, e.target.value)}
-                          className="h-8 w-full rounded-md border border-stone-200 px-2 text-[12px] text-stone-700 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200 focus:border-teal-500/40 focus:ring-1 focus:ring-teal-500/20 focus:outline-none"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveColumn(col.status)}
-                          className="h-8 w-8 rounded-md border border-stone-200 text-stone-400 hover:text-rose-600 hover:bg-rose-50 hover:border-rose-200 dark:border-stone-700 dark:text-stone-400 dark:hover:bg-rose-950/30 dark:hover:border-rose-900"
-                          title={`Remove ${col.label}`}
-                        >
-                          <X className="h-3.5 w-3.5 mx-auto" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="mt-3 flex items-center gap-1.5">
-                    <input
-                      value={newColumnLabel}
-                      onChange={(e) => setNewColumnLabel(e.target.value)}
-                      placeholder="New column label"
-                      className="h-8 w-full rounded-md border border-stone-200 px-2 text-[12px] text-stone-700 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200 dark:placeholder:text-stone-500 focus:border-teal-500/40 focus:ring-1 focus:ring-teal-500/20 focus:outline-none"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleAddColumn}
-                      className="h-8 px-2 rounded-md bg-teal-600 text-white text-[11px] font-medium hover:bg-teal-500 dark:bg-emerald-700 dark:hover:bg-emerald-600"
-                    >
-                      Add
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          }
         />
       </div>
 

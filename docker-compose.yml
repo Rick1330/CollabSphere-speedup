@@ -64,6 +64,7 @@ services:
       start_period: 15s
 
   minio-setup:
+    profiles: ["init"]
     image: minio/mc:latest
     container_name: collabsphere-minio-setup
     depends_on:

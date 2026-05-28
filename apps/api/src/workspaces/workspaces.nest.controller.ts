@@ -88,6 +88,62 @@ export class WorkspacesNestController {
     });
   }
 
+  @Get(":workspaceId/task-labels")
+  @UseGuards(WorkspaceMembershipGuard)
+  async listTaskLabels(
+    @Param("workspaceId") workspaceId: string,
+    @ReqRequestId() requestId: string,
+    @CurrentUserId() actorUserId: string,
+  ) {
+    const data = await this.workspacesService.listTaskLabelsForUser({
+      actorUserId,
+      workspaceId,
+    });
+    return wrapSuccessResponse({
+      payload: createListResponsePayload({ items: data, total: data.length }),
+      requestId,
+    });
+  }
+
+  @Post(":workspaceId/task-labels")
+  @UseGuards(WorkspaceMembershipGuard)
+  @HttpCode(HttpStatus.CREATED)
+  async createTaskLabel(
+    @Param("workspaceId") workspaceId: string,
+    @ReqRequestId() requestId: string,
+    @CurrentUserId() actorUserId: string,
+    @Body() body: { name: string; color?: string; description?: string | null },
+  ) {
+    const data = await this.workspacesService.createTaskLabelForUser({
+      actorUserId,
+      workspaceId,
+      name: body.name,
+      color: body.color,
+      description: body.description,
+    });
+    return wrapSuccessResponse({
+      payload: createSingleResourcePayload({ label: data }),
+      requestId,
+    });
+  }
+
+  @Get(":workspaceId/task-columns")
+  @UseGuards(WorkspaceMembershipGuard)
+  async listTaskColumns(
+    @Param("workspaceId") workspaceId: string,
+    @ReqRequestId() requestId: string,
+    @CurrentUserId() actorUserId: string,
+  ) {
+    const data = await this.workspacesService.listTaskColumnsForUser({
+      actorUserId,
+      workspaceId,
+    });
+    return wrapSuccessResponse({
+      payload: createListResponsePayload({ items: data, total: data.length }),
+      requestId,
+    });
+  }
+
   @Get(":workspaceId/members")
   @UseGuards(WorkspaceMembershipGuard)
   async listMembers(

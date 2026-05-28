@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, FileX, RefreshCw, Send, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -46,6 +47,7 @@ import type { ConnectionStatus, SaveStatus } from "@/features/documents/componen
 import type { PresenceUser } from "@/features/documents/components/editor/editor-presence";
 import type { DocumentLinkedTaskEntry } from "@/features/documents/components/editor/editor-context-rail";
 import { useDocumentReadiness } from "@/features/documents/hooks/use-document-readiness";
+import { useWorkspaceRealtime } from "@/hooks/use-workspace-realtime";
 import { useEditorZoomShortcuts } from "@/features/documents/hooks/use-editor-zoom-shortcuts";
 import { useEditorVersionHistoryShortcuts } from "@/features/documents/hooks/use-editor-version-history-shortcuts";
 import { VersionHistoryOverlay } from "@/features/documents/components/version-history-overlay";
@@ -84,7 +86,13 @@ import { EditorSubmissionHistory } from "@/features/documents/components/editor/
 import { TableInsertDialog } from "@/features/documents/components/editor/table-insert-dialog";
 import { PageSetupDialog } from "@/components/editor/dialogs/PageSetupDialog";
 import type { SubmissionRecord } from "@/lib/mock-academic";
-import { decideOnSubmission, fetchDocumentHistory, submitForReview } from "@/api/adapters/review";
+import {
+  approveSubmission,
+  fetchSubmissionHistory,
+  requestSubmissionChanges,
+  submitDocumentForReview,
+  validateForSubmission,
+} from "@/api/adapters/submissions";
 import type { CommentNode } from "@/lib/mock-comments";
 import {
   buildDocumentSeed,
@@ -440,6 +448,7 @@ const DocumentEditorPage = () => {
   const isBelowLg = useIsBelowLg();
   const navigate = useNavigate();
   const { isSessionReady } = useAuthBootstrap();
+  useWorkspaceRealtime(workspaceId);
 
   useEffect(() => {
     if (!rawWorkspaceId || isDatabaseWorkspaceId(rawWorkspaceId)) return;
@@ -594,7 +603,6 @@ const DocumentEditorPage = () => {
   }, [workspaceId, documentId, retryNonce, effectiveUserId, account?.fullName, isSessionReady]);
 
   const { doc, workspace } = state;
-
   // Local doc mutations (lock/unlock, delete-flag)
   const [overrides, setOverrides] = useState<Partial<MockDocument>>({});
   useEffect(() => {
@@ -624,28 +632,7 @@ const DocumentEditorPage = () => {
   })();
 
   // ─────── Academic submission state ───────
-  // Per-document submission history (API-backed).
-  const [submissionHistory, setSubmissionHistory] = useState<SubmissionRecord[]>([]);
-  useEffect(() => {
-    let cancelled = false;
-    if (!documentId) {
-      setSubmissionHistory([]);
-      return;
-    }
-
-    void (async () => {
-      try {
-        const history = await fetchDocumentHistory(documentId);
-        if (!cancelled) setSubmissionHistory(history);
-      } catch {
-        if (!cancelled) setSubmissionHistory([]);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [documentId]);
+  const queryClient = useQueryClient();
 
   // ─────── Document Properties state ───────
   const [properties, setProperties] = useState<any>({});
@@ -661,6 +648,18 @@ const DocumentEditorPage = () => {
   const readOnlyReason =
     mergedDoc && workspace ? getReadOnlyReason(mergedDoc, workspace, effectiveUserId) : null;
   const isEditable = state.status === "loaded" && readOnlyReason === null;
+  const academicEnabled =
+    state.status === "loaded" &&
+    !!workspace &&
+    workspace.isAcademic &&
+    workspace.status === "active";
+  const submissionHistoryQuery = useQuery({
+    queryKey: ["workspace", workspaceId, "document-submissions", documentId],
+    queryFn: () => fetchSubmissionHistory({ workspaceId, documentId }),
+    enabled: academicEnabled && !!documentId,
+    refetchOnWindowFocus: false,
+  });
+  const submissionHistory: SubmissionRecord[] = submissionHistoryQuery.data ?? [];
   const [isVersionHistoryOpen, setIsVersionHistoryOpen] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -938,8 +937,31 @@ const DocumentEditorPage = () => {
     [isBelowLg, setRightSidebarTab],
   );
 
+  const canShowLeftTab = useCallback(
+    (tab: LeftSidebarTab) => {
+      if (tab !== "review" && tab !== "submissions") {
+        return true;
+      }
+      if (!workspace || workspace.status !== "active" || !workspace.isAcademic) {
+        return false;
+      }
+      const isReviewer = workspace.myRole === "MANAGER";
+      return tab === "review" ? isReviewer : !isReviewer && workspace.myRole !== "VIEWER";
+    },
+    [workspace],
+  );
+
+  useEffect(() => {
+    if (canShowLeftTab(leftSidebarTab)) return;
+    setLeftSidebarTab("files");
+  }, [canShowLeftTab, leftSidebarTab, setLeftSidebarTab]);
+
   const handleLeftRailSelect = useCallback(
     (tab: LeftSidebarTab) => {
+      if (!canShowLeftTab(tab)) {
+        setLeftSidebarTab("files");
+        return;
+      }
       if (!isBelowLg && tab === leftSidebarTab && treeOpen && !focusMode) {
         setTreeOpen(false);
         return;
@@ -954,7 +976,7 @@ const DocumentEditorPage = () => {
         setFocusMode(false);
       }
     },
-    [focusMode, isBelowLg, leftSidebarTab, setLeftSidebarTab, treeOpen],
+    [canShowLeftTab, focusMode, isBelowLg, leftSidebarTab, setLeftSidebarTab, treeOpen],
   );
 
   const handleRightRailSelect = useCallback(
@@ -1329,6 +1351,26 @@ const DocumentEditorPage = () => {
   const [tableDialogOpen, setTableDialogOpen] = useState(false);
   const [pageSetupOpen, setPageSetupOpen] = useState(false);
 
+  const [submitPreflight, setSubmitPreflight] = useState<{
+    status: "idle" | "loading" | "loaded";
+    errors: string[];
+    warnings: string[];
+  }>({ status: "idle", errors: [], warnings: [] });
+
+  useEffect(() => {
+    if (!submitDialogOpen || !mergedDoc) return;
+    setSubmitPreflight({ status: "loading", errors: [], warnings: [] });
+    void (async () => {
+      try {
+        const res = await validateForSubmission({ workspaceId, documentId: mergedDoc.id });
+        setSubmitPreflight({ status: "loaded", errors: res.errors, warnings: res.warnings });
+      } catch {
+        // If preflight fails, fall back to allowing submit attempt (server still enforces).
+        setSubmitPreflight({ status: "loaded", errors: [], warnings: [] });
+      }
+    })();
+  }, [submitDialogOpen, mergedDoc?.id, workspaceId]);
+
   const handleInsertTable = (rows: number, cols: number) => {
     (editor?.chain().focus() as any)
       ?.insertTable({ rows, cols, withHeaderRow: true })
@@ -1386,7 +1428,9 @@ const DocumentEditorPage = () => {
     toast.success(`Created folder "${name}"`);
   };
 
-  if (state.status === "loading") return <EditorShellSkeleton />;
+  if (state.status === "loading") {
+    return <EditorShellSkeleton />;
+  }
 
   if (state.status === "error" || !mergedDoc || !workspace) {
     return (
@@ -1467,24 +1511,6 @@ const DocumentEditorPage = () => {
     setOverrides((prev) => ({ ...prev, title }));
   };
 
-  const leftPanelContentProps = {
-    workspaceId,
-    workspaceName: workspace.name,
-    workspaceType: workspace.type,
-    tree: documentTree,
-    activeDocumentId: mergedDoc.id,
-    permissions: treePermissions,
-    onServerTreeChange: () => reloadDocumentTree(),
-    onNavigate: handleTreeNavigate,
-    editor,
-    isV2Template: templateContract != null,
-    scrollRootRef: editorScrollRef,
-    collaboratorCount: headerPresence.length,
-    lastSavedAt,
-    openCommentCount: openCount,
-    openTaskCount: sessionLinkedTasks.filter((e) => e.task.status !== "done").length,
-  };
-
   const handleCreateTaskFromSelection = (
     task: TaskDetail,
     sourceLink?: TaskLinkedResource,
@@ -1507,12 +1533,8 @@ const DocumentEditorPage = () => {
   };
 
   // ─────────── Academic workflow ───────────
-  const isSupervisor =
-    workspace.myRole === "OWNER" ||
-    workspace.myRole === "ADMIN" ||
-    workspace.myRole === "MANAGER";
-  const isSubmitter = mergedDoc.createdBy.id === effectiveUserId;
-  const academicEnabled = workspace.isAcademic && workspace.status === "active";
+  // Policy: reviewers are MANAGER only (academic workspaces only).
+  const isSupervisor = workspace.myRole === "MANAGER";
 
   // Most recent submission record (used for review panel + feedback banner)
   const latestSubmission: SubmissionRecord | undefined = submissionHistory[0];
@@ -1557,14 +1579,16 @@ const DocumentEditorPage = () => {
     mergedDoc.status === "changes_requested" &&
     !!lastChangesRequested;
   const showSubmissionHistory = academicEnabled && submissionHistory.length > 0;
+  const showReviewTab = academicEnabled && isSupervisor;
+  const showSubmissionsTab = academicEnabled && !isSupervisor && workspace.myRole !== "VIEWER";
 
   // Submit eligibility (student perspective)
   const canSubmitForReview =
     academicEnabled &&
     !isSupervisor &&
-    isSubmitter &&
     (mergedDoc.status === "draft" || mergedDoc.status === "changes_requested") &&
-    workspace.myRole !== "VIEWER";
+    workspace.myRole !== "VIEWER" &&
+    workspace.permissions.canCreateContent;
 
   const isResubmission = mergedDoc.status === "changes_requested";
   const docHasContent =
@@ -1594,26 +1618,35 @@ const DocumentEditorPage = () => {
 
     void (async () => {
       try {
-        await submitForReview({
-          documentId: mergedDoc.id,
-          documentTitle: mergedDoc.title,
-          studentId: effectiveUserId,
-          studentName: account?.fullName ?? "You",
-          submissionNote: note,
-          versionLabel,
-        });
+        void effectiveUserId;
+        void account;
+        void note;
+        void versionLabel;
+        await submitDocumentForReview({ workspaceId, documentId: mergedDoc.id });
 
         setOverrides((prev) => ({ ...prev, status: "submitted" }));
         setSubmitDialogOpen(false);
 
-        const history = await fetchDocumentHistory(mergedDoc.id);
-        setSubmissionHistory(history);
+        await queryClient.invalidateQueries({
+          queryKey: ["workspace", workspaceId, "document-submissions", mergedDoc.id],
+        });
 
         toast.success(isResubmission ? "Resubmitted for review" : "Submitted for review", {
           description: "Your supervisor has been notified.",
         });
-      } catch {
-        toast.error("Could not submit for review.");
+      } catch (error) {
+        const apiError = error instanceof ApiError ? error : null;
+        const message =
+          apiError?.code === "NO_SUPERVISOR_ASSIGNED"
+            ? "No reviewer is assigned yet. Ask an owner/admin to set at least one MANAGER in this workspace."
+            : apiError?.code === "INVALID_TRANSITION"
+              ? apiError.message || "This document cannot be submitted in its current state."
+              : apiError?.code === "DOCUMENT_EMPTY"
+                ? "Document is empty. Add content before submitting."
+                : apiError?.code === "INSUFFICIENT_ROLE"
+                  ? "Your role does not allow submission."
+                  : "Could not submit for review.";
+        toast.error(message);
       }
     })();
   };
@@ -1624,15 +1657,13 @@ const DocumentEditorPage = () => {
 
     void (async () => {
       try {
-        await decideOnSubmission({
-          documentId: mergedDoc.id,
-          decision: "approved",
-          note,
-        });
+        void note;
+        await approveSubmission({ workspaceId, documentId: mergedDoc.id });
         setOverrides((prev) => ({ ...prev, status: "approved" }));
 
-        const history = await fetchDocumentHistory(mergedDoc.id);
-        setSubmissionHistory(history);
+        await queryClient.invalidateQueries({
+          queryKey: ["workspace", workspaceId, "document-submissions", mergedDoc.id],
+        });
 
         toast.success("Document approved", {
           description: "The author has been notified.",
@@ -1649,21 +1680,35 @@ const DocumentEditorPage = () => {
 
     void (async () => {
       try {
-        await decideOnSubmission({
-          documentId: mergedDoc.id,
-          decision: "changes_requested",
-          note,
-        });
+        await requestSubmissionChanges({ workspaceId, documentId: mergedDoc.id, note });
         setOverrides((prev) => ({ ...prev, status: "changes_requested" }));
 
-        const history = await fetchDocumentHistory(mergedDoc.id);
-        setSubmissionHistory(history);
+        await queryClient.invalidateQueries({
+          queryKey: ["workspace", workspaceId, "document-submissions", mergedDoc.id],
+        });
 
         toast.success("Changes requested", {
           description: "The author can now revise and resubmit.",
         });
-      } catch {
-        toast.error("Could not request changes.");
+      } catch (error) {
+        const apiError = error instanceof ApiError ? error : null;
+        const message =
+          apiError?.status === 401 ||
+          apiError?.code === "TOKEN_INVALID" ||
+          apiError?.code === "TOKEN_EXPIRED"
+            ? "Your session expired. Sign out and sign in again."
+            : apiError?.code === "VALIDATION_ERROR"
+              ? apiError.message || "Feedback note did not pass validation."
+              : apiError?.code === "NOTE_REQUIRED"
+                ? apiError.message || "A feedback note is required."
+                : apiError?.code === "INVALID_TRANSITION"
+                  ? apiError.message || "This document is not in a reviewable state."
+                  : apiError?.code === "INSUFFICIENT_ROLE"
+                    ? "Your role does not allow review decisions."
+                    : error instanceof Error && error.message
+                      ? error.message
+                      : "Could not request changes.";
+        toast.error(message);
       }
     })();
   };
@@ -1691,6 +1736,79 @@ const DocumentEditorPage = () => {
     </button>
   ) : null;
 
+  const reviewTabContent = showReviewTab ? (
+    <div className="px-2.5 py-2.5 space-y-2.5">
+      <div className="rounded-lg border border-stone-200 bg-white px-2.5 py-2">
+        <p className="font-mono text-[9px] uppercase tracking-[0.16em] text-stone-500">Reviewer queue</p>
+        <p className="mt-0.5 text-[12px] font-medium text-stone-800">
+          {pendingSubmission ? "A submission is waiting for your decision." : "No pending decision in this document."}
+        </p>
+      </div>
+      {showReviewPanel && pendingSubmission ? (
+        <EditorReviewPanel
+          pendingSubmission={pendingSubmission}
+          onApprove={handleApprove}
+          onRequestChanges={handleRequestChanges}
+        />
+      ) : null}
+      {!showReviewPanel ? (
+        <p className="text-[11px] text-stone-500 px-1">
+          Review decisions appear here when this document is in submitted state.
+        </p>
+      ) : null}
+    </div>
+  ) : null;
+
+  const submissionsTabContent = showSubmissionsTab ? (
+    <div className="px-2.5 py-2.5 space-y-2.5">
+      <div className="rounded-lg border border-stone-200 bg-white px-2.5 py-2">
+        <p className="font-mono text-[9px] uppercase tracking-[0.16em] text-stone-500">Submission center</p>
+        <p className="mt-0.5 text-[12px] font-medium text-stone-800">
+          {latestSubmission ? "Track reviewer activity and decide your next step." : "Submit this document to start review."}
+        </p>
+      </div>
+      {showFeedbackBanner && lastChangesRequested ? (
+        <EditorReviewFeedback
+          lastDecision={lastChangesRequested}
+          canResubmit={canSubmitForReview}
+          onResubmit={() => setSubmitDialogOpen(true)}
+        />
+      ) : null}
+      {submissionHistoryQuery.isLoading ? (
+        <div className="rounded-lg border border-stone-200 bg-white px-2.5 py-2 text-[11px] text-stone-500">
+          Loading submission timeline...
+        </div>
+      ) : null}
+      {showSubmissionHistory ? <EditorSubmissionHistory history={submissionHistory} /> : null}
+      {!showFeedbackBanner && !showSubmissionHistory ? (
+        <p className="text-[11px] text-stone-500 px-1">Submit this document to start review tracking.</p>
+      ) : null}
+    </div>
+  ) : null;
+
+  const leftPanelContentProps = {
+    workspaceId,
+    workspaceName: workspace.name,
+    workspaceType: workspace.type,
+    myRole: workspace.myRole,
+    reviewTabContent,
+    submissionsTabContent,
+    showReviewTab,
+    showSubmissionsTab,
+    tree: documentTree,
+    activeDocumentId: mergedDoc.id,
+    permissions: treePermissions,
+    onServerTreeChange: () => reloadDocumentTree(),
+    onNavigate: handleTreeNavigate,
+    editor,
+    isV2Template: templateContract != null,
+    scrollRootRef: editorScrollRef,
+    collaboratorCount: headerPresence.length,
+    lastSavedAt,
+    openCommentCount: openCount,
+    openTaskCount: sessionLinkedTasks.filter((e) => e.task.status !== "done").length,
+  };
+
 
   const handleToggleTree = () => {
     const next = toggleDocumentTreePanel(isBelowLg, { treeOpen, mobileTreeOpen });
@@ -1703,28 +1821,11 @@ const DocumentEditorPage = () => {
 
   const editorBanners = (
     <>
-      {showReviewPanel && pendingSubmission && (
-        <EditorReviewPanel
-          pendingSubmission={pendingSubmission}
-          onApprove={handleApprove}
-          onRequestChanges={handleRequestChanges}
-        />
-      )}
-      {showFeedbackBanner && lastChangesRequested && (
-        <EditorReviewFeedback
-          lastDecision={lastChangesRequested}
-          canResubmit={canSubmitForReview}
-          onResubmit={() => setSubmitDialogOpen(true)}
-        />
-      )}
-      {readOnlyReason && !showReviewPanel && !showFeedbackBanner && (
+      {readOnlyReason && (
         <EditorReadOnlyBanner
           reason={readOnlyReason}
           lockedByName={mergedDoc.lockedBy?.fullName}
         />
-      )}
-      {showSubmissionHistory && (
-        <EditorSubmissionHistory history={submissionHistory} />
       )}
       {(connectionStatus === "connecting" || collab.status === "connected") && (
         <div className="shrink-0 border-b border-amber-200 bg-amber-50 px-4 py-2 text-center text-xs font-medium text-amber-800">
@@ -1764,7 +1865,7 @@ const DocumentEditorPage = () => {
       ) : null}
       {isBelowLg && (
         <Sheet open={mobileTreeOpen} onOpenChange={setMobileTreeOpen}>
-          <SheetContent side="left" className="w-[300px] p-0 sm:w-[320px]">
+          <SheetContent side="left" className="w-[340px] p-0 sm:w-[360px]">
             <SheetHeader className="sr-only">
               <SheetTitle>Documents</SheetTitle>
             </SheetHeader>
@@ -1774,6 +1875,10 @@ const DocumentEditorPage = () => {
                 activeTab={leftSidebarTab}
                 panelOpen={mobileTreeOpen}
                 onSelectTab={handleLeftRailSelect}
+                showReviewTab={showReviewTab}
+                showSubmissionsTab={showSubmissionsTab}
+                reviewBadgeCount={showReviewTab && pendingSubmission ? 1 : 0}
+                submissionsBadgeCount={showSubmissionsTab && (mergedDoc.status === "submitted" || mergedDoc.status === "changes_requested") ? 1 : 0}
               />
               <LeftPanel className="min-w-0 flex-1">
                 <LeftPanelContent {...leftPanelContentProps} activeTab={leftSidebarTab} />
@@ -1848,6 +1953,10 @@ const DocumentEditorPage = () => {
             activeTab={leftSidebarTab}
             panelOpen={treeOpen}
             onSelectTab={handleLeftRailSelect}
+            showReviewTab={showReviewTab}
+            showSubmissionsTab={showSubmissionsTab}
+            reviewBadgeCount={showReviewTab && pendingSubmission ? 1 : 0}
+            submissionsBadgeCount={showSubmissionsTab && (mergedDoc.status === "submitted" || mergedDoc.status === "changes_requested") ? 1 : 0}
           />
         }
         leftPanel={
@@ -2032,8 +2141,15 @@ const DocumentEditorPage = () => {
           onOpenChange={setSubmitDialogOpen}
           documentTitle={mergedDoc.title}
           isResubmission={isResubmission}
-          canSubmit={canSubmitNow}
-          blockReason={submitBlockReason}
+          canSubmit={canSubmitNow && submitPreflight.errors.length === 0}
+          blockReason={
+            submitBlockReason ??
+            (submitPreflight.status === "loading"
+              ? "Checking submission eligibility…"
+              : submitPreflight.errors.length > 0
+                ? submitPreflight.errors[0]
+                : undefined)
+          }
           onConfirm={handleConfirmSubmit}
         />
       )}

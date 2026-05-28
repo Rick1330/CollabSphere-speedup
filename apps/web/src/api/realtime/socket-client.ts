@@ -34,6 +34,8 @@ export type DocumentRealtimeEvent =
   | "document:submitted"
   | "document:approved";
 
+export type SubmissionRealtimeEvent = "submission:created" | "submission:updated";
+
 export type WorkspaceRealtimeEvent =
   | "workspace:role_changed"
   | "workspace:member_joined"
@@ -46,6 +48,7 @@ export type WorkspaceRealtimeEvent =
 export type WorkspaceRoomRealtimeEvent =
   | WorkspaceRealtimeEvent
   | DocumentRealtimeEvent
+  | SubmissionRealtimeEvent
   | TaskRealtimeEvent
   | CommentRealtimeEvent
   | ActivityRealtimeEvent;
@@ -96,6 +99,11 @@ function readAuthPayload(): { token: string | undefined } {
 
 function applyAuthToSocket(instance: Socket, token: string | null): void {
   instance.auth = token ? { token } : {};
+}
+
+function isSocketUnauthenticatedError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return /not authenticated/i.test(message);
 }
 
 async function emitJoinRoom(instance: Socket, roomKey: string): Promise<void> {
@@ -312,7 +320,16 @@ export function onRealtimeReconnect(listener: () => void): () => void {
 export async function joinWorkspaceRoom(workspaceId: string): Promise<void> {
   joinedRooms.add(workspaceRoomKey(workspaceId));
   const instance = await ensureRealtimeConnected();
-  await emitJoinRoom(instance, workspaceRoomKey(workspaceId));
+  try {
+    await emitJoinRoom(instance, workspaceRoomKey(workspaceId));
+  } catch (error) {
+    // During token rotation/bootstrap the server may reject joins transiently.
+    // Keep room tracked; replay/reconnect will retry once auth is valid.
+    if (isSocketUnauthenticatedError(error)) {
+      return;
+    }
+    throw error;
+  }
 }
 
 export async function leaveWorkspaceRoom(workspaceId: string): Promise<void> {

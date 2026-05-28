@@ -7,7 +7,14 @@ import {
 } from "@/components/editor/canvas/pageSetup";
 
 export type PageWidth = "normal" | "wide" | "full";
-export type LeftSidebarTab = "files" | "pages" | "outline" | "bookmarks" | "stats";
+export type LeftSidebarTab =
+  | "files"
+  | "pages"
+  | "outline"
+  | "bookmarks"
+  | "stats"
+  | "review"
+  | "submissions";
 export type DocumentPageTheme = "light" | "dark";
 export type DocumentTypographyProfile = "editor" | "word-import";
 export type RightSidebarTab = "comments" | "team" | "tasks" | "activity";
@@ -59,7 +66,9 @@ function readStoredLeftSidebarTab(): LeftSidebarTab {
     stored === "pages" ||
     stored === "outline" ||
     stored === "bookmarks" ||
-    stored === "stats"
+    stored === "stats" ||
+    stored === "review" ||
+    stored === "submissions"
   ) {
     return stored;
   }

@@ -111,11 +111,23 @@ const parseRequiredBlockTypesFromProperties = (value: unknown): Set<string> => {
   );
 };
 
+const isSubmissionEnabledForDocument = (value: unknown): boolean => {
+  if (!value || typeof value !== "object") {
+    return true;
+  }
+  const workflow = (value as Record<string, unknown>).workflow;
+  if (!workflow || typeof workflow !== "object") {
+    return true;
+  }
+  const raw = (workflow as Record<string, unknown>).submissionEnabled;
+  return raw === undefined ? true : Boolean(raw);
+};
+
 @Injectable()
 export class DocumentsService {
   constructor(
     @Inject(PrismaClientProvider) private readonly prisma: PrismaClientProvider,
-    private readonly eventEmitter: EventEmitter2,
+    @Inject(EventEmitter2) private readonly eventEmitter: EventEmitter2,
   ) {}
 
   async listDocumentsForUser({
@@ -708,6 +720,7 @@ export class DocumentsService {
         title: true,
         status: true,
         contentPlaintext: true,
+        properties: true,
       },
     });
     if (!document) {
@@ -715,8 +728,17 @@ export class DocumentsService {
     }
 
     if (action === "submit") {
+      if (!isSubmissionEnabledForDocument(document.properties)) {
+        throw new AppError({
+          code: "INVALID_TRANSITION",
+          message: "Submission is disabled for this document.",
+        });
+      }
       if (!(document.status === "draft" || document.status === "changes_requested")) {
-        throw new AppError({ code: "INVALID_TRANSITION" });
+        throw new AppError({
+          code: "INVALID_TRANSITION",
+          message: "Document must be Draft (or Changes requested) to submit.",
+        });
       }
       if (document.contentPlaintext.trim().length === 0) {
         throw new AppError({ code: "DOCUMENT_EMPTY" });
@@ -804,6 +826,34 @@ export class DocumentsService {
         data: {
           status: nextStatus,
           updatedById: actorUserId,
+          ...(action === "submit"
+            ? {
+                submittedAt: new Date(),
+                submittedById: actorUserId,
+                reviewedAt: null,
+                reviewedById: null,
+                reviewNote: null,
+                isLocked: true,
+                lockedByUserId: actorUserId,
+                lockedAt: new Date(),
+              }
+            : action === "approve"
+              ? {
+                  reviewedAt: new Date(),
+                  reviewedById: actorUserId,
+                  reviewNote: null,
+                  isLocked: false,
+                  lockedByUserId: null,
+                  lockedAt: null,
+                }
+              : {
+                  reviewedAt: new Date(),
+                  reviewedById: actorUserId,
+                  reviewNote: note?.trim() ?? null,
+                  isLocked: false,
+                  lockedByUserId: null,
+                  lockedAt: null,
+                }),
         },
         select: {
           id: true,
@@ -925,27 +975,136 @@ export class DocumentsService {
       console.warn("[documents] failed to write audit log", error);
     }
 
-    this.eventEmitter.emit("document.status_changed", {
-      workspaceId,
-      documentId,
-      fromStatus: document.status,
-      toStatus: nextStatus,
-    });
-    if (action === "submit") {
-      this.eventEmitter.emit("document.submitted", {
+    try {
+      this.eventEmitter.emit("document.status_changed", {
         workspaceId,
         documentId,
-        submittedById: actorUserId,
+        fromStatus: document.status,
+        toStatus: nextStatus,
       });
-    } else if (action === "approve") {
-      this.eventEmitter.emit("document.approved", {
-        workspaceId,
-        documentId,
-        approvedById: actorUserId,
-      });
+      if (action === "submit") {
+        this.eventEmitter.emit("document.submitted", {
+          workspaceId,
+          documentId,
+          submittedById: actorUserId,
+        });
+        this.eventEmitter.emit("submission.created", {
+          workspaceId,
+          documentId,
+          submissionId: updated.submission.id,
+          submittedById: actorUserId,
+          submittedAt: updated.submission.submittedAt.toISOString(),
+        });
+      } else if (action === "approve") {
+        this.eventEmitter.emit("document.approved", {
+          workspaceId,
+          documentId,
+          approvedById: actorUserId,
+        });
+        this.eventEmitter.emit("submission.updated", {
+          workspaceId,
+          documentId,
+          submissionId: updated.submission.id,
+          decision: "approved",
+          decidedById: actorUserId,
+          decidedAt: new Date().toISOString(),
+        });
+      } else if (action === "request_changes") {
+        this.eventEmitter.emit("submission.updated", {
+          workspaceId,
+          documentId,
+          submissionId: updated.submission.id,
+          decision: "changes_requested",
+          decidedById: actorUserId,
+          decidedAt: new Date().toISOString(),
+        });
+      }
+    } catch (error) {
+      console.warn("[documents] failed to emit status transition events", error);
     }
 
     return updated;
+  }
+
+  async validateForSubmission({
+    actorUserId,
+    workspaceId,
+    documentId,
+  }: {
+    actorUserId: string;
+    workspaceId: string;
+    documentId: string;
+  }): Promise<{ errors: string[]; warnings: string[] }> {
+    await this.requireWorkspaceMembership({ actorUserId, workspaceId });
+
+    const doc = await this.prisma.document.findFirst({
+      where: { id: documentId, workspaceId, deletedAt: null },
+      select: { id: true, status: true, contentPlaintext: true },
+    });
+    if (!doc) {
+      throw new AppError({ code: "DOCUMENT_NOT_FOUND" });
+    }
+
+    const errors: string[] = [];
+    const warnings: string[] = [];
+
+    if (!(doc.status === "draft" || doc.status === "changes_requested")) {
+      errors.push("Document must be in draft (or changes requested) to submit.");
+    }
+    if (doc.contentPlaintext.trim().length === 0) {
+      errors.push("Document is empty.");
+    }
+
+    return { errors, warnings };
+  }
+
+  async getSubmissionQueue({
+    actorUserId,
+    workspaceId,
+  }: {
+    actorUserId: string;
+    workspaceId: string;
+  }) {
+    const membership = await this.requireWorkspaceMembership({ actorUserId, workspaceId });
+    if (membership.workspace.type !== "academic") {
+      throw new AppError({ code: "WORKSPACE_NOT_ACADEMIC" });
+    }
+    if (!reviewAllowedRoles.has(membership.role)) {
+      throw new AppError({ code: "INSUFFICIENT_ROLE" });
+    }
+
+    const items = await this.prisma.documentSubmission.findMany({
+      where: {
+        workspaceId,
+        decision: null,
+        document: {
+          deletedAt: null,
+          status: "submitted",
+        },
+      },
+      orderBy: { submittedAt: "desc" },
+      select: {
+        id: true,
+        documentId: true,
+        submittedAt: true,
+        submittedById: true,
+        submittedBy: {
+          select: {
+            id: true,
+            fullName: true,
+          },
+        },
+        document: {
+          select: {
+            id: true,
+            title: true,
+            status: true,
+          },
+        },
+      },
+    });
+
+    return { items, total: items.length };
   }
 
   async getDocumentsTree({
@@ -1573,9 +1732,11 @@ export class DocumentsService {
         id: true,
         submittedAt: true,
         submittedById: true,
+        submittedBy: { select: { id: true, fullName: true } },
         decision: true,
         decidedAt: true,
         decidedById: true,
+        decidedBy: { select: { id: true, fullName: true } },
         decisionNote: true,
         snapshotVersionId: true,
       },

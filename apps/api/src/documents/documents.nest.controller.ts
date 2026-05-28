@@ -504,4 +504,22 @@ export class DocumentsNestController {
       requestId,
     });
   }
+
+  @Get(":documentId/validate-for-submission")
+  async validateForSubmission(
+    @Param("workspaceId") workspaceId: string,
+    @Param("documentId") documentId: string,
+    @ReqRequestId() requestId: string,
+    @CurrentUserId() actorUserId: string,
+  ) {
+    const data = await this.documentsService.validateForSubmission({
+      actorUserId,
+      workspaceId,
+      documentId,
+    });
+    return wrapSuccessResponse({
+      payload: createSingleResourcePayload(data),
+      requestId,
+    });
+  }
 }

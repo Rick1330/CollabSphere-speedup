@@ -5,6 +5,11 @@ export const processTaskReminderJob = async (
   _job: Job,
   deps: { prisma: PrismaClient },
 ) => {
+  if (!deps?.prisma || typeof deps.prisma !== "object" || !("task" in deps.prisma)) {
+    // Defensive: avoid crashing the worker on malformed DI/job wiring.
+    return { created: 0, skipped: "missing_prisma" };
+  }
+
   const now = new Date();
   const in24h = new Date(now.getTime() + 24 * 60 * 60 * 1000);
   const tasks = await deps.prisma.task.findMany({
@@ -21,6 +26,7 @@ export const processTaskReminderJob = async (
       workspaceId: true,
     },
   });
+  let createdCount = 0;
   for (const task of tasks) {
     const type = task.dueDate && task.dueDate < now ? "deadline.overdue" : "deadline.reminder";
     const dedupeSince = new Date(now.getTime() - 20 * 60 * 60 * 1000);
@@ -56,6 +62,7 @@ export const processTaskReminderJob = async (
         },
       },
     });
+    createdCount += 1;
   }
-  return { created: tasks.length };
+  return { created: createdCount };
 };

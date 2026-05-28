@@ -7,7 +7,10 @@ import { parseApiSingleEnvelope } from "@/api/client/envelope";
 import type { StoredWorkspace } from "@/features/workspace/store/workspace-store";
 import type { WorkspaceForSidebar } from "@/features/workspace/components/workspace-sidebar";
 import type { WorkspaceRole } from "@/api/adapters/members";
-import { getWorkspaceRoleLabel } from "@/lib/role-labels";
+import {
+  getWorkspaceRoleLabel,
+  type WorkspaceRoleLabelsMap,
+} from "@/lib/role-labels";
 import { getRolePermissions, type WorkspaceRoleKey } from "@/lib/persona-scenario";
 
 type ListEnvelope<T> = {
@@ -29,6 +32,7 @@ export type MineWorkspaceRow = {
   membershipId: string;
   role: WorkspaceRole;
   workspace: WorkspaceCoreDto;
+  roleLabels?: WorkspaceRoleLabelsMap;
   memberCount: number;
   documentCount: number;
   taskCount: number;
@@ -38,6 +42,7 @@ export type MineWorkspaceRow = {
 type ApiWorkspaceDetail = {
   membership: { role: WorkspaceRole };
   workspace: WorkspaceCoreDto;
+  roleLabels?: WorkspaceRoleLabelsMap;
 };
 
 export type CreateWorkspaceInput = {
@@ -88,6 +93,7 @@ export async function getStoredWorkspace(id: string): Promise<StoredWorkspace | 
     const data = parseApiSingleEnvelope<ApiWorkspaceDetail>(payload);
     const ws = data.workspace;
     const role = data.membership.role;
+    const roleLabels = data.roleLabels;
     if (!ws?.id) return null;
     return {
       id: ws.id,
@@ -98,7 +104,7 @@ export async function getStoredWorkspace(id: string): Promise<StoredWorkspace | 
       status: ws.status,
       templateId: null,
       templateName: null,
-      roleLabel: getWorkspaceRoleLabel(ws.type, role),
+      roleLabel: getWorkspaceRoleLabel(ws.type, role, roleLabels),
       createdAt: ws.createdAt,
       lastAccessedAt: ws.updatedAt,
     };
@@ -109,11 +115,16 @@ export async function getStoredWorkspace(id: string): Promise<StoredWorkspace | 
 
 export async function fetchWorkspaceSidebarContext(
   workspaceId: string,
-): Promise<{ sidebar: WorkspaceForSidebar; myRole: WorkspaceRole }> {
+): Promise<{
+  sidebar: WorkspaceForSidebar;
+  myRole: WorkspaceRole;
+  roleLabels?: WorkspaceRoleLabelsMap;
+}> {
   const payload = await request<unknown>(`/workspaces/${workspaceId}`);
   const data = parseApiSingleEnvelope<ApiWorkspaceDetail>(payload);
   const ws = data.workspace;
   const role = data.membership.role;
+  const roleLabels = data.roleLabels;
   const rk = role as WorkspaceRoleKey;
   const rp = getRolePermissions(rk);
   const sidebar: WorkspaceForSidebar = {
@@ -123,7 +134,8 @@ export async function fetchWorkspaceSidebarContext(
     icon: ws.icon ?? undefined,
     type: ws.type,
     status: ws.status,
-    roleLabel: getWorkspaceRoleLabel(ws.type, role).toUpperCase(),
+    role,
+    roleLabel: getWorkspaceRoleLabel(ws.type, role, roleLabels).toUpperCase(),
     permissions: {
       canCreateContent: rp.canCreateContent,
       canOrganizeContent: rp.canOrganizeContent,
@@ -132,5 +144,5 @@ export async function fetchWorkspaceSidebarContext(
       canViewAnalytics: rp.canViewAnalytics,
     },
   };
-  return { sidebar, myRole: role };
+  return { sidebar, myRole: role, roleLabels };
 }

@@ -14,7 +14,8 @@ const Members = () => {
   const { collapsed, toggle } = useSidebar();
   const palette = useCommandPalette();
   const account = useCurrentAccount();
-  const { workspaceId, sidebar, myRole, isLoading, isError, refetch } = useWorkspaceRouteContext();
+  const { workspaceId, sidebar, myRole, roleLabels, isLoading, isError, refetch } =
+    useWorkspaceRouteContext();
 
   useEffect(() => {
     if (sidebar?.name) {
@@ -79,6 +80,7 @@ const Members = () => {
             currentUserId={currentUserId}
             currentUserRole={myRole}
             workspaceType={sidebar.type}
+            roleLabels={roleLabels}
           />
         </main>
       </div>

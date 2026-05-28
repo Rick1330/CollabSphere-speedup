@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "react-router-dom";
-import { Bell, ClipboardCheck, Keyboard, Menu, Search, ShieldCheck } from "lucide-react";
+import { Bell, Keyboard, Menu, Search, ShieldCheck } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import {
@@ -13,7 +13,6 @@ import { MobileSidebarContent } from "./app-sidebar";
 import { WorkspaceSwitcher } from "./workspace-switcher";
 import { getInitials } from "@/lib/format";
 import { useCurrentAccount } from "@/lib/auth-session";
-import { getSessionRole } from "@/lib/session-role";
 import { teardownAuthSession } from "@/lib/auth-teardown";
 import { fetchUnreadCount } from "@/api/adapters/notifications";
 import { emitOpenHelp } from "@/lib/shortcut-events";
@@ -39,7 +38,6 @@ export const TopNav = ({ user: userOverride, unreadCount: unreadCountOverride, o
   });
   const unreadCount =
     unreadCountOverride !== undefined ? unreadCountOverride : (unreadQ.data?.data.unreadCount ?? 0);
-  const sessionRole = getSessionRole(account);
   const user =
     userOverride ??
     (account
@@ -96,19 +94,7 @@ export const TopNav = ({ user: userOverride, unreadCount: unreadCountOverride, o
 
         {/* Right cluster */}
         <div className="flex items-center gap-1.5 ml-auto sm:ml-0">
-          {sessionRole.canReview && !sessionRole.isPlatformAdmin && (
-            <Link
-              to="/review"
-              className="hidden md:inline-flex items-center gap-1.5 h-9 px-2.5 rounded-lg border border-stone-200 hover:border-amber-300 hover:bg-amber-50/50 text-stone-600 hover:text-amber-700 text-xs font-medium transition-colors"
-              title="Open review queue"
-            >
-              <ClipboardCheck className="h-3.5 w-3.5" />
-              <span className="hidden lg:inline font-mono tracking-wide uppercase text-[10px]">
-                Review
-              </span>
-            </Link>
-          )}
-          {sessionRole.isPlatformAdmin && (
+          {account?.globalRole === "ADMIN" && (
             <Link
               to="/admin"
               className="hidden md:inline-flex items-center gap-1.5 h-9 px-2.5 rounded-lg border border-stone-200 hover:border-red-300 hover:bg-red-50/50 text-stone-600 hover:text-red-700 text-xs font-medium transition-colors"

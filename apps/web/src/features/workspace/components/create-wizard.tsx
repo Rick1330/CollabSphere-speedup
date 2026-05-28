@@ -16,6 +16,7 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { createOpaqueId } from "@/lib/secure-random";
+import { ApiError } from "@/api/client";
 import { createWorkspace } from "@/api/adapters/workspaces";
 import {
   WORKSPACE_TEMPLATES,
@@ -24,7 +25,6 @@ import {
   type WorkspaceTemplate,
   type TemplateCategory,
 } from "@/api/adapters/templates";
-import { resolveWizardWorkspaceTemplateForApi } from "@/lib/document-template-api-map";
 import {
   Dialog,
   DialogContent,
@@ -91,6 +91,13 @@ export const CreateWorkspaceWizard = () => {
       : createOpaqueId("idem_"),
   );
 
+  const workspaceType = data.type ?? "general";
+  const { data: workspaceTemplates = [] } = useQuery({
+    queryKey: ["templates", "workspace", workspaceType],
+    queryFn: () => listWorkspaceTemplatesFromApi(workspaceType),
+    enabled: Boolean(data.type),
+  });
+
   const goNext = () =>
     setCurrentStep((s) => Math.min(s + 1, 4) as WizardStep);
   const goBack = () =>
@@ -116,16 +123,13 @@ export const CreateWorkspaceWizard = () => {
     setIsCreating(true);
     try {
       const wsType = data.type ?? "general";
-      const apiTemplateId =
-        data.templateId && !data.templateId.startsWith("tpl-")
-          ? data.templateId
-          : resolveWizardWorkspaceTemplateForApi(data.templateId, wsType);
+      const templateIdForApi = data.templateId ?? undefined;
       const ws = await createWorkspace({
         name: data.name.trim(),
         description: data.description.trim(),
         icon: data.icon.trim() || undefined,
         type: wsType,
-        templateId: apiTemplateId,
+        templateId: templateIdForApi,
       });
       const tpl = data.templateId ? getWorkspaceTemplate(data.templateId) : null;
       const seededFolders = tpl?.preview.folders.length ?? 0;
@@ -137,7 +141,27 @@ export const CreateWorkspaceWizard = () => {
             : "An empty workspace, ready for you to shape.",
       });
       navigate(`/w/${ws.id}`);
-    } catch {
+    } catch (err) {
+      if (err instanceof ApiError) {
+        if (err.code === "TEMPLATE_NOT_FOUND") {
+          setServerError(
+            "Workspace templates are not seeded. Run `pnpm db:seed` or restart `pnpm dev`.",
+          );
+          return;
+        }
+        if (err.code === "WORKSPACE_NAME_CONFLICT") {
+          setServerError(
+            "A workspace with this name already exists. Choose another name or open it from Workspaces.",
+          );
+          return;
+        }
+        if (err.status >= 500) {
+          setServerError(
+            "Workspace creation failed on the server. Check the API terminal; if the log mentions a missing database column (e.g. documents.properties), run `pnpm prisma migrate deploy` and try again.",
+          );
+          return;
+        }
+      }
       setServerError("Workspace creation failed. Please try again.");
     } finally {
       setIsCreating(false);
@@ -565,16 +589,20 @@ const StepTemplate = ({
 }) => {
   const [previewId, setPreviewId] = useState<string | null>(null);
 
-  const { data: templates = WORKSPACE_TEMPLATES.filter((t) => t.category === workspaceType) } =
-    useQuery({
-      queryKey: ["templates", "workspace", workspaceType],
-      queryFn: () => listWorkspaceTemplatesFromApi(workspaceType),
-    });
+  const { data: templates = [] } = useQuery({
+    queryKey: ["templates", "workspace", workspaceType],
+    queryFn: () => listWorkspaceTemplatesFromApi(workspaceType),
+  });
 
   const previewTemplate = previewId ? templates.find((t) => t.id === previewId) ?? null : null;
 
   return (
     <>
+      {templates.length === 0 && (
+        <div className="mb-6 rounded-xl border border-stone-200 bg-stone-50 px-4 py-3 text-[13px] text-stone-700">
+          No templates found for this workspace type. Run <span className="font-mono">pnpm db:seed</span> and refresh.
+        </div>
+      )}
       <ul className="divide-y divide-stone-200 border-y border-stone-200">
         {templates.map((template, idx) => {
           const folders = template.preview.folders.length;

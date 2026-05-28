@@ -33,7 +33,11 @@ pnpm --filter @collabsphere/worker run dev:legacy
 
 Postgres, Redis, and MinIO stay in Docker (`docker compose up`). The **worker and LibreOffice run on the host** so DOCX files are read from the same disk path as the API — no bind-mount issues.
 
-**Port conflicts:** If another stack (e.g. `collabsphere-repo-main-redis-1`) already uses 6379, 5432, or 9000, `pnpm dev` fails before starting apps. Stop those containers (`docker ps`, then `docker stop <name>`) or use `pnpm dev --skip-compose` when this project's `collabsphere-redis` / `collabsphere-postgres` / `collabsphere-minio` are already running.
+**Port conflicts:** If another stack (e.g. `collabsphere-repo-main-*`) already uses 6379, 5432, 9000/9001, 1025, or 8025, `pnpm dev` fails before starting apps. Use `pnpm dev --stop-conflicting` to stop foreign containers on those compose ports automatically, or `docker stop <name>` manually, or `pnpm dev --skip-compose` when this project's `collabsphere-redis` / `collabsphere-postgres` / `collabsphere-minio` / `collabsphere-mailhog` are already running.
+
+**Compose startup:** `pnpm dev` waits only on long-running services (`postgres`, `redis`, `mailhog`, `minio`), then runs the one-shot `minio-setup` job (`docker compose --profile init run --rm minio-setup`) to create S3 buckets. If Postgres stays unhealthy, check `docker logs collabsphere-postgres`; if `.env` credentials changed after the volume was first created, remove the `postgres_data` volume (`docker volume ls`, then `docker volume rm <project>_postgres_data`).
+
+**Database setup:** After Postgres is healthy, `pnpm dev` runs `pnpm prisma migrate deploy` and `pnpm db:seed` (system workspace/document templates such as `general-blank`). On a fresh volume, seed demo logins separately: `pnpm demo:seed-runtime` (`elshaday@collabsphere.app` / `Demo1234!`, see `collab-ui-prompts/demo accounts.md`). If `POST /auth/login` returns 500 and the API log says `table ... does not exist`, run `pnpm prisma migrate deploy` manually. If workspace creation returns 404 `TEMPLATE_NOT_FOUND`, run `pnpm db:seed`. If workspace creation returns 500 and the API log mentions `documents.properties` or another missing column, run `pnpm prisma migrate deploy`. A 409 `WORKSPACE_NAME_CONFLICT` means that name is already taken for your account — pick a different name or delete the existing workspace.
 
 **First-time setup:**
 

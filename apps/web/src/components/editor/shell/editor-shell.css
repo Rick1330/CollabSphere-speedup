@@ -178,6 +178,22 @@
   background: var(--brand-500);
 }
 
+.cs-editor-rail-btn--glow {
+  animation: cs-editor-rail-badge-glow 2000ms var(--ease-out);
+}
+
+@keyframes cs-editor-rail-badge-glow {
+  0% {
+    filter: drop-shadow(0 0 0 oklch(0.78 0.15 75 / 0));
+  }
+  30% {
+    filter: drop-shadow(0 0 8px oklch(0.78 0.15 75 / 0.55));
+  }
+  100% {
+    filter: drop-shadow(0 0 0 oklch(0.78 0.15 75 / 0));
+  }
+}
+
 .cs-editor-rail-badge {
   position: absolute;
   top: var(--space-1);

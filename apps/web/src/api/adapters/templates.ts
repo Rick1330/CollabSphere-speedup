@@ -30,7 +30,81 @@ type ApiTemplateRow = {
   subCategory?: string | null;
   name: string;
   description?: string | null;
+  content?: unknown;
 };
+
+type ParsedWorkspacePreview = {
+  folders: string[];
+  documents: { title: string; folder: string }[];
+  taskColumns: string[];
+  submissionWorkflowEnabled: boolean;
+  roleLabel: string;
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+function parseWorkspacePreviewFromContent(content: unknown): ParsedWorkspacePreview {
+  const fallback: ParsedWorkspacePreview = {
+    folders: [],
+    documents: [],
+    taskColumns: [],
+    submissionWorkflowEnabled: false,
+    roleLabel: "MEMBER",
+  };
+  if (!isRecord(content)) return fallback;
+
+  const structure = isRecord(content.structure) ? content.structure : null;
+  const workspace = structure && isRecord(structure.workspace) ? structure.workspace : null;
+  if (!workspace) return fallback;
+
+  const folders = Array.isArray(workspace.folders)
+    ? workspace.folders
+        .filter(isRecord)
+        .map((folder) => (typeof folder.name === "string" ? folder.name.trim() : ""))
+        .filter((name) => name.length > 0)
+    : [];
+
+  const documents = Array.isArray(workspace.documents)
+    ? workspace.documents
+        .filter(isRecord)
+        .map((doc) => ({
+          title: typeof doc.title === "string" ? doc.title.trim() : "",
+          folder: typeof doc.folderKey === "string" ? doc.folderKey.trim() : "",
+        }))
+        .filter((doc) => doc.title.length > 0)
+    : [];
+
+  const taskBoard = isRecord(workspace.taskBoard) ? workspace.taskBoard : null;
+  const taskColumnsSource = taskBoard && Array.isArray(taskBoard.columns) ? taskBoard.columns : [];
+  const taskColumns = taskColumnsSource
+    .filter(isRecord)
+    .map((column) => (typeof column.name === "string" ? column.name.trim() : ""))
+    .filter((name) => name.length > 0);
+
+  const defaults = isRecord(workspace.defaults) ? workspace.defaults : null;
+  const roleLabels = defaults && isRecord(defaults.roleLabels) ? defaults.roleLabels : null;
+  const workspaceSettings =
+    defaults && isRecord(defaults.workspaceSettings) ? defaults.workspaceSettings : null;
+
+  const roleLabel =
+    roleLabels && typeof roleLabels.MEMBER === "string" && roleLabels.MEMBER.trim().length > 0
+      ? roleLabels.MEMBER.trim()
+      : "MEMBER";
+
+  const submissionWorkflowEnabled =
+    workspaceSettings && typeof workspaceSettings.submissionWorkflowEnabled === "boolean"
+      ? workspaceSettings.submissionWorkflowEnabled
+      : false;
+
+  return {
+    folders,
+    documents,
+    taskColumns,
+    submissionWorkflowEnabled,
+    roleLabel,
+  };
+}
 
 function mapDocumentTemplate(row: ApiTemplateRow): DocumentTemplate {
   return {
@@ -44,6 +118,7 @@ function mapDocumentTemplate(row: ApiTemplateRow): DocumentTemplate {
 }
 
 function mapWorkspaceTemplate(row: ApiTemplateRow): WorkspaceTemplate {
+  const preview = parseWorkspacePreviewFromContent(row.content);
   return {
     id: row.id,
     name: row.name,
@@ -51,12 +126,12 @@ function mapWorkspaceTemplate(row: ApiTemplateRow): WorkspaceTemplate {
     category: row.category as TemplateCategory,
     tagline: row.description ?? row.name,
     preview: {
-      folders: [],
-      documents: [],
-      taskColumns: [],
+      folders: preview.folders,
+      documents: preview.documents,
+      taskColumns: preview.taskColumns,
       settings: {
-        submissionWorkflowEnabled: row.category === "academic",
-        roleLabel: "MEMBER",
+        submissionWorkflowEnabled: preview.submissionWorkflowEnabled,
+        roleLabel: preview.roleLabel,
       },
     },
   };
@@ -90,6 +165,11 @@ export async function listDocumentTemplatesFromApi(
   }
 }
 
+/** True when the wizard is showing mock tpl-* ids (API list missing or empty). */
+export function usesMockWorkspaceTemplateCatalog(templates: WorkspaceTemplate[]): boolean {
+  return templates.length > 0 && templates.every((t) => t.id.startsWith("tpl-"));
+}
+
 export async function listWorkspaceTemplatesFromApi(
   workspaceType: TemplateCategory,
 ): Promise<WorkspaceTemplate[]> {
@@ -98,11 +178,8 @@ export async function listWorkspaceTemplatesFromApi(
       `/templates?kind=workspace&category=${encodeURIComponent(workspaceType)}`,
     );
     const { items } = parseApiListEnvelope<ApiTemplateRow>(payload);
-    if (items.length === 0) {
-      return WORKSPACE_TEMPLATES.filter((t) => t.category === workspaceType);
-    }
     return items.map(mapWorkspaceTemplate);
   } catch {
-    return WORKSPACE_TEMPLATES.filter((t) => t.category === workspaceType);
+    return [];
   }
 }

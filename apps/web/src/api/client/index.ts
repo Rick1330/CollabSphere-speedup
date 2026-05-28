@@ -220,6 +220,7 @@ const REQUEST_DEADLINE_MS = 45_000;
 
 /** Single-flight refresh so concurrent 401s share one `/auth/refresh` call. */
 let refreshSessionInFlight: Promise<boolean> | null = null;
+let refreshThrottledUntil = 0;
 
 /**
  * Rotate access JWT using refresh cookie + CSRF header (same contract as Nest `POST /auth/refresh`).
@@ -231,6 +232,10 @@ export function tryRefreshSession(): Promise<boolean> {
 }
 
 function refreshSessionWithCookie(): Promise<boolean> {
+  const now = Date.now();
+  if (refreshThrottledUntil > now) {
+    return Promise.resolve(false);
+  }
   if (!refreshSessionInFlight) {
     refreshSessionInFlight = (async (): Promise<boolean> => {
       const csrf = authSession.getCsrfToken();
@@ -251,7 +256,13 @@ function refreshSessionWithCookie(): Promise<boolean> {
           credentials: "include",
           signal: deadline,
         });
-        if (!res.ok) return false;
+        if (!res.ok) {
+          // Avoid hammering refresh when the API rate-limits (common during dev reload loops).
+          if (res.status === 429) {
+            refreshThrottledUntil = Date.now() + 10_000;
+          }
+          return false;
+        }
         const payload = (await res.json()) as unknown;
         const { extraData } = parseApiActionEnvelope<{
           accessToken?: string;

@@ -8,7 +8,9 @@ import { canAssignRole, canManageMember } from "./workspaces.policy.js";
 import {
   applyWorkspaceTemplate,
   buildDefaultWorkspaceSettings,
+  extractRoleLabelsFromSettings,
   parseWorkspaceTemplateContent,
+  type WorkspaceRoleLabelsMap,
 } from "./workspace-template.application.js";
 const COLLAB_PERMISSION_CHANNEL = "collab:permission-changed";
 
@@ -152,7 +154,7 @@ export class WorkspacesService {
       return workspace;
     });
 
-    this.eventEmitter.emit("workspace.updated", {
+    this.eventEmitter?.emit?.("workspace.updated", {
       workspaceId: created.id,
       changes: { created: true },
     });
@@ -384,6 +386,18 @@ export class WorkspacesService {
       },
     });
 
+    const workspaceIds = memberships.map((m) => m.workspace.id);
+    const settingsRows =
+      workspaceIds.length > 0
+        ? await this.prisma.workspaceSettings.findMany({
+            where: { workspaceId: { in: workspaceIds } },
+            select: { workspaceId: true, settings: true },
+          })
+        : [];
+    const roleLabelsByWorkspace = new Map<string, WorkspaceRoleLabelsMap | undefined>(
+      settingsRows.map((row) => [row.workspaceId, extractRoleLabelsFromSettings(row.settings)]),
+    );
+
     return memberships.map((membership) => {
       const ws = membership.workspace;
       const { _count, members: previewMembers, ...workspaceCore } = ws;
@@ -391,6 +405,7 @@ export class WorkspacesService {
         membershipId: membership.id,
         role: membership.role,
         workspace: workspaceCore,
+        roleLabels: roleLabelsByWorkspace.get(ws.id),
         memberCount: _count.members,
         documentCount: _count.documents,
         taskCount: _count.tasks,
@@ -512,7 +527,13 @@ export class WorkspacesService {
       throw new AppError({ code: "WORKSPACE_NOT_FOUND" });
     }
 
-    return { membership, workspace };
+    const settingsRow = await this.prisma.workspaceSettings.findUnique({
+      where: { workspaceId },
+      select: { settings: true },
+    });
+    const roleLabels = extractRoleLabelsFromSettings(settingsRow?.settings);
+
+    return { membership, workspace, roleLabels };
   }
 
   async listMembersForUser({ workspaceId }: { workspaceId: string }) {
@@ -533,6 +554,125 @@ export class WorkspacesService {
         },
       },
       orderBy: [{ role: "asc" }, { createdAt: "asc" }],
+    });
+  }
+
+  async listTaskColumnsForUser({
+    actorUserId,
+    workspaceId,
+  }: {
+    actorUserId: string;
+    workspaceId: string;
+  }) {
+    await this.findActorMembership({ userId: actorUserId, workspaceId });
+    return this.prisma.taskColumn.findMany({
+      where: {
+        workspaceId,
+        deletedAt: null,
+      },
+      orderBy: [{ position: "asc" }, { createdAt: "asc" }],
+      select: {
+        id: true,
+        name: true,
+        status: true,
+        position: true,
+      },
+    });
+  }
+
+  async listTaskLabelsForUser({
+    actorUserId,
+    workspaceId,
+  }: {
+    actorUserId: string;
+    workspaceId: string;
+  }) {
+    await this.findActorMembership({ userId: actorUserId, workspaceId });
+    return this.prisma.taskLabel.findMany({
+      where: {
+        workspaceId,
+        deletedAt: null,
+      },
+      orderBy: [{ name: "asc" }],
+      select: {
+        id: true,
+        name: true,
+        color: true,
+        description: true,
+      },
+    });
+  }
+
+  async createTaskLabelForUser({
+    actorUserId,
+    workspaceId,
+    name,
+    color,
+    description,
+  }: {
+    actorUserId: string;
+    workspaceId: string;
+    name: string;
+    color?: string;
+    description?: string | null;
+  }) {
+    const membership = await this.findActorMembership({ userId: actorUserId, workspaceId });
+    this.assertAdminOrOwner(membership.role);
+
+    const workspace = await this.prisma.workspace.findFirst({
+      where: { id: workspaceId, deletedAt: null },
+      select: { id: true, status: true },
+    });
+    if (!workspace) {
+      throw new AppError({ code: "WORKSPACE_NOT_FOUND" });
+    }
+    if (workspace.status === "archived") {
+      throw new AppError({ code: "WORKSPACE_ARCHIVED_READONLY" });
+    }
+
+    const trimmed = name.trim().toLowerCase();
+    if (!trimmed || trimmed.length > 50) {
+      throw new ValidationAppError({
+        issues: [
+          {
+            field: "name",
+            rule: "length",
+            message: "Label name must be 1-50 characters.",
+          },
+        ],
+      });
+    }
+
+    const existing = await this.prisma.taskLabel.findFirst({
+      where: {
+        workspaceId,
+        name: trimmed,
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+    if (existing) {
+      throw new AppError({ code: "VALIDATION_ERROR", message: "A label with this name already exists." });
+    }
+
+    const normalizedColor = /^#[0-9a-fA-F]{6}$/.test(color ?? "")
+      ? color!
+      : "#64748b";
+
+    return this.prisma.taskLabel.create({
+      data: {
+        workspaceId,
+        name: trimmed,
+        color: normalizedColor,
+        description: description?.trim() || null,
+        createdById: actorUserId,
+      },
+      select: {
+        id: true,
+        name: true,
+        color: true,
+        description: true,
+      },
     });
   }
 
@@ -650,12 +790,17 @@ export class WorkspacesService {
       data: { role },
     });
 
-    this.eventEmitter.emit("workspace.member_role_changed", {
-      workspaceId,
-      userId: targetMembership.userId,
-      newRole: role,
-      oldRole: targetMembership.role,
-    });
+    try {
+      this.eventEmitter.emit("workspace.member_role_changed", {
+        workspaceId,
+        userId: targetMembership.userId,
+        newRole: role,
+        oldRole: targetMembership.role,
+      });
+    } catch (error) {
+      // Realtime/event fan-out failures should never block membership persistence.
+      console.warn("[WorkspacesService] workspace.member_role_changed emit failed", error);
+    }
 
     await this.redisPublish.publish(
       COLLAB_PERMISSION_CHANNEL,

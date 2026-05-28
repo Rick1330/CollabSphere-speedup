@@ -14,7 +14,9 @@ import { fileURLToPath } from "node:url";
 import { assertDevPortContract } from "../packages/shared/src/dev-port-contract.ts";
 import {
   checkComposeServicePort,
+  collectForeignContainersForPorts,
   formatComposePortCheckFailure,
+  stopDockerContainers,
 } from "./lib/compose-port-check.mts";
 import {
   checkMinioHostPort,
@@ -39,6 +41,9 @@ const envLocalPath = join(rootDir, ".env.local");
 const workerEnvPath = join(rootDir, "apps", "worker", ".env.worker");
 const composeFilePath = join(rootDir, "docker-compose.yml");
 const workerComposeFilePath = join(rootDir, "docker-compose.worker.yml");
+/** Long-running compose services; excludes one-shot minio-setup (use `run --rm` instead). */
+const COMPOSE_WAIT_SERVICES = ["postgres", "redis", "mailhog", "minio"] as const;
+const POSTGRES_CONTAINER = "collabsphere-postgres";
 const windowsTaskkillPath = String.raw`C:\Windows\System32\taskkill.exe`;
 const envKeyPattern = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
@@ -104,18 +109,20 @@ const logError = (message) => {
 };
 
 const exitWithHelp = (code = 0) => {
-  console.log(`Usage: pnpm dev [--skip-compose] [--build-worker]
+  console.log(`Usage: pnpm dev [--skip-compose] [--stop-conflicting] [--build-worker]
 
 Options:
-  --skip-compose   Reuse existing Docker services and skip docker compose startup.
-  --build-worker   Rebuild the Docker worker image before starting (slow; use after Dockerfile changes).
-  --help           Show this help text.
+  --skip-compose        Reuse existing Docker services and skip docker compose startup.
+  --stop-conflicting    Stop foreign containers on compose dev ports before compose up.
+  --build-worker        Rebuild the Docker worker image before starting (slow; use after Dockerfile changes).
+  --help                Show this help text.
 `);
   process.exit(code);
 };
 
 const parseArgs = (argv) => {
   let skipCompose = false;
+  let stopConflicting = false;
   let buildWorker = false;
 
   for (const arg of argv) {
@@ -125,6 +132,11 @@ const parseArgs = (argv) => {
 
     if (arg === "--skip-compose") {
       skipCompose = true;
+      continue;
+    }
+
+    if (arg === "--stop-conflicting") {
+      stopConflicting = true;
       continue;
     }
 
@@ -145,7 +157,7 @@ const parseArgs = (argv) => {
     buildWorker = envFlag === "1" || envFlag === "true" || envFlag === "yes";
   }
 
-  return { skipCompose, buildWorker };
+  return { skipCompose, stopConflicting, buildWorker };
 };
 
 const hasWrappedQuote = (value, quote) => value.startsWith(quote) && value.endsWith(quote);
@@ -394,7 +406,7 @@ const formatPortInUseHelp = (port, label = "PORT") => {
   return `${label} ${port} is already in use.${killHint}`;
 };
 
-const assertListenPortAvailable = (port, label = "PORT") =>
+const assertListenPortAvailable = (port, label = "PORT", host = "0.0.0.0") =>
   new Promise<void>((resolve, reject) => {
     const probe = net.createServer();
     probe.once("error", (error) => {
@@ -414,7 +426,7 @@ const assertListenPortAvailable = (port, label = "PORT") =>
         resolve();
       });
     });
-    probe.listen(port, "0.0.0.0");
+    probe.listen(port, host);
   });
 
 const loadValidatedEnv = () => {
@@ -505,10 +517,53 @@ const COMPOSE_HOST_PORTS: Array<{
     label: "postgres",
   },
   { envKey: "MINIO_API_PORT", defaultPort: 9000, container: "collabsphere-minio", label: "minio" },
+  {
+    envKey: "MINIO_CONSOLE_PORT",
+    defaultPort: 9001,
+    container: "collabsphere-minio",
+    label: "minio-console",
+  },
+  {
+    envKey: "MAILHOG_SMTP_PORT",
+    defaultPort: 1025,
+    container: "collabsphere-mailhog",
+    label: "mailhog-smtp",
+  },
+  {
+    envKey: "MAILHOG_UI_PORT",
+    defaultPort: 8025,
+    container: "collabsphere-mailhog",
+    label: "mailhog-ui",
+  },
 ];
 
 const resolveHostPort = (values: EnvMap, envKey: string, defaultPort: number) =>
   Number.parseInt(values[envKey] ?? String(defaultPort), 10) || defaultPort;
+
+const buildComposePortChecks = (values: EnvMap) =>
+  COMPOSE_HOST_PORTS.map(({ envKey, defaultPort, container }) => ({
+    hostPort: resolveHostPort(values, envKey, defaultPort),
+    expectedContainer: container,
+  }));
+
+const formatDevComposePortList = (values: EnvMap) =>
+  [...new Set(buildComposePortChecks(values).map((check) => check.hostPort))]
+    .sort((left, right) => left - right)
+    .join(", ");
+
+const stopForeignContainersOnDevPorts = async (values: EnvMap) => {
+  const foreign = collectForeignContainersForPorts(buildComposePortChecks(values));
+  const portList = formatDevComposePortList(values);
+
+  if (foreign.length === 0) {
+    logInfo(`no conflicting containers on dev ports (${portList})`);
+    return;
+  }
+
+  logInfo(`stopping ${foreign.length} conflicting container(s): ${foreign.join(", ")}`);
+  stopDockerContainers(foreign, (message) => logInfo(message));
+  await sleep(1_000);
+};
 
 const assertComposePortsBeforeUp = (values: EnvMap) => {
   const failures: string[] = [];
@@ -525,7 +580,8 @@ const assertComposePortsBeforeUp = (values: EnvMap) => {
     throw new Error(
       "Docker Compose cannot bind required ports:\n" +
         failures.map((hint) => `  - ${hint}`).join("\n") +
-        "\nStop the conflicting containers, or run `pnpm dev --skip-compose` if this project's stack is already up.",
+        "\nStop the conflicting containers, run `pnpm dev --stop-conflicting`, " +
+        "or use `pnpm dev --skip-compose` if this project's stack is already up.",
     );
   }
 };
@@ -1017,6 +1073,166 @@ const assertDockerEngineHealthy = () => {
   );
 };
 
+const captureCommandOutput = (
+  command: string,
+  args: string[],
+  options?: { cwd?: string; env?: NodeJS.ProcessEnv },
+) => {
+  const result = spawnSync(command, args, {
+    encoding: "utf8",
+    windowsHide: true,
+    cwd: options?.cwd,
+    env: options?.env,
+  });
+  return `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
+};
+
+const getPostgresHealthStatus = (): string | null => {
+  const status = captureCommandOutput("docker", [
+    "inspect",
+    "-f",
+    "{{.State.Health.Status}}",
+    POSTGRES_CONTAINER,
+  ]);
+  if (!status || /error|no such/i.test(status)) {
+    return null;
+  }
+  return status;
+};
+
+const waitForPostgresHealthy = async (appEnv: EnvMap, timeoutMs = 90_000) => {
+  const user = appEnv.POSTGRES_USER ?? "collab";
+  const db = appEnv.POSTGRES_DB ?? "collabsphere";
+  const started = Date.now();
+
+  while (Date.now() - started < timeoutMs) {
+    if (getPostgresHealthStatus() === "healthy") {
+      return;
+    }
+
+    const ready = spawnSync(
+      "docker",
+      ["exec", POSTGRES_CONTAINER, "pg_isready", "-U", user, "-d", db],
+      { encoding: "utf8", windowsHide: true },
+    );
+    if (ready.status === 0) {
+      return;
+    }
+
+    await new Promise((resolve) => {
+      setTimeout(resolve, 500);
+    });
+  }
+
+  throw new Error(
+    `Postgres did not become healthy within ${timeoutMs / 1000}s.\n` +
+      `Run: docker logs ${POSTGRES_CONTAINER}\n` +
+      "If you changed POSTGRES_USER/POSTGRES_PASSWORD in .env but kept an old volume, reset postgres_data:\n" +
+      "  docker compose -f docker-compose.yml down\n" +
+      "  docker volume ls   # find <project>_postgres_data, then: docker volume rm <name>",
+  );
+};
+
+const formatComposeStartupFailure = (detail: string, appEnv: EnvMap) => {
+  const portConflict = /port is already allocated/i.test(detail);
+  const portHint = portConflict
+    ? "\n[dev] A port is in use by another Docker container (often collabsphere-repo-*). " +
+      `Run \`pnpm dev --stop-conflicting\`, or \`docker ps\` and stop containers on ${formatDevComposePortList(appEnv)}, ` +
+      "or use `pnpm dev --skip-compose`."
+    : "";
+
+  const psOutput = captureCommandOutput("docker", ["compose", "-f", composeFilePath, "ps"], {
+    cwd: rootDir,
+  });
+  const psHint = psOutput ? `\n[dev] docker compose ps:\n${psOutput}` : "";
+
+  return (
+    `${detail}${portHint}${psHint}\n` +
+    `[dev] Check Postgres: docker logs ${POSTGRES_CONTAINER}\n` +
+    "[dev] Docker Compose could not start dependencies. " +
+    "Fix Docker Desktop (restart until `docker version` shows Server without errors), " +
+    "or run `pnpm dev --skip-compose` if postgres/redis/mailhog/minio are already available."
+  );
+};
+
+const ensureDockerComposeServices = async (
+  composeEnv: NodeJS.ProcessEnv,
+  appEnv: EnvMap,
+) => {
+  try {
+    await runCommand(
+      "docker",
+      ["compose", "-f", composeFilePath, "up", "-d", "--wait", ...COMPOSE_WAIT_SERVICES],
+      { cwd: rootDir, env: composeEnv },
+    );
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(formatComposeStartupFailure(detail, appEnv));
+  }
+
+  await waitForPostgresHealthy(appEnv);
+  await ensureDatabaseMigrations(appEnv);
+
+  try {
+    await runCommand(
+      "docker",
+      ["compose", "-f", composeFilePath, "--profile", "init", "run", "--rm", "minio-setup"],
+      { cwd: rootDir, env: composeEnv },
+    );
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `${detail}\n` +
+        "[dev] MinIO bucket setup failed. Ensure collabsphere-minio is healthy, then run:\n" +
+        "  docker compose -f docker-compose.yml --profile init run --rm minio-setup\n" +
+        "  docker logs collabsphere-minio",
+    );
+  }
+
+  logInfo("MinIO buckets ensured");
+};
+
+const ensureDatabaseMigrations = async (appEnv: EnvMap) => {
+  const pnpmRunner = resolvePnpmRunner();
+  logInfo("applying database migrations (pnpm prisma migrate deploy)");
+  try {
+    await runCommand(pnpmRunner.command, [...pnpmRunner.baseArgs, "prisma", "migrate", "deploy"], {
+      cwd: rootDir,
+      env: { ...process.env, ...appEnv },
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `${detail}\n` +
+        "[dev] Database migrations failed. Ensure Postgres is running and DATABASE_URL in .env matches compose credentials, then run:\n" +
+        "  pnpm prisma migrate deploy\n" +
+        `  docker logs ${POSTGRES_CONTAINER}`,
+    );
+  }
+  logInfo("database migrations applied");
+  await ensureSystemTemplatesSeeded(appEnv);
+};
+
+const ensureSystemTemplatesSeeded = async (appEnv: EnvMap) => {
+  const pnpmRunner = resolvePnpmRunner();
+  logInfo("seeding system templates (pnpm db:seed)");
+  try {
+    await runCommand(process.execPath, [join(scriptDir, "prisma-local.mjs"), "db", "seed"], {
+      cwd: rootDir,
+      env: { ...process.env, ...appEnv },
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `${detail}\n` +
+        "[dev] System template seed failed. Ensure Postgres is reachable, then run:\n" +
+        "  pnpm db:seed\n" +
+        "Check DATABASE_URL in .env matches your Postgres instance.",
+    );
+  }
+  logInfo("system templates seeded");
+};
+
 const runCommand = (command, args, options) =>
   new Promise<void>((resolve, reject) => {
     const child = spawn(command, args, {
@@ -1065,7 +1281,7 @@ const isDockerWorkerRunning = (composeEnv: NodeJS.ProcessEnv) => {
 };
 
 const main = async () => {
-  const { skipCompose, buildWorker } = parseArgs(process.argv.slice(2));
+  const { skipCompose, stopConflicting, buildWorker } = parseArgs(process.argv.slice(2));
 
   if (!existsSync(composeFilePath) && !skipCompose) {
     throw new Error(`Missing docker-compose.yml at ${composeFilePath}`);
@@ -1126,31 +1342,18 @@ const main = async () => {
 
   if (skipCompose) {
     logWarn("skipping docker compose startup because --skip-compose was provided");
+    await ensureDatabaseMigrations(appEnv);
   } else {
     logInfo("ensuring docker compose services are up and healthy");
     assertDockerEngineHealthy();
+
+    if (stopConflicting) {
+      await stopForeignContainersOnDevPorts(appEnv);
+    }
+
     assertComposePortsBeforeUp(appEnv);
 
-    try {
-      await runCommand("docker", ["compose", "-f", composeFilePath, "up", "-d", "--wait"], {
-        cwd: rootDir,
-        env: composeEnv,
-      });
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
-      const portConflict = /port is already allocated/i.test(detail);
-      const portHint = portConflict
-        ? "\n[dev] A port is in use by another Docker container (often collabsphere-repo-*). " +
-          "Run `docker ps` and stop containers on 6379/5432/9000, or use `pnpm dev --skip-compose`."
-        : "";
-
-      throw new Error(
-        `${detail}${portHint}\n` +
-          "[dev] Docker Compose could not start dependencies. " +
-          "Fix Docker Desktop (restart until `docker version` shows Server without errors), " +
-          "or run `pnpm dev --skip-compose` if postgres/redis/mailhog are already available.",
-      );
-    }
+    await ensureDockerComposeServices(composeEnv, appEnv);
 
     logInfo("docker compose services are ready");
   }
@@ -1240,10 +1443,10 @@ const main = async () => {
       await assertApiPortNotAlreadyServing(apiPort);
     }
     if (surface.label === "web") {
-      await assertListenPortAvailable(webDevPort, "Vite dev port");
+      await assertListenPortAvailable(webDevPort, "Vite dev port", "127.0.0.1");
     }
     if (surface.label === "collab") {
-      await assertListenPortAvailable(collabPort, "COLLAB_PORT");
+      await assertListenPortAvailable(collabPort, "COLLAB_PORT", "127.0.0.1");
     }
 
     const workerScript = surface.label === "worker" ? "dev:once" : "dev";
@@ -1312,9 +1515,15 @@ const main = async () => {
         return;
       }
 
-      const detail = signal
+      let detail = signal
         ? `${surface.label} exited unexpectedly due to signal ${signal}`
         : `${surface.label} exited unexpectedly with code ${code}`;
+      if (surface.label === "web" && !signal && code === 1) {
+        const pid = findListeningPid(webDevPort);
+        if (pid) {
+          detail += `\n[dev] ${formatPortInUseHelp(webDevPort, "Vite dev port")}`;
+        }
+      }
       const exitCode = !Number.isInteger(code) || code === 0 ? 1 : code;
 
       void shutdown(detail, exitCode);

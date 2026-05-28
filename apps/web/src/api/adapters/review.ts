@@ -1,30 +1,32 @@
 /**
- * Review-queue adapter (mock).
+ * Review-queue adapter (API-backed).
  *
- * Aggregates pending submissions across workspaces for the supervisor /
- * reviewer review queue. Built on top of the existing academic mock data
- * (`MOCK_ACADEMIC_PROGRESS`) but extended with workspace context and
- * mutating handlers (approve / request changes) that update an in-memory
- * store so the queue feels live.
- *
- * The data is intentionally per-process (no persistence) — refreshing the
- * page resets it. That's fine for a mock; it keeps the demo deterministic.
+ * Aggregates pending submissions across *academic* workspaces where the user
+ * is allowed to review. This removes the mock review data and aligns the UI
+ * with real workspace membership + backend submission workflow.
  */
 
-import {
-  MOCK_ACADEMIC_PROGRESS,
-  MOCK_SUBMISSION_HISTORY,
-  type AcademicQueueItem,
-  type SubmissionRecord,
-} from "@/lib/mock-academic";
+import { request } from "@/api/client";
+import { parseApiListEnvelope } from "@/api/client/envelope";
+import { listMineWorkspaceRows } from "@/api/adapters/workspaces";
+import { approveSubmission, fetchSubmissionHistory, requestSubmissionChanges } from "@/api/adapters/submissions";
+import type { SubmissionRecord } from "@/lib/mock-academic";
+import { canReviewAcademic, type WorkspaceType } from "@/lib/academic-capabilities";
 
 export type ReviewDecision = "approved" | "changes_requested";
 
-export interface ReviewItem extends AcademicQueueItem {
+export interface ReviewItem {
+  documentId: string;
+  documentTitle: string;
+  studentId: string;
+  studentName: string;
+  status: "submitted";
+  lastEventAt: string;
+  folderPath: string | null;
   /** Workspace this submission belongs to (so the queue can route correctly). */
   workspaceId: string;
   workspaceName: string;
-  workspaceType: "academic" | "professional" | "general";
+  workspaceType: WorkspaceType;
   /** Optional submission note from the student. */
   submissionNote?: string;
   /** Version label e.g. "v2". */
@@ -37,219 +39,103 @@ export interface ReviewedItem extends ReviewItem {
   decisionNote?: string;
 }
 
-const now = () => new Date().toISOString();
-
-/** Seed the queue from academic progress + add cross-workspace context. */
-function seedQueue(): ReviewItem[] {
-  return MOCK_ACADEMIC_PROGRESS.awaitingReview.map((item, idx) => ({
-    ...item,
-    workspaceId: idx % 2 === 0 ? "thesis" : "alpha",
-    workspaceName: idx % 2 === 0 ? "Thesis — Distributed Systems" : "Project Alpha",
-    workspaceType: (idx % 2 === 0 ? "academic" : "professional") as
-      | "academic"
-      | "professional",
-    submissionNote:
-      idx === 0
-        ? "Updated REST envelope conventions per last review."
-        : idx === 1
-          ? "Chapter 2 first draft — focus on lit-review framing."
-          : "Initial pass for review; happy to iterate.",
-    versionLabel: `v${idx + 1}`,
-  }));
-}
-
-function seedReviewed(): ReviewedItem[] {
-  return MOCK_ACADEMIC_PROGRESS.recentlyReviewed.map((item, idx) => ({
-    ...item,
-    workspaceId: idx % 2 === 0 ? "alpha" : "thesis",
-    workspaceName: idx % 2 === 0 ? "Project Alpha" : "Thesis — Distributed Systems",
-    workspaceType: (idx % 2 === 0 ? "professional" : "academic") as
-      | "academic"
-      | "professional",
-    decision: item.status === "approved" ? "approved" : "changes_requested",
-    decidedAt: item.lastEventAt,
-    decisionNote:
-      item.status === "approved"
-        ? "Clear rationale, approved."
-        : "Scope section unclear — please split MVP from stretch goals.",
-  }));
-}
-
-const pending: ReviewItem[] = seedQueue();
-let reviewed: ReviewedItem[] = seedReviewed();
-
-const delay = (ms = 250) => new Promise((r) => setTimeout(r, ms));
-
 export async function fetchReviewQueue(): Promise<{
   pending: ReviewItem[];
   reviewed: ReviewedItem[];
 }> {
-  await delay(200);
-  return {
-    pending: [...pending].sort(
-      (a, b) => new Date(a.lastEventAt).getTime() - new Date(b.lastEventAt).getTime(),
-    ),
-    reviewed: [...reviewed].sort(
-      (a, b) => new Date(b.decidedAt).getTime() - new Date(a.decidedAt).getTime(),
-    ),
-  };
+  const rows = await listMineWorkspaceRows();
+  const reviewableAcademic = rows.filter((row) =>
+    canReviewAcademic({ workspaceType: row.workspace.type, myRole: row.role }),
+  );
+
+  const pending = (
+    await Promise.all(
+      reviewableAcademic.map(async (row) => {
+        const payload = await request<unknown>(`/workspaces/${row.workspace.id}/submissions/queue`);
+        const { items } = parseApiListEnvelope<{
+          id: string;
+          documentId: string;
+          submittedAt: string;
+          submittedById: string;
+          submittedBy?: { id: string; fullName?: string | null } | null;
+          document?: { id: string; title?: string | null; status?: string | null } | null;
+        }>(payload);
+
+        return items.map(
+          (item): ReviewItem => ({
+            documentId: item.documentId,
+            documentTitle: item.document?.title?.trim() || "Untitled",
+            studentId: item.submittedById,
+            studentName: item.submittedBy?.fullName?.trim() || "Student",
+            status: "submitted",
+            lastEventAt: item.submittedAt,
+            folderPath: null,
+            workspaceId: row.workspace.id,
+            workspaceName: row.workspace.name,
+            workspaceType: row.workspace.type,
+            submissionNote: undefined,
+            versionLabel: undefined,
+          }),
+        );
+      }),
+    )
+  ).flat();
+
+  pending.sort((a, b) => new Date(b.lastEventAt).getTime() - new Date(a.lastEventAt).getTime());
+
+  // Reviewed history is not yet exposed as a cross-workspace feed by the API.
+  return { pending, reviewed: [] };
 }
 
 export async function decideOnSubmission(params: {
+  workspaceId: string;
   documentId: string;
   decision: ReviewDecision;
   note?: string;
-}): Promise<ReviewedItem> {
-  await delay(350);
-  const idx = pending.findIndex((p) => p.documentId === params.documentId);
-  if (idx === -1) {
-    throw new Error("Submission no longer pending");
+}): Promise<void> {
+  if (params.decision === "approved") {
+    await approveSubmission({ workspaceId: params.workspaceId, documentId: params.documentId });
+    return;
   }
-  const [item] = pending.splice(idx, 1);
-  const reviewedItem: ReviewedItem = {
-    ...item,
-    status: params.decision,
-    decision: params.decision,
-    decidedAt: now(),
-    decisionNote: params.note,
-    lastEventAt: now(),
-  };
-  reviewed = [reviewedItem, ...reviewed].slice(0, 20);
-  return reviewedItem;
-}
-
-export async function submitForReview(params: {
-  documentId: string;
-  documentTitle: string;
-  studentId: string;
-  studentName: string;
-  submissionNote?: string;
-  versionLabel?: string;
-}): Promise<ReviewItem> {
-  await delay(300);
-
-  const submittedAt = now();
-
-  // Ensure there is at most one pending cycle per document.
-  const existingIdx = pending.findIndex((p) => p.documentId === params.documentId);
-  if (existingIdx !== -1) pending.splice(existingIdx, 1);
-
-  const item: ReviewItem = {
+  const note = params.note?.trim() ?? "";
+  if (!note) {
+    throw new Error("A feedback note is required when requesting changes.");
+  }
+  await requestSubmissionChanges({
+    workspaceId: params.workspaceId,
     documentId: params.documentId,
-    documentTitle: params.documentTitle,
-    studentId: params.studentId,
-    studentName: params.studentName,
-    status: "submitted",
-    lastEventAt: submittedAt,
-    submissionNote: params.submissionNote,
-    versionLabel: params.versionLabel,
-    // The mock adapter doesn't currently know workspace context for arbitrary
-    // document submissions; keep these stable placeholders.
-    workspaceId: "unknown",
-    workspaceName: "Unknown workspace",
-    workspaceType: "academic",
-    folderPath: null,
-  };
-
-  pending.unshift(item);
-  return item;
+    note,
+  });
 }
 
-/** Per-document decision history. Combines seeded submission history with
- * any in-memory decisions recorded during this session. */
-export async function fetchDocumentHistory(documentId: string): Promise<SubmissionRecord[]> {
-  await delay(150);
-  const seeded = MOCK_SUBMISSION_HISTORY[documentId] ?? [];
-
-  const sessionPending: SubmissionRecord[] = pending
-    .filter((p) => p.documentId === documentId)
-    .map((p) => ({
-      id: `pending-${p.documentId}-${p.lastEventAt}`,
-      documentId: p.documentId,
-      submittedById: p.studentId,
-      submittedByName: p.studentName,
-      submittedAt: p.lastEventAt,
-      submissionNote: p.submissionNote,
-      versionLabel: p.versionLabel,
-    }));
-
-  const sessionDecisions: SubmissionRecord[] = reviewed
-    .filter((r) => r.documentId === documentId)
-    .map((r) => ({
-      id: `session-${r.documentId}-${r.decidedAt}`,
-      documentId: r.documentId,
-      submittedById: r.studentId,
-      submittedByName: r.studentName,
-      submittedAt: r.lastEventAt,
-      decision: r.decision,
-      decidedById: "user-current",
-      decidedByName: "You",
-      decidedAt: r.decidedAt,
-      decisionNote: r.decisionNote,
-      versionLabel: r.versionLabel,
-    }));
-
-  // Seeded pending/decision entries are historical snapshots. We should avoid
-  // duplicating them when the session queue already has an active pending
-  // entry (or when a decision is already represented by session state).
-  const seededDecisions = seeded.filter((r) => !!r.decision);
-
-  const candidates: SubmissionRecord[] = [
-    ...sessionPending,
-    ...sessionDecisions,
-    ...seededDecisions,
-  ];
-
-  // Dedupe by semantic keys instead of id (mock ids differ across layers).
-  const seenKeys = new Set<string>();
-  return candidates
-    .filter((r) => {
-      const key = r.decision
-        ? `decision:${r.decision}:${r.decidedAt ?? r.submittedAt}`
-        : `pending:${r.submittedAt}`;
-      if (seenKeys.has(key)) return false;
-      seenKeys.add(key);
-      return true;
-    })
-    .sort(
-      (a, b) =>
-        new Date(b.decidedAt ?? b.submittedAt).getTime() -
-        new Date(a.decidedAt ?? a.submittedAt).getTime(),
-    );
+export async function fetchDocumentHistory(params: {
+  workspaceId: string;
+  documentId: string;
+}): Promise<SubmissionRecord[]> {
+  return fetchSubmissionHistory(params);
 }
 
-/** Lightweight counts for dashboard panels. */
 export async function fetchReviewCounts(): Promise<{
   pendingTotal: number;
   overdueTotal: number;
   decidedToday: number;
 }> {
-  await delay(120);
+  const { pending } = await fetchReviewQueue();
   const dayMs = 24 * 60 * 60 * 1000;
   const now = Date.now();
   return {
     pendingTotal: pending.length,
     overdueTotal: pending.filter((p) => now - new Date(p.lastEventAt).getTime() > dayMs).length,
-    decidedToday: reviewed.filter((r) => now - new Date(r.decidedAt).getTime() < dayMs).length,
+    decidedToday: 0,
   };
 }
 
-/** For the student "my submissions" panel — what *I* have submitted. */
-export async function fetchMySubmissions(accountId: string): Promise<{
+export async function fetchMySubmissions(_accountId: string): Promise<{
   pending: ReviewItem[];
   reviewed: ReviewedItem[];
 }> {
-  await delay(180);
-  // Map mock account ids → student ids used in the academic mock seed.
-  const idMap: Record<string, string> = {
-    u_meron: "user-priya",
-    u_hanna: "user-alice",
-    u_jane: "user-jane",
-    u_eyob: "user-bob",
-  };
-  const studentId = idMap[accountId] ?? accountId;
-  return {
-    pending: pending.filter((p) => p.studentId === studentId),
-    reviewed: reviewed.filter((r) => r.studentId === studentId),
-  };
+  // The backend does not currently expose a per-user submissions feed. Keep this
+  // surface stable for the dashboard panel; we can wire it once the API exists.
+  void _accountId;
+  return { pending: [], reviewed: [] };
 }

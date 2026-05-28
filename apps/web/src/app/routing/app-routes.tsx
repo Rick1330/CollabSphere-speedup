@@ -68,6 +68,7 @@ const AdminWorkspaceDetail = lazyPage(
 );
 const AdminAudit = lazyPage(() => import("@/features/admin/pages/AdminAudit"));
 const ReviewQueue = lazyPage(() => import("@/features/review/pages/ReviewQueue"));
+const SubmissionCenter = lazyPage(() => import("@/features/review/pages/SubmissionCenter"));
 const KitShowcasePage = lazyPage(() => import("@/features/dev/pages/KitShowcasePage"));
 
 const LazyDocumentEditor = lazy(() => import("@/features/documents/pages/DocumentEditor"));
@@ -132,6 +133,8 @@ export function AppRoutes() {
           <Route path="files" element={<Files />} />
           <Route path="analytics" element={<Analytics />} />
           <Route path="templates" element={<Templates />} />
+          <Route path="review" element={<ReviewQueue />} />
+          <Route path="submissions" element={<SubmissionCenter />} />
           <Route path="settings" element={<WorkspaceSettings />} />
           <Route path="settings/members" element={<WorkspaceSettings />} />
         </Route>

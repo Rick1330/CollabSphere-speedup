@@ -14,7 +14,11 @@
  */
 import { request, ApiError as ClientApiError } from "@/api/client";
 import { parseApiSingleEnvelope } from "@/api/client/envelope";
-import { getWorkspaceRoleLabel } from "@/lib/role-labels";
+import {
+  getWorkspaceRoleLabel,
+  type WorkspaceRoleLabelsMap,
+  type WorkspaceTypeForLabels,
+} from "@/lib/role-labels";
 
 export type WorkspaceRole = "OWNER" | "ADMIN" | "MANAGER" | "MEMBER" | "VIEWER";
 
@@ -162,7 +166,10 @@ const mapApiError = (error: unknown): never => {
   throw error;
 };
 
-const mapMember = (item: ApiWorkspaceMember): WorkspaceMember => ({
+const mapMember = (
+  item: ApiWorkspaceMember,
+  ctx: { workspaceType: WorkspaceTypeForLabels; roleLabels?: WorkspaceRoleLabelsMap },
+): WorkspaceMember => ({
   membershipId: item.id,
   user: {
     id: item.user.id,
@@ -171,16 +178,19 @@ const mapMember = (item: ApiWorkspaceMember): WorkspaceMember => ({
     avatarUrl: item.user.avatarUrl ?? null,
   },
   role: item.role,
-  roleLabel: getWorkspaceRoleLabel("general", item.role),
+  roleLabel: getWorkspaceRoleLabel(ctx.workspaceType, item.role, ctx.roleLabels),
   joinedAt: item.joinedAt ?? new Date().toISOString(),
   lastAccessedAt: item.lastAccessedAt ?? null,
 });
 
-const mapInvitation = (item: ApiInvitation): PendingInvitation => ({
+const mapInvitation = (
+  item: ApiInvitation,
+  ctx: { workspaceType: WorkspaceTypeForLabels; roleLabels?: WorkspaceRoleLabelsMap },
+): PendingInvitation => ({
   id: item.id,
   email: item.email,
   role: item.role,
-  roleLabel: getWorkspaceRoleLabel("general", item.role),
+  roleLabel: getWorkspaceRoleLabel(ctx.workspaceType, item.role, ctx.roleLabels),
   invitedBy: {
     id: item.invitedById,
     fullName: item.invitedByFullName?.trim() || "Workspace member",
@@ -201,16 +211,28 @@ export async function fetchWorkspaceMemberPeerProfile(
   return parseApiSingleEnvelope<WorkspaceMemberPeerProfile>(raw);
 }
 
-export async function fetchMembers(workspaceId: string): Promise<{ data: { items: WorkspaceMember[] } }> {
+export async function fetchMembers(
+  workspaceId: string,
+  ctx: { workspaceType?: WorkspaceTypeForLabels; roleLabels?: WorkspaceRoleLabelsMap } = {},
+): Promise<{ data: { items: WorkspaceMember[] } }> {
+  const labelCtx = {
+    workspaceType: ctx.workspaceType ?? "general",
+    roleLabels: ctx.roleLabels,
+  };
   const payload = await request<ListEnvelope<ApiWorkspaceMember>>(`/workspaces/${workspaceId}/members`);
-  return { data: { items: (payload.data?.items ?? []).map(mapMember) } };
+  return { data: { items: (payload.data?.items ?? []).map((item) => mapMember(item, labelCtx)) } };
 }
 
 export async function fetchPendingInvitations(
   workspaceId: string,
+  ctx: { workspaceType?: WorkspaceTypeForLabels; roleLabels?: WorkspaceRoleLabelsMap } = {},
 ): Promise<{ data: { items: PendingInvitation[] } }> {
+  const labelCtx = {
+    workspaceType: ctx.workspaceType ?? "general",
+    roleLabels: ctx.roleLabels,
+  };
   const payload = await request<ListEnvelope<ApiInvitation>>(`/workspaces/${workspaceId}/invitations`);
-  return { data: { items: (payload.data?.items ?? []).map(mapInvitation) } };
+  return { data: { items: (payload.data?.items ?? []).map((item) => mapInvitation(item, labelCtx)) } };
 }
 
 export async function changeMemberRole(

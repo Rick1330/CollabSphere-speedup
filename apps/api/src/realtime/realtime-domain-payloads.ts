@@ -69,6 +69,23 @@ export type DocumentApprovedPayload = {
   approvedById: string;
 };
 
+export type SubmissionCreatedPayload = {
+  workspaceId: string;
+  documentId: string;
+  submissionId: string;
+  submittedById: string;
+  submittedAt: string;
+};
+
+export type SubmissionUpdatedPayload = {
+  workspaceId: string;
+  documentId: string;
+  submissionId: string;
+  decision: "approved" | "changes_requested";
+  decidedById: string;
+  decidedAt: string;
+};
+
 export type TaskCreatedPayload = {
   workspaceId: string;
   taskId: string;

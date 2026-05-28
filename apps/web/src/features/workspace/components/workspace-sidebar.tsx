@@ -8,6 +8,10 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getWorkspaceNavItems } from "./workspace-nav-items";
+import { useQuery } from "@tanstack/react-query";
+import { request } from "@/api/client";
+import { parseApiListEnvelope } from "@/api/client/envelope";
+import { collectDocumentsFromTree, getDocumentTree } from "@/api/adapters/documents";
 
 export interface WorkspaceForSidebar {
   id: string;
@@ -15,6 +19,7 @@ export interface WorkspaceForSidebar {
   description?: string;
   icon?: string;
   type: "professional" | "academic" | "general";
+  role?: "OWNER" | "ADMIN" | "MANAGER" | "MEMBER" | "VIEWER";
   roleLabel: string;
   status: "active" | "archived";
   permissions: {
@@ -41,7 +46,34 @@ const typeBadge = (t: WorkspaceForSidebar["type"]) =>
 
 export const WorkspaceSidebar = ({ workspace, collapsed, onToggle }: WorkspaceSidebarProps) => {
   const base = `/w/${workspace.id}`;
-  const allItems = getWorkspaceNavItems(workspace);
+  const reviewQ = useQuery({
+    queryKey: ["workspace", workspace.id, "review-nav-count"],
+    queryFn: async () => {
+      const payload = await request<unknown>(`/workspaces/${workspace.id}/submissions/queue`);
+      const { total } = parseApiListEnvelope<unknown>(payload);
+      return total;
+    },
+    enabled: workspace.type === "academic" && workspace.role === "MANAGER",
+    staleTime: 15_000,
+  });
+  const submissionQ = useQuery({
+    queryKey: ["workspace", workspace.id, "submission-nav-count"],
+    queryFn: async () => {
+      const tree = await getDocumentTree(workspace.id);
+      const docs = collectDocumentsFromTree(tree);
+      return docs.filter((doc) => doc.status === "submitted" || doc.status === "changes_requested")
+        .length;
+    },
+    enabled:
+      workspace.type === "academic" &&
+      workspace.permissions.canCreateContent &&
+      workspace.role !== "VIEWER",
+    staleTime: 15_000,
+  });
+  const allItems = getWorkspaceNavItems(workspace, {
+    reviewPending: reviewQ.data ?? 0,
+    submissionActive: submissionQ.data ?? 0,
+  });
   const primaryNav = allItems.slice(0, 6);
   const secondaryNav = allItems.slice(6);
 
@@ -132,6 +164,11 @@ export const WorkspaceSidebar = ({ workspace, collapsed, onToggle }: WorkspaceSi
                 >
                   <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
                   {!collapsed && <span className="truncate">{item.label}</span>}
+                  {!collapsed && typeof item.badgeCount === "number" && item.badgeCount > 0 ? (
+                    <span className="ml-auto rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
+                      {item.badgeCount}
+                    </span>
+                  ) : null}
                 </NavLink>
               </li>
             );
@@ -184,6 +221,11 @@ export const WorkspaceSidebar = ({ workspace, collapsed, onToggle }: WorkspaceSi
                 >
                   <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
                   {!collapsed && <span>{item.label}</span>}
+                  {!collapsed && typeof item.badgeCount === "number" && item.badgeCount > 0 ? (
+                    <span className="ml-auto rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
+                      {item.badgeCount}
+                    </span>
+                  ) : null}
                 </NavLink>
               </li>
             );

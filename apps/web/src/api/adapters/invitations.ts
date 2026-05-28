@@ -14,6 +14,8 @@ function parseListEnvelope<T>(payload: unknown): T[] {
   return items;
 }
 
+import type { WorkspaceRoleLabelsMap } from "@/lib/role-labels";
+
 export type PendingInvitationRow = {
   id: string;
   role: string;
@@ -25,6 +27,7 @@ export type PendingInvitationRow = {
     type: string;
     icon: string | null;
     status: string;
+    roleLabels?: WorkspaceRoleLabelsMap;
   };
   invitedByFullName: string;
 };

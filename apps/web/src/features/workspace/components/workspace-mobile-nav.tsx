@@ -52,6 +52,11 @@ export const WorkspaceMobileNav = ({ workspace }: WorkspaceMobileNavProps) => {
                 >
                   <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
                   <span className="whitespace-nowrap">{item.label}</span>
+                  {typeof item.badgeCount === "number" && item.badgeCount > 0 ? (
+                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
+                      {item.badgeCount}
+                    </span>
+                  ) : null}
                 </NavLink>
               </li>
             );

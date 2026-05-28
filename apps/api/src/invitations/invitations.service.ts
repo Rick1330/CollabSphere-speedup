@@ -1,11 +1,16 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { WorkspaceRole } from "@prisma/client";
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Optional } from "@nestjs/common";
 import { EventEmitter2 } from "@nestjs/event-emitter";
 import { AppError } from "../common/filters/app-error.filter.js";
 import { PrismaClientProvider } from "../common/prisma/prisma-client.provider.js";
 import { apiRuntimeEnv } from "../config/api-runtime.js";
 import { canAssignRole } from "../workspaces/workspaces.policy.js";
+import {
+  extractRoleLabelsFromSettings,
+  resolveRoleLabel,
+  type WorkspaceRoleLabelsMap,
+} from "../workspaces/workspace-template.application.js";
 import {
   createWorkspaceInvitationEmailJob,
   enqueueWorkspaceInvitationEmailJob,
@@ -23,15 +28,10 @@ const createInvitationToken = () => randomBytes(32).toString("base64url");
 const normalizeEmail = (email: string) => email.trim().toLowerCase();
 
 const isEmailValid = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-const invitationRoleLabel = (role: WorkspaceRole) => {
-  if (role === "OWNER") return "Owner";
-  return role
-    .toLowerCase()
-    .split("_")
-    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
-    .join(" ");
-};
+const invitationRoleLabel = (role: WorkspaceRole, roleLabels?: WorkspaceRoleLabelsMap) =>
+  resolveRoleLabel(role, roleLabels);
 
 const futureExpiryDate = () => {
   const expiresAt = new Date();
@@ -109,26 +109,37 @@ export class InvitationsService {
         expiresAt: true,
         createdAt: true,
         workspace: {
-          select: { id: true, name: true, type: true, icon: true, status: true },
+          select: {
+            id: true,
+            name: true,
+            type: true,
+            icon: true,
+            status: true,
+            settings: { select: { settings: true } },
+          },
         },
         invitedByUser: { select: { fullName: true } },
       },
       orderBy: { createdAt: "desc" },
     });
-    return rows.map((r) => ({
-      id: r.id,
-      role: r.role,
-      expiresAt: r.expiresAt,
-      createdAt: r.createdAt,
-      workspace: {
-        id: r.workspace.id,
-        name: r.workspace.name,
-        type: r.workspace.type,
-        icon: r.workspace.icon,
-        status: r.workspace.status,
-      },
-      invitedByFullName: r.invitedByUser.fullName,
-    }));
+    return rows.map((r) => {
+      const roleLabels = extractRoleLabelsFromSettings(r.workspace.settings?.settings);
+      return {
+        id: r.id,
+        role: r.role,
+        expiresAt: r.expiresAt,
+        createdAt: r.createdAt,
+        workspace: {
+          id: r.workspace.id,
+          name: r.workspace.name,
+          type: r.workspace.type,
+          icon: r.workspace.icon,
+          status: r.workspace.status,
+          roleLabels,
+        },
+        invitedByFullName: r.invitedByUser.fullName,
+      };
+    });
   }
 
   async createInvitations({
@@ -164,7 +175,12 @@ export class InvitationsService {
 
     const workspace = await this.prisma.workspace.findFirst({
       where: { id: workspaceId, deletedAt: null },
-      select: { id: true, status: true, name: true },
+      select: {
+        id: true,
+        status: true,
+        name: true,
+        settings: { select: { settings: true } },
+      },
     });
     if (!workspace) {
       throw new AppError({ code: "WORKSPACE_NOT_FOUND" });
@@ -178,6 +194,7 @@ export class InvitationsService {
       select: { fullName: true },
     });
     const inviterFullName = actorUser?.fullName?.trim() || "A workspace member";
+    const workspaceRoleLabels = extractRoleLabelsFromSettings(workspace.settings?.settings);
 
     const activeMemberCount = await this.prisma.workspaceMember.count({
       where: { workspaceId, isActive: true, deletedAt: null },
@@ -240,6 +257,7 @@ export class InvitationsService {
           workspaceName: workspace.name,
           inviterFullName,
           role,
+          roleLabels: workspaceRoleLabels,
         });
       } catch {
         await this.prisma.invitation.update({
@@ -373,13 +391,17 @@ export class InvitationsService {
 
     const workspace = await this.prisma.workspace.findFirst({
       where: { id: workspaceId, deletedAt: null },
-      select: { name: true },
+      select: {
+        name: true,
+        settings: { select: { settings: true } },
+      },
     });
     const actorUser = await this.prisma.user.findFirst({
       where: { id: actorUserId, deletedAt: null },
       select: { fullName: true },
     });
     const inviterFullName = actorUser?.fullName?.trim() || "A workspace member";
+    const workspaceRoleLabels = extractRoleLabelsFromSettings(workspace?.settings?.settings);
 
     const token = createInvitationToken();
     const updated = await this.prisma.invitation.update({
@@ -408,6 +430,7 @@ export class InvitationsService {
           workspaceName: workspace.name,
           inviterFullName,
           role: invitation.role,
+          roleLabels: workspaceRoleLabels,
         });
       } catch {
         throw new AppError({
@@ -480,6 +503,7 @@ export class InvitationsService {
     workspaceName: string;
     inviterFullName: string;
     role: WorkspaceRole;
+    roleLabels?: WorkspaceRoleLabelsMap;
   }) {
     const encryptedInviteToken = encryptInvitationTokenForEmailQueue({
       token: input.token,
@@ -489,10 +513,22 @@ export class InvitationsService {
       invitedEmail: input.invitedEmail,
       workspaceName: input.workspaceName,
       inviterFullName: input.inviterFullName,
-      roleLabel: invitationRoleLabel(input.role),
+      roleLabel: invitationRoleLabel(input.role, input.roleLabels),
       encryptedInviteToken,
     });
-    await enqueueWorkspaceInvitationEmailJob({ job });
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      try {
+        await enqueueWorkspaceInvitationEmailJob({ job });
+        return;
+      } catch (error) {
+        lastError = error;
+        if (attempt < 2) {
+          await wait(150);
+        }
+      }
+    }
+    throw lastError;
   }
 
   private async finalizeAcceptInvitation(
@@ -562,7 +598,7 @@ export class InvitationsService {
       return nextMembership;
     });
 
-    this.eventEmitter.emit("workspace.member_joined", {
+    this.eventEmitter?.emit?.("workspace.member_joined", {
       workspaceId: invitation.workspaceId,
       userId: user.id,
       role: membership.role,

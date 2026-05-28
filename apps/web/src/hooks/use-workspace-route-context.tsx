@@ -3,12 +3,14 @@ import { useParams } from "react-router-dom";
 import { fetchWorkspaceSidebarContext } from "@/api/adapters/workspaces";
 import type { WorkspaceForSidebar } from "@/features/workspace/components/workspace-sidebar";
 import type { WorkspaceRole } from "@/api/adapters/members";
+import type { WorkspaceRoleLabelsMap } from "@/lib/role-labels";
 import { isDatabaseWorkspaceId } from "@/lib/workspace-id";
 import { ApiError } from "@/api/client";
 export interface WorkspaceRouteContextValue {
   workspaceId: string;
   sidebar: WorkspaceForSidebar | undefined;
   myRole: WorkspaceRole | undefined;
+  roleLabels: WorkspaceRoleLabelsMap | undefined;
   isLoading: boolean;
   isError: boolean;
   /** True when the API rejected access for this workspace (not a member, etc.). */
@@ -41,6 +43,7 @@ export function useWorkspaceRouteContext(): WorkspaceRouteContextValue {
     workspaceId,
     sidebar: q.data?.sidebar,
     myRole: q.data?.myRole,
+    roleLabels: q.data?.roleLabels,
     isLoading: q.isLoading,
     isError: q.isError,
     accessDenied,

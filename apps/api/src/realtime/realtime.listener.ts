@@ -13,6 +13,8 @@ import type {
   DocumentSubmittedPayload,
   DocumentUnlockedPayload,
   ExportCompletedPayload,
+  SubmissionCreatedPayload,
+  SubmissionUpdatedPayload,
   TaskAssignedPayload,
   TaskCompletedPayload,
   TaskCreatedPayload,
@@ -142,6 +144,29 @@ export class RealtimeListener {
       workspaceId: payload.workspaceId,
       documentId: payload.documentId,
       approvedById: payload.approvedById,
+    });
+  }
+
+  @OnEvent("submission.created", { async: false })
+  onSubmissionCreated(payload: SubmissionCreatedPayload): void {
+    this.gateway.emitToRoom(this.workspaceRoom(payload.workspaceId), "submission:created", {
+      workspaceId: payload.workspaceId,
+      documentId: payload.documentId,
+      submissionId: payload.submissionId,
+      submittedById: payload.submittedById,
+      submittedAt: payload.submittedAt,
+    });
+  }
+
+  @OnEvent("submission.updated", { async: false })
+  onSubmissionUpdated(payload: SubmissionUpdatedPayload): void {
+    this.gateway.emitToRoom(this.workspaceRoom(payload.workspaceId), "submission:updated", {
+      workspaceId: payload.workspaceId,
+      documentId: payload.documentId,
+      submissionId: payload.submissionId,
+      decision: payload.decision,
+      decidedById: payload.decidedById,
+      decidedAt: payload.decidedAt,
     });
   }
 

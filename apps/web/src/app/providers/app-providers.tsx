@@ -39,17 +39,23 @@ function ThemeListener() {
 function ApiClientAuthBridge({ queryClient }: { queryClient: QueryClient }) {
   const navigate = useNavigate();
 
+  // Configure core client settings synchronously so queries never run against an unconfigured client.
+  // (Auth failure redirect still needs `navigate`, so it's registered in the layout effect below.)
+  configureApiClient({
+    baseUrl: resolveConfiguredApiBaseUrl(),
+    getAuthToken: () => authSession.getAccessToken(),
+    onAccessTokenRefreshed: () => {
+      syncSocketAuthFromSession();
+      void queryClient.invalidateQueries({ queryKey: ["current-user"] });
+    },
+    onAuthFailure: null,
+  });
+
   useLayoutEffect(() => {
     // Dev note: if OAuth "works on second try", align the web app URL host with the API
     // (e.g. both `127.0.0.1` or both `localhost`) so refresh/session cookies stay on one origin.
     logDevSessionContext();
     configureApiClient({
-      baseUrl: resolveConfiguredApiBaseUrl(),
-      getAuthToken: () => authSession.getAccessToken(),
-      onAccessTokenRefreshed: () => {
-        syncSocketAuthFromSession();
-        void queryClient.invalidateQueries({ queryKey: ["current-user"] });
-      },
       onAuthFailure: () => {
         if (isAuthFailureSuppressed()) return;
         if (typeof window !== "undefined") {

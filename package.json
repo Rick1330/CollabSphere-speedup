@@ -22,6 +22,7 @@
     "phase0:guardrails": "pnpm exec tsx --test --test-concurrency=1 tests/unit/phase0-guardrails.test.ts tests/unit/phase0-ui-guardrails.test.ts tests/unit/phase0-test-strategy-gates.test.ts",
     "review:coderabbit": "tsx scripts/review-coderabbit.ts",
     "prisma": "node scripts/prisma-local.mjs",
+    "db:seed": "node scripts/prisma-local.mjs db seed",
     "lint": "pnpm exec eslint . --max-warnings=0",
     "typecheck": "pnpm --filter @collabsphere/database run generate && pnpm exec tsc -p packages/shared/tsconfig.json --noEmit && pnpm exec tsc -p packages/ui/tsconfig.json --noEmit && pnpm exec tsc -p packages/database/tsconfig.json --noEmit && pnpm --filter @collabsphere/web run typecheck",
     "test": "pnpm exec turbo run //#test:unit && pnpm exec turbo run //#test:integration --env-mode=loose",
