@@ -91,7 +91,7 @@ import { InsertLinkDialog } from "@/features/documents/components/editor/InsertL
 import { EditorTableBubbleMenu } from "@/features/documents/components/editor/EditorTableBubbleMenu";
 import { InsertTOCDialog, type TOCInsertOptions } from "@/features/documents/components/editor/InsertTOCDialog";
 import { PageSetupDialog } from "@/components/editor/dialogs/PageSetupDialog";
-import { printEditorDocument } from "@/features/documents/lib/print-document";
+import { printEditorDocument, waitPrintLayoutSettled } from "@/features/documents/lib/print-document";
 import { exportDocumentPdf } from "@/features/documents/lib/export-document-pdf";
 import { setEditorScrollContainer } from "@/features/documents/lib/editor-scroll-container";
 import type { SubmissionRecord } from "@/lib/mock-academic";
@@ -528,6 +528,11 @@ const DocumentEditorPage = () => {
             fetchWorkspaceDocument(workspaceId, documentId),
           ]);
           if (cancelled) return;
+          setDocumentProperties(
+            apiDoc.properties && typeof apiDoc.properties === "object"
+              ? (apiDoc.properties as Record<string, unknown>)
+              : null,
+          );
           const pending = readPendingDoc(documentId);
           const folderName = apiDoc.folder?.name ?? null;
           const contentHtml = pending?.contentHTML ?? "";
@@ -613,9 +618,13 @@ const DocumentEditorPage = () => {
 
   const { doc, workspace } = state;
   // Local doc mutations (lock/unlock, delete-flag)
+  const [documentProperties, setDocumentProperties] = useState<Record<string, unknown> | null>(
+    null,
+  );
   const [overrides, setOverrides] = useState<Partial<MockDocument>>({});
   useEffect(() => {
     setOverrides({});
+    setDocumentProperties(null);
   }, [documentId]);
 
   const mergedDoc: MockDocument | null = useMemo(
@@ -711,7 +720,7 @@ const DocumentEditorPage = () => {
       avatarUrl: account?.avatarUrl ?? null,
     },
     readOnly: !isEditable,
-    properties: { ...properties, title: mergedDoc?.title },
+    properties: { ...properties, ...(documentProperties ?? {}), title: mergedDoc?.title },
     pointerRootRef: writingColumnRef,
     onThreadClick: (threadId) => onThreadClickRef.current(threadId),
   });
@@ -993,7 +1002,10 @@ const DocumentEditorPage = () => {
       editor,
       onBeforePrint: async () => {
         printZoomRestoreRef.current = zoomLevel;
-        if (zoomLevel !== 100) setZoomLevel(100);
+        if (zoomLevel !== 100) {
+          setZoomLevel(100);
+          await waitPrintLayoutSettled();
+        }
       },
       onAfterPrint: () => {
         if (printZoomRestoreRef.current != null) {

@@ -225,6 +225,7 @@ export type WorkspaceDocumentDetail = {
   status: TreeDocumentNode["status"];
   templateId: string | null;
   templateVersion: number | null;
+  properties?: Record<string, unknown> | null;
   isLocked: boolean;
   createdAt: string;
   updatedAt: string;

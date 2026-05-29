@@ -47,6 +47,10 @@ import { renderCursor } from "@/editor/cursor-render";
 import { normalizeCollabWsUrl, resolveCollabWsUrlFromEnv } from "@/lib/collab-ws-url";
 import { encodeYdocState, ydocCache } from "@/lib/ydoc-cache";
 import { getEditorScrollContainer } from "@/features/documents/lib/editor-scroll-container";
+import {
+  readTemplateBlocksFromProperties,
+  templateBlocksToHtml,
+} from "@/features/documents/lib/template-blocks-to-html";
 import { TextSelection } from "@tiptap/pm/state";
 
 export type CollabPointer = {
@@ -412,6 +416,7 @@ export function useCollaborativeDocumentEditor(input: {
   const connectTimeoutRef = useRef<number | null>(null);
   const tokenRefreshTimerRef = useRef<number | null>(null);
   const bootstrapGenerationRef = useRef(0);
+  const templateBlocksSeededRef = useRef(false);
   const cacheWriteTimerRef = useRef<number | null>(null);
   const authRetryPendingRef = useRef(false);
   const refreshCollabTokenRef = useRef<(options: { reconnect: boolean }) => Promise<void>>(
@@ -781,6 +786,27 @@ export function useCollaborativeDocumentEditor(input: {
     editor.commands.updateUser(cursorUser);
     setProviderAwarenessUser(collabSession.provider, user);
   }, [collabSession, editor, user.id, user.fullName, user.avatarUrl]);
+
+  useEffect(() => {
+    templateBlocksSeededRef.current = false;
+  }, [documentId, sessionKey]);
+
+  useEffect(() => {
+    if (status !== "synced" || readOnly || !editor || editor.isDestroyed) return;
+    if (templateBlocksSeededRef.current) return;
+
+    const docEmpty = editor.state.doc.textContent.trim().length === 0;
+    if (!docEmpty) return;
+
+    const blocks = readTemplateBlocksFromProperties(propertiesRef.current);
+    if (!blocks?.length) return;
+
+    const html = templateBlocksToHtml(blocks);
+    if (!html.trim()) return;
+
+    templateBlocksSeededRef.current = true;
+    editor.commands.setContent(html, { emitUpdate: true });
+  }, [status, readOnly, editor, sessionKey]);
 
   useEffect(() => {
     const root = pointerRootRef?.current;

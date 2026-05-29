@@ -3,8 +3,23 @@
  * Run: `pnpm --filter @collabsphere/database exec prisma db seed`
  */
 import { PrismaClient } from "@prisma/client";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const prisma = new PrismaClient();
+const __seedDir = dirname(fileURLToPath(import.meta.url));
+const TEMPLATE_SEEDS_DIR = join(__seedDir, "template-seeds");
+
+const loadTemplateSeedAsset = (id) => {
+  const path = join(TEMPLATE_SEEDS_DIR, `${id}.json`);
+  if (!existsSync(path)) return null;
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return null;
+  }
+};
 
 const doc = (id, category, name, description, requiredBlockTypes, blocks) => ({
   id,
@@ -62,6 +77,44 @@ const blankDocumentTemplate = ({
     },
   },
 });
+
+/** Loads golden export from template-seeds/<id>.json when present; otherwise blank placeholder. */
+const seededDocumentTemplate = ({
+  id,
+  category,
+  name,
+  description,
+  subCategory = "general",
+}) => {
+  const asset = loadTemplateSeedAsset(id);
+  if (!asset?.contentYjsBase64) {
+    return blankDocumentTemplate({ id, category, name, description, subCategory });
+  }
+  return {
+    id,
+    kind: "document",
+    category,
+    subCategory,
+    scope: "system",
+    name,
+    description,
+    version: 1,
+    schemaVersion: 2,
+    contentFormat: "document-v2",
+    isEnabled: true,
+    content: {
+      schemaVersion: 2,
+      format: "document-v2",
+      metadata: { title: name, category, kind: "document" },
+      properties: {},
+      structure: {
+        blocks: Array.isArray(asset.blocks) ? asset.blocks : [],
+        yjsSeedBase64: asset.contentYjsBase64,
+        plaintextSeed: typeof asset.contentPlaintext === "string" ? asset.contentPlaintext : "",
+      },
+    },
+  };
+};
 
 const workspace = (id, category, name, description, workspacePayload, subCategory = "general") => ({
   id,
@@ -515,7 +568,7 @@ async function main() {
     workspace(
       "tpl_workspace_general_personal_v1",
       "general",
-      "Personal Workspace",
+      "Personal Notes & Tasks",
       "Your personal workspace for notes, ideas, and tasks.",
       {
         defaults: {
@@ -554,13 +607,13 @@ async function main() {
 
   const documentTemplates = [
     // General blanks used as placeholders in workspace templates.
-    blankDocumentTemplate({
+    seededDocumentTemplate({
       id: "tpl_doc_general_blank_v1",
       category: "general",
       name: "Blank Document",
       description: "Empty placeholder document (content to be added later).",
     }),
-    blankDocumentTemplate({
+    seededDocumentTemplate({
       id: "tpl_doc_general_reading_list_v1",
       category: "general",
       name: "Reading List",
@@ -568,92 +621,92 @@ async function main() {
     }),
 
     // Academic templates referenced by workspace templates (blank placeholders for now).
-    blankDocumentTemplate({
+    seededDocumentTemplate({
       id: "tpl_doc_academic_workspace_guide_v1",
       category: "academic",
       name: "How to Use This Workspace (Academic)",
       description: "Academic workspace guide placeholder (content to be added later).",
       subCategory: "onboarding",
     }),
-    blankDocumentTemplate({
+    seededDocumentTemplate({
       id: "tpl_doc_academic_team_charter_v1",
       category: "academic",
       name: "Team Charter & Agreements",
       description: "Team charter placeholder (content to be added later).",
     }),
-    blankDocumentTemplate({
+    seededDocumentTemplate({
       id: "tpl_doc_academic_meeting_minutes_v1",
       category: "academic",
       name: "Meeting Minutes",
       description: "Meeting minutes placeholder (content to be added later).",
     }),
-    blankDocumentTemplate({
+    seededDocumentTemplate({
       id: "tpl_doc_academic_literature_review_v1",
       category: "academic",
       name: "Literature Review",
       description: "Literature review placeholder (content to be added later).",
     }),
-    blankDocumentTemplate({
+    seededDocumentTemplate({
       id: "tpl_doc_academic_test_plan_v1",
       category: "academic",
       name: "Test Plan",
       description: "Test plan placeholder (content to be added later).",
     }),
-    blankDocumentTemplate({
+    seededDocumentTemplate({
       id: "tpl_doc_academic_project_plan_v1",
       category: "academic",
       name: "Project Plan",
       description: "Project plan placeholder (content to be added later).",
     }),
-    blankDocumentTemplate({
+    seededDocumentTemplate({
       id: "tpl_doc_academic_thesis_proposal_v1",
       category: "academic",
       name: "Thesis Proposal",
       description: "Thesis proposal placeholder (content to be added later).",
     }),
-    blankDocumentTemplate({
+    seededDocumentTemplate({
       id: "tpl_doc_academic_thesis_chapter_v1",
       category: "academic",
       name: "Thesis Chapter",
       description: "Thesis chapter placeholder (content to be added later).",
     }),
-    blankDocumentTemplate({
+    seededDocumentTemplate({
       id: "tpl_doc_academic_lab_report_v1",
       category: "academic",
       name: "Lab Report",
       description: "Lab report placeholder (content to be added later).",
     }),
-    blankDocumentTemplate({
+    seededDocumentTemplate({
       id: "tpl_doc_academic_proposal_v1",
       category: "academic",
       name: "Project Proposal",
       description: "Project proposal placeholder (content to be added later).",
     }),
-    blankDocumentTemplate({
+    seededDocumentTemplate({
       id: "tpl_doc_academic_rad_v1",
       category: "academic",
       name: "Requirement Analysis Document (RAD)",
       description: "RAD placeholder (content to be added later).",
     }),
-    blankDocumentTemplate({
+    seededDocumentTemplate({
       id: "tpl_doc_academic_rdd_v1",
       category: "academic",
       name: "Requirement Design Document (RDD)",
       description: "RDD placeholder (content to be added later).",
     }),
-    blankDocumentTemplate({
+    seededDocumentTemplate({
       id: "tpl_doc_academic_progress_v1",
       category: "academic",
       name: "Weekly Progress Report",
       description: "Progress report placeholder (content to be added later).",
     }),
-    blankDocumentTemplate({
+    seededDocumentTemplate({
       id: "tpl_doc_academic_final_report_v1",
       category: "academic",
       name: "Final Project Report",
       description: "Final report placeholder (content to be added later).",
     }),
-    blankDocumentTemplate({
+    seededDocumentTemplate({
       id: "tpl_doc_academic_srs_v1",
       category: "academic",
       name: "Requirements Document (SRS)",
@@ -661,110 +714,110 @@ async function main() {
     }),
 
     // Professional templates referenced by workspace templates (blank placeholders for now).
-    blankDocumentTemplate({
+    seededDocumentTemplate({
       id: "tpl_doc_professional_workspace_guide_v1",
       category: "professional",
       name: "Getting Started (Professional)",
       description: "Professional workspace guide placeholder (content to be added later).",
       subCategory: "onboarding",
     }),
-    blankDocumentTemplate({
+    seededDocumentTemplate({
       id: "tpl_doc_professional_tech_overview_v1",
       category: "professional",
       name: "Tech Stack Overview",
       description: "Tech overview placeholder (content to be added later).",
     }),
-    blankDocumentTemplate({
+    seededDocumentTemplate({
       id: "tpl_doc_professional_prd_v1",
       category: "professional",
       name: "Product Requirements Document (PRD)",
       description: "PRD placeholder (content to be added later).",
     }),
-    blankDocumentTemplate({
+    seededDocumentTemplate({
       id: "tpl_doc_professional_roadmap_v1",
       category: "professional",
       name: "Product Roadmap",
       description: "Roadmap placeholder (content to be added later).",
     }),
-    blankDocumentTemplate({
+    seededDocumentTemplate({
       id: "tpl_doc_professional_tdd_v1",
       category: "professional",
       name: "Technical Design Document",
       description: "TDD placeholder (content to be added later).",
     }),
-    blankDocumentTemplate({
+    seededDocumentTemplate({
       id: "tpl_doc_professional_adr_v1",
       category: "professional",
       name: "ADR",
       description: "ADR placeholder (content to be added later).",
     }),
-    blankDocumentTemplate({
+    seededDocumentTemplate({
       id: "tpl_doc_professional_retro_v1",
       category: "professional",
       name: "Sprint Retrospective",
       description: "Retro placeholder (content to be added later).",
     }),
-    blankDocumentTemplate({
+    seededDocumentTemplate({
       id: "tpl_doc_professional_meeting_v1",
       category: "professional",
       name: "Meeting Notes",
       description: "Meeting notes placeholder (content to be added later).",
     }),
-    blankDocumentTemplate({
+    seededDocumentTemplate({
       id: "tpl_doc_professional_postmortem_v1",
       category: "professional",
       name: "Incident Postmortem",
       description: "Postmortem placeholder (content to be added later).",
     }),
-    blankDocumentTemplate({
+    seededDocumentTemplate({
       id: "tpl_doc_professional_standup_v1",
       category: "professional",
       name: "Daily Standup Notes",
       description: "Standup placeholder (content to be added later).",
     }),
-    blankDocumentTemplate({
+    seededDocumentTemplate({
       id: "tpl_doc_professional_sprint_scope_v1",
       category: "professional",
       name: "Sprint Goal & Scope",
       description: "Sprint scope placeholder (content to be added later).",
     }),
-    blankDocumentTemplate({
+    seededDocumentTemplate({
       id: "tpl_doc_professional_project_brief_v1",
       category: "professional",
       name: "Project Brief",
       description: "Project brief placeholder (content to be added later).",
     }),
-    blankDocumentTemplate({
+    seededDocumentTemplate({
       id: "tpl_doc_professional_scope_of_work_v1",
       category: "professional",
       name: "Scope of Work",
       description: "SOW placeholder (content to be added later).",
     }),
-    blankDocumentTemplate({
+    seededDocumentTemplate({
       id: "tpl_doc_professional_readme_v1",
       category: "professional",
       name: "Project README",
       description: "README placeholder (content to be added later).",
     }),
-    blankDocumentTemplate({
+    seededDocumentTemplate({
       id: "tpl_doc_professional_contributing_v1",
       category: "professional",
       name: "Contributing Guide",
       description: "Contributing placeholder (content to be added later).",
     }),
-    blankDocumentTemplate({
+    seededDocumentTemplate({
       id: "tpl_doc_professional_coc_v1",
       category: "professional",
       name: "Code of Conduct",
       description: "CoC placeholder (content to be added later).",
     }),
-    blankDocumentTemplate({
+    seededDocumentTemplate({
       id: "tpl_doc_professional_changelog_v1",
       category: "professional",
       name: "Changelog",
       description: "Changelog placeholder (content to be added later).",
     }),
-    blankDocumentTemplate({
+    seededDocumentTemplate({
       id: "tpl_doc_professional_rfc_v1",
       category: "professional",
       name: "RFC",

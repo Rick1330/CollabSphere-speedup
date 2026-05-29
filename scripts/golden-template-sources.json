@@ -1,0 +1,13 @@
+{
+  "_comment": "Optional overrides only. Export auto-maps elshadayrick7@gmail.com workspaces by addendum names (C.1–E.2). Fill a key only when auto-match fails.",
+  "tpl_workspace_academic_senior_project_v1": "",
+  "tpl_workspace_academic_research_thesis_v1": "",
+  "tpl_workspace_academic_group_assignment_v1": "",
+  "tpl_workspace_academic_lab_assignment_v1": "",
+  "tpl_workspace_professional_software_project_v1": "",
+  "tpl_workspace_professional_sprint_v1": "",
+  "tpl_workspace_professional_client_project_v1": "",
+  "tpl_workspace_professional_open_source_v1": "",
+  "tpl_workspace_general_blank_v1": "",
+  "tpl_workspace_general_personal_v1": ""
+}

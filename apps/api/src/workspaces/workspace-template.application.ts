@@ -2,6 +2,7 @@ import type { Prisma, TaskStatus, WorkspaceType } from "@prisma/client";
 import { AppError } from "../common/filters/app-error.filter.js";
 import { parseTemplateEnvelopeV2 } from "../common/templates/template-schema.js";
 import { parseDocumentTemplateContent } from "../common/templates/template-schema.js";
+import { resolveDocumentSeedFromTemplate } from "../documents/document-template-seed.service.js";
 
 type TemplateFolderSpec = {
   key: string;
@@ -482,32 +483,19 @@ export const applyWorkspaceTemplate = async ({
       throw new AppError({ code: "TEMPLATE_CATEGORY_MISMATCH" });
     }
 
-    let parsedTemplate: ReturnType<typeof parseDocumentTemplateContent> | null = null;
+    let documentSeed: ReturnType<typeof resolveDocumentSeedFromTemplate> | null = null;
     if (template) {
-      parsedTemplate = parseDocumentTemplateContent(template.content);
+      documentSeed = resolveDocumentSeedFromTemplate(template);
     }
 
-    const templateProperties =
-      parsedTemplate && template
-        ? {
-            template: {
-              id: template.id,
-              version: template.version,
-              schemaVersion: template.schemaVersion,
-              format: parsedTemplate.format ?? template.contentFormat ?? null,
-              metadata: parsedTemplate.metadata ?? null,
-              properties: parsedTemplate.properties ?? null,
-            },
-            blocks: parsedTemplate.blocks,
-            ...(parsedTemplate.regions ? { regions: parsedTemplate.regions } : {}),
-            ...(parsedTemplate.variables ? { variables: parsedTemplate.variables } : {}),
-          }
-        : null;
+    const templateProperties = documentSeed?.templateProperties ?? null;
     const propertiesWithSubmission =
       spec.submissionEnabled === undefined
         ? templateProperties
         : {
-            ...(templateProperties ?? {}),
+            ...(templateProperties && typeof templateProperties === "object"
+              ? (templateProperties as Record<string, unknown>)
+              : {}),
             workflow: {
               ...((templateProperties as Record<string, unknown> | null)?.workflow as
                 | Record<string, unknown>
@@ -516,22 +504,39 @@ export const applyWorkspaceTemplate = async ({
             },
           };
 
-    await tx.document.create({
+    const createdDoc = await tx.document.create({
       data: {
         workspaceId,
         folderId,
         title,
         position: i + 1,
+        contentPlaintext: documentSeed?.contentPlaintext ?? "",
+        contentYjs: documentSeed?.contentYjs,
         properties: propertiesWithSubmission
           ? (JSON.parse(JSON.stringify(propertiesWithSubmission)) as Prisma.InputJsonValue)
           : undefined,
         templateId: template?.id ?? null,
         templateVersion: template?.version ?? null,
-        templateSchemaVersion: template?.schemaVersion ?? null,
+        templateSchemaVersion: documentSeed?.templateSchemaVersion ?? null,
+        regionOrder: documentSeed?.regionOrder,
         createdById: actorUserId,
       },
       select: { id: true },
     });
+
+    if (documentSeed && template) {
+      const parsedTemplate = parseDocumentTemplateContent(template.content);
+      if (parsedTemplate.variables?.length) {
+        await tx.documentRegionVariable.createMany({
+          data: parsedTemplate.variables.map((v) => ({
+            documentId: createdDoc.id,
+            workspaceId,
+            variableKey: v.key,
+            value: null,
+          })),
+        });
+      }
+    }
   }
 
   const taskColumns = templateContent.taskColumns;

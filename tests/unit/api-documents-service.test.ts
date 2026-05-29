@@ -5,10 +5,21 @@ import { AppError } from "../../apps/api/src/common/filters/app-error.filter.js"
 import { DocumentsService } from "../../apps/api/src/documents/documents.service.js";
 
 test("documents service creates document with parsed template metadata", async () => {
+  const ydoc = new Y.Doc();
+  const fragment = ydoc.getXmlFragment("default");
+  const paragraph = new Y.XmlElement("paragraph");
+  const text = new Y.XmlText();
+  text.insert(0, "Brief");
+  paragraph.insert(0, [text]);
+  fragment.insert(0, [paragraph]);
+  const yjsSeedBase64 = Buffer.from(Y.encodeStateAsUpdate(ydoc)).toString("base64");
+  ydoc.destroy();
+
   const prisma = {
     workspaceMember: {
       findFirst: async () => ({
         id: "m-1",
+        role: "MEMBER",
         workspace: { id: "ws-1", type: "professional", status: "active" },
       }),
     },
@@ -27,6 +38,7 @@ test("documents service creates document with parsed template metadata", async (
           format: "document-v2",
           structure: {
             blocks: [{ type: "cover-page", attrs: { title: "Project Brief" } }],
+            yjsSeedBase64,
           },
         },
       }),
@@ -44,9 +56,38 @@ test("documents service creates document with parsed template metadata", async (
         createdAt: new Date("2026-05-08T00:00:00.000Z"),
       }),
     },
+    $transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
+      let captured: Record<string, unknown> | null = null;
+      const tx = {
+        document: {
+          create: async ({ data }: { data: Record<string, unknown> }) => {
+            captured = data;
+            return {
+              id: "doc-1",
+              workspaceId: data.workspaceId,
+              folderId: data.folderId,
+              title: data.title,
+              status: "draft",
+              templateId: data.templateId,
+              templateVersion: data.templateVersion,
+              templateSchemaVersion: data.templateSchemaVersion,
+              regionOrder: data.regionOrder,
+              createdAt: new Date("2026-05-08T00:00:00.000Z"),
+            };
+          },
+        },
+        documentRegionVariable: {
+          createMany: async () => ({ count: 0 }),
+        },
+      };
+      const result = await fn(tx);
+      (prisma as { _lastCreate?: Record<string, unknown> })._lastCreate = captured;
+      return result;
+    },
   };
 
-  const service = new DocumentsService(prisma as never);
+  const eventEmitter = { emit: () => true };
+  const service = new DocumentsService(prisma as never, eventEmitter as never, {} as never);
   const created = await service.createDocument({
     actorUserId: "user-1",
     workspaceId: "ws-1",
@@ -57,6 +98,9 @@ test("documents service creates document with parsed template metadata", async (
 
   assert.equal(created.templateId, "doc-prd-v2");
   assert.equal(created.templateVersion, 3);
+  const createData = (prisma as { _lastCreate?: Record<string, unknown> })._lastCreate;
+  assert.ok(createData?.contentYjs);
+  assert.equal(typeof createData?.contentPlaintext, "string");
 });
 
 test("documents service lists documents for member", async () => {

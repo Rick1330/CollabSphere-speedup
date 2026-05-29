@@ -3,6 +3,7 @@
 @import "tailwindcss";
 @import "./components/editor/styles/tokens.css";
 @import "./styles/editor-tokens.css";
+@import "./components/editor/canvas/pagination/pagination.css";
 
 @custom-variant dark (&:where(.dark, .dark *));
 
@@ -1482,6 +1483,10 @@
   margin: -4px 0 12px;
 }
 
+#cs-print-root {
+  display: none;
+}
+
 /* ─── Document editor — print stylesheet ──────────────────────────────────
  * Producing high-fidelity PDFs from the editor (Cmd/Ctrl+P → Save as PDF)
  * is the OSS path to "Export as PDF" without a paid Tiptap Pro extension.
@@ -1492,6 +1497,36 @@
  *     boundaries for tables, code blocks, diagrams, and equations.
  * ───────────────────────────────────────────────────────────────────────── */
 @media print {
+  body.cs-editor-printing #root {
+    display: none !important;
+  }
+
+  body.cs-editor-printing #cs-print-root {
+    display: block !important;
+  }
+
+  #cs-print-root .cs-print-page {
+    break-after: page;
+    page-break-after: always;
+    width: var(--print-page-width);
+    min-height: var(--print-page-height);
+    margin-left: auto;
+    margin-right: auto;
+    box-sizing: border-box;
+  }
+
+  #cs-print-root .cs-print-page:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
+
+  /* Page setup — CSS variables set by applyPrintPageVariables before print */
+  @page {
+    size: var(--print-page-size, A4 portrait);
+    margin: var(--print-page-margin-top, 18mm) var(--print-page-margin-right, 16mm)
+      var(--print-page-margin-bottom, 18mm) var(--print-page-margin-left, 16mm);
+  }
+
   /* Hide editor chrome */
   [role="toolbar"],
   [aria-label="Document context"],
@@ -1500,12 +1535,6 @@
   header[role="banner"],
   .editor-print-hide {
     display: none !important;
-  }
-
-  /* Page setup */
-  @page {
-    size: A4;
-    margin: 18mm 16mm;
   }
 
   html, body {

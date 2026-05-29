@@ -237,6 +237,23 @@ function sanitizePrintClone(clone: HTMLElement): void {
     });
 }
 
+function applyPrintPageShellStyles(
+  pageEl: HTMLElement,
+  pageSetup: PageSetup,
+  isLastPage: boolean,
+): void {
+  const { pageWidth, pageHeight } = getPageContentBox(pageSetup);
+  pageEl.style.width = `${pageWidth}px`;
+  pageEl.style.minHeight = `${pageHeight}px`;
+  pageEl.style.boxSizing = "border-box";
+  pageEl.style.marginLeft = "auto";
+  pageEl.style.marginRight = "auto";
+  if (!isLastPage) {
+    pageEl.style.pageBreakAfter = "always";
+    pageEl.style.breakAfter = "page";
+  }
+}
+
 /** Group top-level blocks into explicit print page shells. */
 export function buildExplicitPrintRoot(
   editor: Editor,
@@ -256,11 +273,13 @@ export function buildExplicitPrintRoot(
 
   const root = document.createElement("div");
   root.id = PRINT_ROOT_ID;
+  root.className = "tiptap ProseMirror cs-print-root-inner";
 
   for (let page = 1; page <= pageCount; page += 1) {
     const pageEl = document.createElement("div");
     pageEl.className = "cs-print-page";
     pageEl.dataset.page = String(page);
+    applyPrintPageShellStyles(pageEl, pageSetup, page === pageCount);
 
     const pageBlocks = grouped.get(page) ?? [];
     for (const { el } of pageBlocks) {

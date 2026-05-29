@@ -1,10 +1,25 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import * as Y from "yjs";
+
 import {
   applyWorkspaceTemplate,
   parseWorkspaceTemplateContent,
 } from "../../apps/api/src/workspaces/workspace-template.application.js";
+
+const sampleYjsBase64 = () => {
+  const ydoc = new Y.Doc();
+  const fragment = ydoc.getXmlFragment("default");
+  const paragraph = new Y.XmlElement("paragraph");
+  const text = new Y.XmlText();
+  text.insert(0, "Seeded");
+  paragraph.insert(0, [text]);
+  fragment.insert(0, [paragraph]);
+  const update = Y.encodeStateAsUpdate(ydoc);
+  ydoc.destroy();
+  return Buffer.from(update).toString("base64");
+};
 
 test("parseWorkspaceTemplateContent rejects non-record payloads", () => {
   assert.throws(() => parseWorkspaceTemplateContent("nope"), /TEMPLATE_INVALID|Template/i);
@@ -41,6 +56,77 @@ test("parseWorkspaceTemplateContent rejects unsupported format values", () => {
       }),
     /TEMPLATE_INVALID|Template/i,
   );
+});
+
+test("applyWorkspaceTemplate seeds contentYjs when document template has yjs seed", async () => {
+  const yjsSeedBase64 = sampleYjsBase64();
+  const documentCreates: Array<Record<string, unknown>> = [];
+  const tx = {
+    folder: {
+      create: async () => ({ id: "folder_1" }),
+    },
+    document: {
+      create: async (args: { data: Record<string, unknown> }) => {
+        documentCreates.push(args.data);
+        return { id: "doc_1" };
+      },
+    },
+    taskColumn: {
+      deleteMany: async () => ({ count: 0 }),
+      createMany: async () => ({ count: 0 }),
+    },
+    taskLabel: {
+      createMany: async () => ({ count: 0 }),
+    },
+    workspaceSettings: {
+      update: async () => ({ workspaceId: "ws_1" }),
+    },
+    template: {
+      findMany: async () => [
+        {
+          id: "tpl_doc_test_v1",
+          kind: "document",
+          category: "professional",
+          version: 1,
+          schemaVersion: 2,
+          contentFormat: "document-v2",
+          content: {
+            schemaVersion: 2,
+            format: "document-v2",
+            structure: { blocks: [], yjsSeedBase64 },
+          },
+        },
+      ],
+    },
+  } as const;
+
+  const content = parseWorkspaceTemplateContent({
+    schemaVersion: 2,
+    folders: [{ key: "root", name: "Main" }],
+    documents: [
+      {
+        title: "PRD",
+        folderKey: "root",
+        documentTemplateId: "tpl_doc_test_v1",
+      },
+    ],
+    taskColumns: [{ name: "Todo", status: "todo" }],
+  });
+
+  await applyWorkspaceTemplate({
+    tx: tx as unknown as import("@prisma/client").Prisma.TransactionClient,
+    workspaceId: "ws_1",
+    workspaceName: "Alpha",
+    workspaceType: "professional",
+    actorUserId: "user_1",
+    templateContent: content,
+  });
+
+  assert.equal(documentCreates.length, 1);
+  const created = documentCreates[0];
+  assert.ok(created?.contentYjs);
+  assert.equal(typeof created.contentPlaintext, "string");
+  assert.ok(String(created.contentPlaintext).length > 0);
 });
 
 test("applyWorkspaceTemplate creates folders and documents and replaces task columns", async () => {

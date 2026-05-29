@@ -2,13 +2,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   applyPrintPageVariables,
   clearPrintPageVariables,
+  ensurePrintStylesheet,
   prepareEditorForPrint,
   releaseLayoutClippingForPrint,
+  removePrintStylesheet,
   restoreLayoutClipping,
 } from "./print-document";
 import * as documentToc from "./document-toc";
 import * as editorScrollContainer from "./editor-scroll-container";
 import {
+  buildExplicitPrintRoot,
   PRINT_ROOT_ID,
   removeExplicitPrintRoot,
 } from "@/components/editor/canvas/pagination-dom";
@@ -31,6 +34,26 @@ describe("print-document css variables", () => {
     clearPrintPageVariables();
     expect(document.documentElement.style.getPropertyValue("--print-page-size")).toBe("");
     expect(document.documentElement.style.getPropertyValue("--print-page-margin-left")).toBe("");
+  });
+});
+
+describe("ensurePrintStylesheet", () => {
+  afterEach(() => {
+    removePrintStylesheet();
+  });
+
+  it("injects runtime print stylesheet", () => {
+    ensurePrintStylesheet();
+    const style = document.getElementById("cs-print-runtime-styles");
+    expect(style).not.toBeNull();
+    expect(style?.textContent).toContain("body.cs-editor-printing #root");
+    expect(style?.textContent).toContain("#cs-print-root .cs-print-page");
+  });
+
+  it("removes runtime print stylesheet on cleanup", () => {
+    ensurePrintStylesheet();
+    removePrintStylesheet();
+    expect(document.getElementById("cs-print-runtime-styles")).toBeNull();
   });
 });
 
@@ -123,5 +146,60 @@ describe("prepareEditorForPrint", () => {
 
     removeExplicitPrintRoot();
     document.body.removeChild(column);
+  });
+});
+
+describe("buildExplicitPrintRoot inline styles", () => {
+  afterEach(() => {
+    removeExplicitPrintRoot();
+  });
+
+  it("sets inline page dimensions and page breaks on shells", () => {
+    const page1 = document.createElement("div");
+    page1.className = "rm-page-break";
+    const page2 = document.createElement("div");
+    page2.className = "rm-page-break";
+    const pagination = document.createElement("div");
+    pagination.setAttribute("data-rm-pagination", "true");
+    pagination.append(page1, page2);
+
+    const prose = document.createElement("div");
+    const p = document.createElement("p");
+    p.textContent = "Body";
+    prose.append(pagination, p);
+
+    Object.defineProperty(page1, "getBoundingClientRect", {
+      value: () => ({ top: 100, bottom: 1000, left: 0, right: 800, width: 800, height: 900 }),
+    });
+    Object.defineProperty(page2, "getBoundingClientRect", {
+      value: () => ({ top: 1000, bottom: 1900, left: 0, right: 800, width: 800, height: 900 }),
+    });
+
+    const editor = {
+      isDestroyed: false,
+      state: {
+        doc: {
+          content: { size: 4 },
+          forEach: (fn: (node: { isBlock: boolean }, offset: number) => void) => {
+            fn({ isBlock: true }, 0);
+          },
+        },
+      },
+      view: {
+        dom: prose,
+        coordsAtPos: () => ({ top: 150, bottom: 170, left: 0, right: 800 }),
+        nodeDOM: () => p,
+        domAtPos: () => ({ node: p, offset: 0 }),
+      },
+    } as import("@tiptap/react").Editor;
+
+    buildExplicitPrintRoot(editor, setup);
+    const pages = Array.from(document.querySelectorAll<HTMLElement>("#cs-print-root .cs-print-page"));
+    expect(pages).toHaveLength(2);
+    expect(pages[0].style.width).toBe("794px");
+    expect(pages[0].style.minHeight).toBe("1123px");
+    expect(pages[0].style.pageBreakAfter).toBe("always");
+    expect(pages[1].style.pageBreakAfter).toBe("");
+    expect(document.getElementById(PRINT_ROOT_ID)?.classList.contains("tiptap")).toBe(true);
   });
 });

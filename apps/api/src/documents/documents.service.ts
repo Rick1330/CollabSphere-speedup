@@ -4,6 +4,7 @@ import { EventEmitter2 } from "@nestjs/event-emitter";
 import { AppError, ValidationAppError } from "../common/filters/app-error.filter.js";
 import { PrismaClientProvider } from "../common/prisma/prisma-client.provider.js";
 import { parseDocumentTemplateContent } from "../common/templates/template-schema.js";
+import { resolveDocumentSeedFromTemplate } from "./document-template-seed.service.js";
 import { canManageLocks, isDocumentReadOnly } from "../../../../packages/shared/src/collab/document-write-policy.js";
 import {
   canCreateWorkspaceContent,
@@ -274,9 +275,11 @@ export class DocumentsService {
       throw new AppError({ code: "TEMPLATE_CATEGORY_MISMATCH" });
     }
 
+    let documentSeed: ReturnType<typeof resolveDocumentSeedFromTemplate> | null = null;
     let parsedTemplate: ReturnType<typeof parseDocumentTemplateContent> | null = null;
     if (template) {
       try {
+        documentSeed = resolveDocumentSeedFromTemplate(template);
         parsedTemplate = parseDocumentTemplateContent(template.content);
       } catch {
         throw new AppError({
@@ -285,36 +288,6 @@ export class DocumentsService {
         });
       }
     }
-    const plaintext = parsedTemplate
-      ? collectTextFromNode(parsedTemplate.blocks).join(" ").slice(0, 20_000)
-      : "";
-    const templateProperties =
-      parsedTemplate && template
-        ? {
-            template: {
-              id: template.id,
-              version: template.version,
-              schemaVersion: template.schemaVersion,
-              format: parsedTemplate.format ?? template.contentFormat ?? null,
-              metadata: parsedTemplate.metadata ?? null,
-              properties: parsedTemplate.properties ?? null,
-            },
-            blocks: parsedTemplate.blocks,
-            ...(parsedTemplate.regions ? { regions: parsedTemplate.regions } : {}),
-            ...(parsedTemplate.variables ? { variables: parsedTemplate.variables } : {}),
-          }
-        : null;
-
-    const isRichDocument = parsedTemplate?.format === "richdocument";
-    // T1: Yjs binary (`contentYjs`) stays at the DB default (empty) until a collab-layer
-    // `YjsService.seedFromV2Template` (or equivalent) exists; metadata, regions, variables,
-    // and plaintext snapshot are persisted here for API/DB workflows.
-    const regionOrderJson: Prisma.InputJsonValue | undefined =
-      isRichDocument && parsedTemplate?.regions && parsedTemplate.regions.length > 0
-        ? (JSON.parse(JSON.stringify(parsedTemplate.regions.map((r) => r.id))) as Prisma.InputJsonValue)
-        : undefined;
-    const templateSchemaVersion =
-      isRichDocument && template ? template.schemaVersion : undefined;
 
     const maxPosition = await this.prisma.document.findFirst({
       where: {
@@ -335,14 +308,13 @@ export class DocumentsService {
           folderId: folderId ?? null,
           title,
           position: nextPosition,
-          contentPlaintext: plaintext,
-          properties: templateProperties
-            ? (JSON.parse(JSON.stringify(templateProperties)) as Prisma.InputJsonValue)
-            : undefined,
+          contentPlaintext: documentSeed?.contentPlaintext ?? "",
+          contentYjs: documentSeed?.contentYjs,
+          properties: documentSeed?.templateProperties ?? undefined,
           templateId: template?.id ?? null,
           templateVersion: template?.version ?? null,
-          templateSchemaVersion: templateSchemaVersion ?? null,
-          regionOrder: regionOrderJson ?? undefined,
+          templateSchemaVersion: documentSeed?.templateSchemaVersion ?? null,
+          regionOrder: documentSeed?.regionOrder,
           createdById: actorUserId,
         },
         select: {

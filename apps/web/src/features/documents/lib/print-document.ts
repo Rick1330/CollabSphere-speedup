@@ -10,6 +10,33 @@ import { waitForPaginationIdle } from "@/features/documents/lib/document-toc";
 import { getEditorScrollContainer } from "@/features/documents/lib/editor-scroll-container";
 
 const PRINT_BODY_CLASS = "cs-editor-printing";
+const PRINT_RUNTIME_STYLE_ID = "cs-print-runtime-styles";
+
+const PRINT_RUNTIME_CSS = `
+#cs-print-root { display: none; }
+@media print {
+  body.cs-editor-printing #root { display: none !important; }
+  body.cs-editor-printing #cs-print-root { display: block !important; }
+  #cs-print-root .cs-print-page {
+    break-after: page;
+    page-break-after: always;
+    width: var(--print-page-width);
+    min-height: var(--print-page-height);
+    margin-left: auto;
+    margin-right: auto;
+    box-sizing: border-box;
+  }
+  #cs-print-root .cs-print-page:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
+  @page {
+    size: var(--print-page-size, A4 portrait);
+    margin: var(--print-page-margin-top, 96px) var(--print-page-margin-right, 96px)
+      var(--print-page-margin-bottom, 96px) var(--print-page-margin-left, 96px);
+  }
+}
+`;
 
 type ClippingSnapshot = {
   el: HTMLElement;
@@ -160,6 +187,24 @@ function waitFrames(count: number): Promise<void> {
   });
 }
 
+/** Wait for layout to settle after zoom or pagination changes before print. */
+export async function waitPrintLayoutSettled(): Promise<void> {
+  await waitForPaginationIdle();
+  await waitFrames(2);
+}
+
+export function ensurePrintStylesheet(): void {
+  removePrintStylesheet();
+  const style = document.createElement("style");
+  style.id = PRINT_RUNTIME_STYLE_ID;
+  style.textContent = PRINT_RUNTIME_CSS;
+  document.head.appendChild(style);
+}
+
+export function removePrintStylesheet(): void {
+  document.getElementById(PRINT_RUNTIME_STYLE_ID)?.remove();
+}
+
 async function waitForPaginationReady(editor: Editor | null, timeoutMs = 2000): Promise<void> {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
@@ -223,6 +268,7 @@ export async function printEditorDocument(options: {
 }): Promise<void> {
   const { pageSetup, editor, onBeforePrint, onAfterPrint } = options;
   applyPrintPageVariables(pageSetup);
+  ensurePrintStylesheet();
   await onBeforePrint?.();
   await prepareEditorForPrint({ editor, pageSetup });
   document.body.classList.add(PRINT_BODY_CLASS);
@@ -230,6 +276,7 @@ export async function printEditorDocument(options: {
   const cleanup = () => {
     document.body.classList.remove(PRINT_BODY_CLASS);
     removeExplicitPrintRoot();
+    removePrintStylesheet();
     restoreLayoutClipping();
     clearPrintPageVariables();
     onAfterPrint?.();
