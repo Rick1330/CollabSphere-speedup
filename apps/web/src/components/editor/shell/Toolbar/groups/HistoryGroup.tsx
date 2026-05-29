@@ -1,4 +1,4 @@
-import { Paintbrush, Printer, Redo, Undo } from "lucide-react";
+import { Printer, Redo, Undo } from "lucide-react";
 import { toast } from "sonner";
 import { IconButton } from "@/components/ui-kit";
 import { canRedo, canUndo, type ToolbarEditorProps } from "../toolbar-utils";
@@ -34,14 +34,6 @@ export function HistoryGroup({ editor, isReadOnly }: ToolbarEditorProps) {
         }}
       >
         <Printer size={16} strokeWidth={1.75} />
-      </IconButton>
-      <IconButton
-        aria-label="Format painter"
-        tooltip="Format painter"
-        disabled={isReadOnly}
-        onClick={() => toast.info("Format painter — coming soon")}
-      >
-        <Paintbrush size={16} strokeWidth={1.75} />
       </IconButton>
     </>
   );

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Editor } from "@tiptap/react";
 import { toPng } from "html-to-image";
+import { listPaginationPageBreakElements } from "@/components/editor/canvas/pagination-dom";
 import { useEditorStore } from "@/features/documents/stores/use-editor-store";
 import { EditorRailSection } from "@/features/documents/components/editor/editor-rail-chrome";
 import { cn } from "@/components/ui-kit";
@@ -31,8 +32,7 @@ function PageThumb({ editor, pageIndex, active, cache, onCache, onSelect }: Page
 
     const generate = async () => {
       if (generatingRef.current || cache.has(pageIndex)) return;
-      const pagination = editor.view.dom.querySelector("[data-rm-pagination]");
-      const pageEl = pagination?.children[pageIndex] as HTMLElement | undefined;
+      const pageEl = listPaginationPageBreakElements(editor)[pageIndex];
       if (!pageEl) return;
 
       generatingRef.current = true;
@@ -125,9 +125,7 @@ export function PagesPanel({ editor }: { editor: Editor | null }) {
 
   const scrollToPage = (pageIndex: number) => {
     if (!editor || editor.isDestroyed) return;
-    const pagination = editor.view.dom.querySelector("[data-rm-pagination]");
-    if (!pagination) return;
-    const pageEl = pagination.children[pageIndex] as HTMLElement | undefined;
+    const pageEl = listPaginationPageBreakElements(editor)[pageIndex];
     pageEl?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 

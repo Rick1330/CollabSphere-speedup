@@ -5,8 +5,10 @@
   "type": "module",
   "dependencies": {
     "@aws-sdk/client-s3": "^3.400.0",
+    "@collabsphere/document-export": "workspace:*",
     "@collabsphere/docx-import": "workspace:*",
     "@collabsphere/shared": "workspace:*",
+    "playwright": "^1.52.0",
     "@nestjs/bullmq": "^11.0.2",
     "@nestjs/common": "^10.4.20",
     "@nestjs/config": "^4.0.4",

@@ -11,7 +11,6 @@ const HIDE_ORDER: ToolbarGroupId[] = [
   "font",
   "quickInsert",
   "insert",
-  "review",
   "clipboard",
   "history",
 ];

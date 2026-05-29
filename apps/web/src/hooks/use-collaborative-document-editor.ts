@@ -16,7 +16,6 @@ import Subscript from "@tiptap/extension-subscript";
 import Superscript from "@tiptap/extension-superscript";
 import Link from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
-import Table from "@tiptap/extension-table";
 import TableRow from "@tiptap/extension-table-row";
 import TableHeader from "@tiptap/extension-table-header";
 import TableCell from "@tiptap/extension-table-cell";
@@ -27,6 +26,10 @@ import CharacterCount from "@tiptap/extension-character-count";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import * as Y from "yjs";
 
+import { HeadingWithAnchor } from "@/features/documents/editor-extensions/heading-anchor.extension";
+import { DocumentFindExtension } from "@/features/documents/editor-extensions/document-find.extension";
+import { TableAdvanced } from "@/features/documents/editor-extensions/table-advanced.extension";
+import { ImageAdvanced } from "@/features/documents/editor-extensions/image-advanced.extension";
 import { MermaidBlock } from "@/features/documents/editor-extensions/mermaid-block";
 import { MathBlock } from "@/features/documents/editor-extensions/math-block";
 import { CalloutBlock } from "@/features/documents/editor-extensions/callout-block";
@@ -43,6 +46,8 @@ import { prepareDocumentCollabBootstrap } from "@/features/documents/collab/coll
 import { renderCursor } from "@/editor/cursor-render";
 import { normalizeCollabWsUrl, resolveCollabWsUrlFromEnv } from "@/lib/collab-ws-url";
 import { encodeYdocState, ydocCache } from "@/lib/ydoc-cache";
+import { getEditorScrollContainer } from "@/features/documents/lib/editor-scroll-container";
+import { TextSelection } from "@tiptap/pm/state";
 
 export type CollabPointer = {
   x: number;
@@ -278,7 +283,7 @@ function buildEditorExtensions(
 ) {
   const extensions: any[] = [
     (StarterKit as any).configure({
-      heading: { levels: [1, 2, 3, 4, 5, 6] },
+      heading: false,
       history: false,
       gapcursor: false,
       codeBlock: {
@@ -288,8 +293,10 @@ function buildEditorExtensions(
         },
       },
     }),
+    HeadingWithAnchor.configure({ levels: [1, 2, 3, 4, 5, 6] }),
     Gapcursor as any,
     CharacterCount as any,
+    DocumentFindExtension,
     CommentMarkExtension.configure({
       onThreadClick,
     }),
@@ -324,15 +331,21 @@ function buildEditorExtensions(
       openOnClick: false,
       HTMLAttributes: { class: "text-teal-600 hover:underline cursor-pointer" },
     }),
+    (ImageAdvanced as any).configure({
+      inline: false,
+      allowBase64: false,
+      HTMLAttributes: { class: "cs-editor-image" },
+    }),
     (Placeholder as any).configure({
       placeholder: ({ node }: { node: { type: { name: string } } }) => {
         if (node.type.name === "heading") return "Heading";
         return "Start writing, or press / for commands…";
       },
     }),
-    (Table as any).configure({
+    (TableAdvanced as any).configure({
       resizable: true,
-      HTMLAttributes: { class: "w-full border-collapse my-4 text-sm rounded-md overflow-hidden" },
+      allowTableNodeSelection: true,
+      HTMLAttributes: { class: "cs-editor-table w-full border-collapse my-4 text-sm" },
     }),
     TableRow as any,
     (TableHeader as any).configure({
@@ -724,6 +737,38 @@ export function useCollaborativeDocumentEditor(input: {
       editorProps: {
         attributes: {
           class: EDITOR_PROSE_CLASS,
+        },
+        handleClick: (view, _pos, event) => {
+          const target = event.target;
+          if (!(target instanceof HTMLElement)) return false;
+          const anchor = target.closest("a");
+          const href = anchor?.getAttribute("href");
+          if (!href?.startsWith("#cs-h-")) return false;
+          event.preventDefault();
+          const el = view.dom.querySelector<HTMLElement>(`#${CSS.escape(href.slice(1))}`);
+          if (!el) return true;
+          try {
+            const pos = view.posAtDOM(el, 0);
+            const selection = TextSelection.create(view.state.doc, pos);
+            view.dispatch(view.state.tr.setSelection(selection));
+            view.focus();
+          } catch {
+            // ignore mapping errors for decorative nodes
+          }
+          const scroller = getEditorScrollContainer();
+          if (scroller) {
+            const elRect = el.getBoundingClientRect();
+            const scRect = scroller.getBoundingClientRect();
+            scroller.scrollTo({
+              top: scroller.scrollTop + elRect.top - scRect.top - scroller.clientHeight * 0.2,
+              behavior: "smooth",
+            });
+          } else {
+            el.scrollIntoView({ behavior: "smooth", block: "start" });
+          }
+          el.classList.add("cs-heading-anchor--flash");
+          window.setTimeout(() => el.classList.remove("cs-heading-anchor--flash"), 1300);
+          return true;
         },
       },
     },

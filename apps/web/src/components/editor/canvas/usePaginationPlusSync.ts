@@ -3,6 +3,7 @@ import type { Editor } from "@tiptap/react";
 import {
   getPageContentBox,
   PAGE_GAP_PX,
+  buildGridPageTops,
   type PageSetup,
 } from "./pageSetup";
 import { DEFAULT_PAGE_FOOTER_TEMPLATE } from "./paginationPlusConfig";
@@ -51,12 +52,14 @@ function syncDefaultHeaderFooter(editor: Editor): void {
 
 function publishPaginationMeta(
   editor: Editor,
+  pageSetup: PageSetup,
   setPaginationMeta: ReturnType<typeof useEditorStore.getState>["setPaginationMeta"],
 ): void {
   scheduleAfterLayout(() => {
     if (editor.isDestroyed) return;
     const pageCount = resolvePaginationPlusPageCount(editor);
-    setPaginationMeta(pageCount, [0]);
+    const pageTops = buildGridPageTops(pageCount, pageSetup);
+    setPaginationMeta(pageCount, pageTops);
   });
 }
 
@@ -72,13 +75,13 @@ export function usePaginationPlusSync(
 
     syncPageDimensions(editor, pageSetup);
     syncDefaultHeaderFooter(editor);
-    publishPaginationMeta(editor, setPaginationMeta);
+    publishPaginationMeta(editor, pageSetup, setPaginationMeta);
   }, [editor, enabled, pageSetup, setPaginationMeta]);
 
   useEffect(() => {
     if (!editor || editor.isDestroyed || !enabled) return;
 
-    const publishMeta = () => publishPaginationMeta(editor, setPaginationMeta);
+    const publishMeta = () => publishPaginationMeta(editor, pageSetup, setPaginationMeta);
 
     const unsubscribe = subscribeEditorMeta(editor, publishMeta, {
       debounceMs: 50,
@@ -87,5 +90,5 @@ export function usePaginationPlusSync(
     });
 
     return unsubscribe;
-  }, [editor, enabled, setPaginationMeta]);
+  }, [editor, enabled, pageSetup, setPaginationMeta]);
 }

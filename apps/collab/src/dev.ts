@@ -1,6 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import { parseServicePort, validateServiceEnv } from "../../../packages/shared/src/bootstrap-runtime.js";
 import { EnvValidationError, parseRuntimeEnv } from "../../../packages/shared/src/runtime-env.js";
+import { allocateNextDocumentVersionNumber } from "../../../packages/shared/src/document-version-allocation.js";
 import { createCollabServer } from "./hocuspocus-server.js";
 
 const runtimeEnv = validateServiceEnv({
@@ -91,12 +92,7 @@ const collabServer = createCollabServer({
     },
     async persistDocument({ documentId, updatedById, contentYjs, contentPlaintext, updatedAt }) {
       await prisma.$transaction(async (tx) => {
-        const latestVersion = await tx.documentVersion.findFirst({
-          where: { documentId },
-          orderBy: { versionNumber: "desc" },
-          select: { versionNumber: true },
-        });
-        const nextVersion = (latestVersion?.versionNumber ?? 0) + 1;
+        const nextVersion = await allocateNextDocumentVersionNumber(tx, documentId);
 
         await tx.document.update({
           where: {

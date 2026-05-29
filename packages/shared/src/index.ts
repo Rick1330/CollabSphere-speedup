@@ -16,4 +16,5 @@ export * from "./jobs/job-types.js";
 export * from "./collab/document-write-policy.js";
 export * from "./collab/document-import-lock.js";
 export * from "./collab/workspace-content-policy.js";
+export * from "./document-version-allocation.js";
 export * from "./env.js";

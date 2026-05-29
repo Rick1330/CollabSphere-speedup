@@ -1,5 +1,6 @@
 import type { Extension } from "@hocuspocus/server";
 import * as Y from "yjs";
+import { allocateNextDocumentVersionNumber } from "../../../../packages/shared/src/document-version-allocation.js";
 import { prisma } from "../lib/prisma.js";
 import { extractPlaintextFromYdoc } from "../lib/extract-plaintext.js";
 
@@ -47,23 +48,20 @@ async function createVersionSnapshot(input: {
   const state = Y.encodeStateAsUpdate(input.ydoc);
   const plaintext = extractPlaintextFromYdoc(input.ydoc);
 
-  const latest = await prisma.documentVersion.findFirst({
-    where: { documentId: input.documentId },
-    orderBy: { versionNumber: "desc" },
-    select: { versionNumber: true },
-  });
-  const versionNumber = (latest?.versionNumber ?? 0) + 1;
-
-  await prisma.documentVersion.create({
-    data: {
-      documentId: input.documentId,
-      workspaceId: input.workspaceId,
-      versionNumber,
-      reason: input.reason,
-      yjsState: toPrismaBytes(state),
-      plaintext: plaintext || null,
-      createdById: input.triggeredBy ?? null,
-    },
+  const versionNumber = await prisma.$transaction(async (tx) => {
+    const nextVersionNumber = await allocateNextDocumentVersionNumber(tx, input.documentId);
+    await tx.documentVersion.create({
+      data: {
+        documentId: input.documentId,
+        workspaceId: input.workspaceId,
+        versionNumber: nextVersionNumber,
+        reason: input.reason,
+        yjsState: toPrismaBytes(state),
+        plaintext: plaintext || null,
+        createdById: input.triggeredBy ?? null,
+      },
+    });
+    return nextVersionNumber;
   });
 
   console.info("[auto-version] Snapshot created", {

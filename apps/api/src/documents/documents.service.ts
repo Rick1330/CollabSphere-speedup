@@ -9,12 +9,14 @@ import {
   canCreateWorkspaceContent,
   canOrganizeWorkspaceContent,
 } from "../../../../packages/shared/src/collab/workspace-content-policy.js";
+import { allocateNextDocumentVersionNumber } from "../../../../packages/shared/src/document-version-allocation.js";
 import {
   safeResolveVersionPlaintext,
   toUint8Array,
   yjsStateToBase64,
 } from "./yjs-plaintext.js";
 import { publishDocumentRestored } from "../common/redis/publish-document-restored.js";
+import { DocumentImagesService } from "./document-images.service.js";
 
 const LIST_VERSION_YJS_BACKFILL_MAX_BYTES = 512 * 1024;
 
@@ -128,6 +130,7 @@ export class DocumentsService {
   constructor(
     @Inject(PrismaClientProvider) private readonly prisma: PrismaClientProvider,
     @Inject(EventEmitter2) private readonly eventEmitter: EventEmitter2,
+    @Inject(DocumentImagesService) private readonly documentImagesService: DocumentImagesService,
   ) {}
 
   async listDocumentsForUser({
@@ -627,16 +630,7 @@ export class DocumentsService {
     }
 
     const result = await this.prisma.$transaction(async (tx) => {
-      const latestVersion = await tx.documentVersion.findFirst({
-        where: {
-          documentId: existing.id,
-        },
-        orderBy: {
-          versionNumber: "desc",
-        },
-        select: { versionNumber: true },
-      });
-      const nextVersionNumber = (latestVersion?.versionNumber ?? 0) + 1;
+      const nextVersionNumber = await allocateNextDocumentVersionNumber(tx, existing.id);
 
       const updatedDocument = await tx.document.update({
         where: {
@@ -799,16 +793,16 @@ export class DocumentsService {
         },
         select: { id: true, versionNumber: true, yjsState: true, plaintext: true },
       });
-      const nextVersionNumber = (latestVersion?.versionNumber ?? 0) + 1;
 
       let snapshotVersionId = latestVersion?.id ?? null;
       if (action === "submit" || action === "approve") {
         const reason = action === "submit" ? "submitted" : "approved";
+        const snapshotVersionNumber = await allocateNextDocumentVersionNumber(tx, documentId);
         const snapshot = await tx.documentVersion.create({
           data: {
             workspaceId,
             documentId,
-            versionNumber: nextVersionNumber,
+            versionNumber: snapshotVersionNumber,
             reason,
             yjsState: latestVersion?.yjsState ?? Buffer.alloc(0),
             plaintext: latestVersion?.plaintext ?? document.contentPlaintext,
@@ -1378,12 +1372,7 @@ export class DocumentsService {
     const plaintext = doc.contentPlaintext?.trim() ?? "";
 
     const created = await this.prisma.$transaction(async (tx) => {
-      const latest = await tx.documentVersion.findFirst({
-        where: { documentId },
-        orderBy: { versionNumber: "desc" },
-        select: { versionNumber: true },
-      });
-      const versionNumber = (latest?.versionNumber ?? 0) + 1;
+      const versionNumber = await allocateNextDocumentVersionNumber(tx, documentId);
       return tx.documentVersion.create({
         data: {
           workspaceId,
@@ -1623,12 +1612,7 @@ export class DocumentsService {
         if (!target) {
           throw new AppError({ code: "NOT_FOUND", message: "Version not found" });
         }
-        const latest = await tx.documentVersion.findFirst({
-          where: { documentId },
-          orderBy: { versionNumber: "desc" },
-          select: { versionNumber: true },
-        });
-        const nextNum = (latest?.versionNumber ?? 0) + 1;
+        const nextNum = await allocateNextDocumentVersionNumber(tx, documentId);
         const currentYjs = toPrismaBytes(toUint8Array(current.contentYjs));
         const targetYjs = toPrismaBytes(toUint8Array(target.yjsState));
 
@@ -1812,5 +1796,42 @@ export class DocumentsService {
           ? "Re-import via server DOCX path or run scripts/shrink-content-yjs-images.mts; ensure images use MinIO/HTTP URLs."
           : "Y.Doc size is acceptable",
     };
+  }
+
+  async uploadDocumentImageForUser({
+    actorUserId,
+    workspaceId,
+    documentId,
+    buffer,
+    mimeType,
+  }: {
+    actorUserId: string;
+    workspaceId: string;
+    documentId: string;
+    buffer: Buffer;
+    mimeType: string;
+  }) {
+    const membership = await this.requireWorkspaceMembership({ actorUserId, workspaceId });
+
+    const existing = await this.prisma.document.findFirst({
+      where: { id: documentId, workspaceId, deletedAt: null },
+      select: { id: true, status: true, isLocked: true },
+    });
+
+    if (!existing) {
+      throw new AppError({ code: "DOCUMENT_NOT_FOUND" });
+    }
+
+    if (
+      isDocumentReadOnly({
+        status: existing.status,
+        isLocked: Boolean(existing.isLocked),
+        role: membership.role,
+      })
+    ) {
+      throw new AppError({ code: "DOCUMENT_READONLY_STATUS" });
+    }
+
+    return this.documentImagesService.saveDocumentImage(documentId, buffer, mimeType);
   }
 }

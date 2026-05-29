@@ -1,28 +1,17 @@
-import "reflect-metadata";
-import { Logger } from "@nestjs/common";
-import { NestFactory } from "@nestjs/core";
-import { EnvValidationError, parseRuntimeEnv } from "../../../packages/shared/src/runtime-env.js";
-import { validateServiceEnv } from "../../../packages/shared/src/bootstrap-runtime.js";
-import { WorkerModule } from "./worker.module.js";
+import { Redis } from "ioredis";
+import { startExportProcessor } from "./jobs/export.processor.js";
 
-const logger = new Logger("WorkerServer");
+const redisUrl = process.env.REDIS_URL ?? "redis://127.0.0.1:6379";
+const connection = new Redis(redisUrl, { maxRetriesPerRequest: null });
 
-async function bootstrap() {
-  validateServiceEnv({
-    service: "worker",
-    parser: parseRuntimeEnv,
-    validationErrorClass: EnvValidationError,
-  });
+const exportWorker = startExportProcessor(connection);
 
-  const app = await NestFactory.createApplicationContext(WorkerModule, {
-    logger: ["log", "error", "warn"],
-  });
-
-  app.enableShutdownHooks();
-  logger.log("Worker server is running (BullMQ processors active)");
-}
-
-bootstrap().catch((error) => {
-  logger.error("Worker bootstrap failed", error);
-  process.exit(1);
+exportWorker.on("completed", (job) => {
+  console.log(`[worker] export completed ${job.id}`);
 });
+
+exportWorker.on("failed", (job, error) => {
+  console.error(`[worker] export failed ${job?.id}`, error);
+});
+
+console.log("[worker] export processor listening on queue: export");

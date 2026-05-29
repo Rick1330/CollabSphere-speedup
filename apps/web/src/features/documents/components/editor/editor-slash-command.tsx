@@ -30,6 +30,7 @@ import {
   Minus,
   Type,
   Table as TableIcon,
+  Image as ImageIcon,
   Workflow,
   Sigma,
   Info,
@@ -45,6 +46,7 @@ interface EditorSlashCommandProps {
    * editor lives inside a scrollable viewport. */
   scrollContainer?: HTMLElement | null;
   onInsertTableRequest: () => void;
+  onInsertImageRequest?: () => void;
 }
 
 interface SlashItem {
@@ -112,11 +114,7 @@ const ITEMS: SlashItem[] = [
     hint: "Checkboxes",
     Icon: ListChecks,
     keywords: ["task", "todo", "checkbox"],
-    run: (e) => {
-      // StarterKit doesn't ship with task list — fall back to bullet list
-      // so the action always succeeds gracefully.
-      e.chain().focus().toggleBulletList().run();
-    },
+    run: (e) => e.chain().focus().toggleTaskList().run(),
   },
   {
     id: "quote",
@@ -152,6 +150,16 @@ const ITEMS: SlashItem[] = [
       (e.chain().focus() as any)
         .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
         .run(),
+  },
+  {
+    id: "image",
+    label: "Image",
+    hint: "Upload from computer",
+    Icon: ImageIcon,
+    keywords: ["image", "photo", "picture", "upload"],
+    run: () => {
+      /* handled via onInsertImageRequest in component */
+    },
   },
   {
     id: "mermaid",
@@ -221,9 +229,10 @@ interface MenuState {
   query: string;
 }
 
-export const EditorSlashCommand = ({ 
-  editor, 
+export const EditorSlashCommand = ({
+  editor,
   onInsertTableRequest,
+  onInsertImageRequest,
 }: EditorSlashCommandProps) => {
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [activeIdx, setActiveIdx] = useState(0);
@@ -386,6 +395,8 @@ export const EditorSlashCommand = ({
 
     if (item.id === "table") {
       onInsertTableRequest();
+    } else if (item.id === "image") {
+      onInsertImageRequest?.();
     } else {
       item.run(editor);
     }

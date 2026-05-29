@@ -8,7 +8,6 @@ import {
   Superscript as SuperscriptIcon,
   Underline as UnderlineIcon,
 } from "lucide-react";
-import { toast } from "sonner";
 import {
   IconButton,
   Menu,
@@ -16,7 +15,7 @@ import {
   MenuItem,
   MenuTrigger,
 } from "@/components/ui-kit";
-import { isActive, type ToolbarEditorProps } from "../toolbar-utils";
+import { applyTextCaseTransform, isActive, type ToolbarEditorProps } from "../toolbar-utils";
 
 export function CharacterGroup({ editor, isReadOnly }: ToolbarEditorProps) {
   return (
@@ -85,7 +84,15 @@ export function CharacterGroup({ editor, isReadOnly }: ToolbarEditorProps) {
           >
             Superscript
           </MenuItem>
-          <MenuItem onSelect={() => toast.info("Case transform — coming soon")}>Change case</MenuItem>
+          <MenuItem disabled={isReadOnly} onSelect={() => applyTextCaseTransform(editor, "upper")}>
+            UPPERCASE
+          </MenuItem>
+          <MenuItem disabled={isReadOnly} onSelect={() => applyTextCaseTransform(editor, "lower")}>
+            lowercase
+          </MenuItem>
+          <MenuItem disabled={isReadOnly} onSelect={() => applyTextCaseTransform(editor, "title")}>
+            Title Case
+          </MenuItem>
         </MenuContent>
       </Menu>
     </>

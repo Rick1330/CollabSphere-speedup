@@ -35,3 +35,4 @@ export function ListsGroup({ editor, isReadOnly }: ToolbarEditorProps) {
     </>
   );
 }
+

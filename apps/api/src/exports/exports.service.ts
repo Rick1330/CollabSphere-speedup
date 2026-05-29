@@ -1,25 +1,34 @@
 import { Inject, Injectable } from "@nestjs/common";
+import { InjectQueue } from "@nestjs/bullmq";
 import { Queue } from "bullmq";
-import { Redis } from "ioredis";
+import fs from "node:fs/promises";
+import path from "node:path";
+import {
+  JobTypes,
+  Queues,
+  type ExportJobData,
+  type ExportPageSetup,
+} from "@collabsphere/shared/jobs";
 import { AppError } from "../common/filters/app-error.filter.js";
 import { PrismaClientProvider } from "../common/prisma/prisma-client.provider.js";
 
+const storageRoot = path.resolve(process.env.STORAGE_LOCAL_PATH ?? "./uploads");
+
+export const exportBullJobId = (exportJobId: string) => `export-${exportJobId}`;
+
 @Injectable()
 export class ExportsService {
-  private readonly queue: Queue;
-
-  constructor(@Inject(PrismaClientProvider) private readonly prisma: PrismaClientProvider) {
-    const redisUrl = process.env.REDIS_URL ?? "redis://127.0.0.1:6379";
-    this.queue = new Queue("exports", {
-      connection: new Redis(redisUrl, { maxRetriesPerRequest: null }),
-    });
-  }
+  constructor(
+    @Inject(PrismaClientProvider) private readonly prisma: PrismaClientProvider,
+    @InjectQueue(Queues.EXPORT) private readonly exportQueue: Queue<ExportJobData>,
+  ) {}
 
   async createExport(input: {
     actorUserId: string;
     workspaceId: string;
     resourceId: string;
     format: "pdf" | "markdown";
+    pageSetup?: ExportPageSetup;
   }) {
     const member = await this.prisma.workspaceMember.findFirst({
       where: {
@@ -54,11 +63,20 @@ export class ExportsService {
         status: "queued",
       },
     });
-    await this.queue.add(
-      "export",
-      { exportJobId: created.id },
+
+    const jobType = input.format === "pdf" ? JobTypes.EXPORT_PDF : JobTypes.EXPORT_MARKDOWN;
+    await this.exportQueue.add(
+      jobType,
       {
-        jobId: `export:${created.id}`,
+        exportJobId: created.id,
+        documentId: input.resourceId,
+        workspaceId: input.workspaceId,
+        requestedBy: input.actorUserId,
+        format: input.format,
+        pageSetup: input.pageSetup,
+      },
+      {
+        jobId: exportBullJobId(created.id),
         attempts: 5,
         backoff: {
           type: "exponential",
@@ -97,5 +115,19 @@ export class ExportsService {
       ...job,
       downloadUrl: job.outputStorageKey ? `/api/v1/exports/${job.id}/download` : null,
     };
+  }
+
+  async resolveExportDownloadPath(exportJobId: string, actorUserId: string): Promise<string> {
+    const job = await this.getExport({ actorUserId, exportJobId });
+    if (job.status !== "completed" || !job.outputStorageKey) {
+      throw new AppError({ code: "EXPORT_NOT_READY", message: "Export is not ready for download." });
+    }
+    const filePath = path.join(storageRoot, job.outputStorageKey);
+    try {
+      await fs.access(filePath);
+    } catch {
+      throw new AppError({ code: "EXPORT_NOT_READY", message: "Export file is not available." });
+    }
+    return filePath;
   }
 }

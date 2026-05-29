@@ -28,8 +28,10 @@ import {
   AlignRight,
   Settings2,
   ChevronDown,
+  Trash2,
   Workflow,
 } from "lucide-react";
+import { deleteNodeAtPos } from "@/features/documents/components/editor/block-canvas-toolbar";
 import { cn } from "@/lib/utils";
 import {
   DropdownMenu,
@@ -66,7 +68,7 @@ declare module "@tiptap/core" {
   }
 }
 
-const MermaidView = ({ node, updateAttributes, editor }: NodeViewProps) => {
+const MermaidView = ({ node, updateAttributes, editor, getPos }: NodeViewProps) => {
   const code = (node.attrs.code as string) ?? "";
   const align = (node.attrs.align as "left" | "center" | "right") ?? "center";
   const width = (node.attrs.width as string) ?? "100%";
@@ -263,6 +265,16 @@ const MermaidView = ({ node, updateAttributes, editor }: NodeViewProps) => {
                 ))}
               </DropdownMenuContent>
             </DropdownMenu>
+
+            <button
+              type="button"
+              aria-label="Delete diagram"
+              title="Delete"
+              onClick={() => deleteNodeAtPos(editor, getPos)}
+              className="p-1.5 rounded-md text-red-500 hover:bg-red-50 transition-colors"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
           </div>
         )}
 

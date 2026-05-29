@@ -27,7 +27,9 @@ import {
   AlignCenter,
   AlignRight,
   Sigma,
+  Trash2,
 } from "lucide-react";
+import { deleteNodeAtPos } from "@/features/documents/components/editor/block-canvas-toolbar";
 import { cn } from "@/lib/utils";
 
 const PLACEHOLDER = String.raw`E = mc^2 \quad \text{or} \quad \sum_{i=1}^{n} i = \frac{n(n+1)}{2}`;
@@ -40,7 +42,7 @@ declare module "@tiptap/core" {
   }
 }
 
-const MathView = ({ node, updateAttributes, editor }: NodeViewProps) => {
+const MathView = ({ node, updateAttributes, editor, getPos }: NodeViewProps) => {
   const latex = (node.attrs.latex as string) ?? "";
   const align = (node.attrs.align as "left" | "center" | "right") ?? "center";
 
@@ -141,6 +143,16 @@ const MathView = ({ node, updateAttributes, editor }: NodeViewProps) => {
                 <AlignRight className="h-3.5 w-3.5" />
               </button>
             </div>
+
+            <button
+              type="button"
+              aria-label="Delete equation"
+              title="Delete"
+              onClick={() => deleteNodeAtPos(editor, getPos)}
+              className="p-1.5 rounded-md text-red-500 hover:bg-red-50 transition-colors"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
           </div>
         )}
 

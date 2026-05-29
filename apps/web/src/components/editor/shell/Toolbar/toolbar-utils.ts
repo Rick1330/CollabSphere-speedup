@@ -1,15 +1,26 @@
 import type { Editor } from "@tiptap/react";
+import { toast } from "sonner";
+import { uploadDocumentImage } from "@/api/adapters/document-images";
 import {
   DOC_BODY_FONT_SIZE_PT,
   DOC_HEADING_FONT_SIZE_PT,
 } from "@/components/editor/canvas/pageSetup";
 import { LINE_HEIGHT_OPTIONS, type LineHeightValue } from "@/components/editor/extensions/lineHeight";
 
+export type DocumentImageInsertContext = {
+  workspaceId: string;
+  documentId: string;
+};
+
 export type ToolbarEditorProps = {
   editor: Editor | null;
   isReadOnly: boolean;
   onInsertTableRequest: () => void;
+  onInsertTOCRequest?: () => void;
+  onOpenTablePropertiesRequest?: () => void;
+  onInsertLinkRequest?: () => void;
   onToggleComments?: () => void;
+  imageInsertContext?: DocumentImageInsertContext;
 };
 
 export type StyleItem = {
@@ -192,8 +203,12 @@ export function isActive(editor: Editor | null, name: string, attrs?: Record<str
   return editor?.isActive(name, attrs) ?? false;
 }
 
-export function handleInsertLink(editor: Editor | null): void {
+export function handleInsertLink(editor: Editor | null, onInsertLinkRequest?: () => void): void {
   if (!editor) return;
+  if (onInsertLinkRequest) {
+    onInsertLinkRequest();
+    return;
+  }
   const previousUrl = (editor.getAttributes("link").href as string | undefined) ?? "";
   const url = window.prompt("Enter URL:", previousUrl);
   if (url === null) return;
@@ -204,6 +219,200 @@ export function handleInsertLink(editor: Editor | null): void {
   (editor.chain().focus().extendMarkRange("link") as { setLink: (attrs: { href: string }) => { run: () => void } })
     .setLink({ href: url })
     .run();
+}
+
+export function handleInsertMermaid(editor: Editor | null): void {
+  if (!editor || editor.isDestroyed) return;
+  const chain = editor.chain().focus() as { insertMermaidBlock?: () => { run: () => boolean } };
+  const inserted = chain.insertMermaidBlock?.().run();
+  if (!inserted) {
+    toast.error("Cannot insert diagram — editor is not ready.");
+  }
+}
+
+type TableChain = {
+  addRowBefore?: () => { run: () => boolean };
+  addRowAfter?: () => { run: () => boolean };
+  deleteRow?: () => { run: () => boolean };
+  addColumnBefore?: () => { run: () => boolean };
+  addColumnAfter?: () => { run: () => boolean };
+  deleteColumn?: () => { run: () => boolean };
+  mergeCells?: () => { run: () => boolean };
+  splitCell?: () => { run: () => boolean };
+  toggleHeaderRow?: () => { run: () => boolean };
+  toggleHeaderColumn?: () => { run: () => boolean };
+  toggleHeaderCell?: () => { run: () => boolean };
+  deleteTable?: () => { run: () => boolean };
+  setCellAttribute?: (name: string, value: unknown) => { run: () => boolean };
+};
+
+export type TableCommandId =
+  | "addRowBefore"
+  | "addRowAfter"
+  | "deleteRow"
+  | "addColumnBefore"
+  | "addColumnAfter"
+  | "deleteColumn"
+  | "mergeCells"
+  | "splitCell"
+  | "toggleHeaderRow"
+  | "toggleHeaderColumn"
+  | "toggleHeaderCell"
+  | "deleteTable"
+  | "setTableCellAlignLeft"
+  | "setTableCellAlignCenter"
+  | "setTableCellAlignRight";
+
+export function runTableCommand(editor: Editor | null, command: TableCommandId): void {
+  if (!editor || editor.isDestroyed) return;
+  const chain = editor.chain().focus() as TableChain;
+  let ok = false;
+  switch (command) {
+    case "addRowBefore":
+      ok = chain.addRowBefore?.().run() ?? false;
+      break;
+    case "addRowAfter":
+      ok = chain.addRowAfter?.().run() ?? false;
+      break;
+    case "deleteRow":
+      ok = chain.deleteRow?.().run() ?? false;
+      break;
+    case "addColumnBefore":
+      ok = chain.addColumnBefore?.().run() ?? false;
+      break;
+    case "addColumnAfter":
+      ok = chain.addColumnAfter?.().run() ?? false;
+      break;
+    case "deleteColumn":
+      ok = chain.deleteColumn?.().run() ?? false;
+      break;
+    case "mergeCells":
+      ok = chain.mergeCells?.().run() ?? false;
+      break;
+    case "splitCell":
+      ok = chain.splitCell?.().run() ?? false;
+      break;
+    case "toggleHeaderRow":
+      ok = chain.toggleHeaderRow?.().run() ?? false;
+      break;
+    case "toggleHeaderColumn":
+      ok = chain.toggleHeaderColumn?.().run() ?? false;
+      break;
+    case "toggleHeaderCell":
+      ok = chain.toggleHeaderCell?.().run() ?? false;
+      break;
+    case "deleteTable":
+      ok = chain.deleteTable?.().run() ?? false;
+      break;
+    case "setTableCellAlignLeft":
+      ok = chain.setCellAttribute?.("textAlign", "left").run() ?? false;
+      break;
+    case "setTableCellAlignCenter":
+      ok = chain.setCellAttribute?.("textAlign", "center").run() ?? false;
+      break;
+    case "setTableCellAlignRight":
+      ok = chain.setCellAttribute?.("textAlign", "right").run() ?? false;
+      break;
+    default:
+      ok = false;
+  }
+  if (!ok) {
+    toast.info("Place the cursor inside a table to run this action.");
+  }
+}
+
+export function setSelectedImageAlign(editor: Editor | null, align: "left" | "center" | "right"): void {
+  if (!editor || editor.isDestroyed) return;
+  const ok = (editor.chain().focus() as { setImageAlign?: (value: "left" | "center" | "right") => { run: () => boolean } })
+    .setImageAlign?.(align)
+    .run();
+  if (!ok) {
+    toast.info("Select an image first.");
+  }
+}
+
+export function setSelectedImageWidth(editor: Editor | null, widthPercent: number): void {
+  if (!editor || editor.isDestroyed) return;
+  const rounded = Math.round(widthPercent / 5) * 5;
+  const ok = (editor.chain().focus() as { setImageWidth?: (value: number) => { run: () => boolean } })
+    .setImageWidth?.(rounded)
+    .run();
+  if (!ok) {
+    toast.info("Select an image first.");
+  }
+}
+
+export function deleteSelectedMediaNode(editor: Editor | null): void {
+  if (!editor || editor.isDestroyed) return;
+  const isMedia =
+    editor.isActive("image") ||
+    editor.isActive("mermaidBlock") ||
+    editor.isActive("mathBlock");
+  if (!isMedia) {
+    toast.info("Select an image, diagram, or equation first.");
+    return;
+  }
+  editor.chain().focus().deleteSelection().run();
+}
+
+export function handleInsertImage(
+  editor: Editor | null,
+  context: DocumentImageInsertContext | undefined,
+): void {
+  if (!editor || editor.isDestroyed) return;
+  if (!context?.workspaceId || !context.documentId) {
+    toast.error("Cannot insert image — open a server-backed document first.");
+    return;
+  }
+
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "image/jpeg,image/png,image/gif,image/webp";
+  input.onchange = () => {
+    const file = input.files?.[0];
+    input.remove();
+    if (!file) return;
+
+    void (async () => {
+      const toastId = toast.loading("Uploading image…");
+      try {
+        const { url } = await uploadDocumentImage(file, context);
+        const chain = editor.chain().focus() as {
+          setImage?: (attrs: { src: string; alt?: string }) => { run: () => boolean };
+        };
+        const inserted = chain.setImage?.({ src: url, alt: file.name }).run();
+        if (!inserted) {
+          throw new Error("Editor does not support image blocks.");
+        }
+        toast.success("Image inserted", { id: toastId });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Image upload failed";
+        toast.error(message, { id: toastId });
+      }
+    })();
+  };
+  input.click();
+}
+
+export function applyTextCaseTransform(
+  editor: Editor | null,
+  mode: "upper" | "lower" | "title",
+): void {
+  if (!editor || editor.isDestroyed) return;
+  const { from, to } = editor.state.selection;
+  if (from === to) return;
+
+  const selected = editor.state.doc.textBetween(from, to, "\n");
+  let transformed = selected;
+  if (mode === "upper") {
+    transformed = selected.toUpperCase();
+  } else if (mode === "lower") {
+    transformed = selected.toLowerCase();
+  } else {
+    transformed = selected.replace(/\b\w/g, (char) => char.toUpperCase());
+  }
+
+  editor.chain().focus().insertContentAt({ from, to }, transformed).run();
 }
 
 export function clearFormatting(editor: Editor | null): void {
@@ -287,8 +496,7 @@ export type ToolbarGroupId =
   | "quickInsert"
   | "paragraph"
   | "lists"
-  | "insert"
-  | "review";
+  | "insert";
 
 /** Spec §6.3: groups hidden first when toolbar overflows (see useToolbarOverflow). */
 export const TOOLBAR_COLLAPSE_ORDER: ToolbarGroupId[] = [
@@ -300,7 +508,6 @@ export const TOOLBAR_COLLAPSE_ORDER: ToolbarGroupId[] = [
   "font",
   "quickInsert",
   "insert",
-  "review",
   "clipboard",
   "history",
 ];

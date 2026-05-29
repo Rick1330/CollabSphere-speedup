@@ -106,6 +106,39 @@ export class DocumentsNestController {
     });
   }
 
+  @Post(":documentId/images")
+  @WorkspaceRoleAtLeast("MEMBER")
+  @UseInterceptors(
+    FileInterceptor("file", {
+      limits: { fileSize: 10 * 1024 * 1024 },
+    }),
+  )
+  async uploadDocumentImage(
+    @Param("workspaceId") workspaceId: string,
+    @Param("documentId") documentId: string,
+    @ReqRequestId() requestId: string,
+    @CurrentUserId() actorUserId: string,
+    @UploadedFile() file?: { buffer: Buffer; mimetype?: string; originalname?: string },
+  ) {
+    if (!file?.buffer?.length) {
+      throw new BadRequestException("Image file is required");
+    }
+
+    const mimeType = file.mimetype?.trim() || "application/octet-stream";
+    const result = await this.documentsService.uploadDocumentImageForUser({
+      actorUserId,
+      workspaceId,
+      documentId,
+      buffer: file.buffer,
+      mimeType,
+    });
+
+    return wrapSuccessResponse({
+      payload: createSingleResourcePayload(result),
+      requestId,
+    });
+  }
+
   @Post(":documentId/import/docx")
   @WorkspaceRoleAtLeast("MEMBER")
   @UseInterceptors(

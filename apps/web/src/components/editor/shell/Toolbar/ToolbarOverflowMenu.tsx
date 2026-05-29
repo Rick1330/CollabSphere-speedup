@@ -1,4 +1,3 @@
-import { toast } from "sonner";
 import {
   MenuContent,
   MenuItem,
@@ -16,8 +15,14 @@ import {
   getFontSizePt,
   handleIndentDecrease,
   handleIndentIncrease,
+  handleInsertImage,
   handleInsertLink,
+  handleInsertMermaid,
+  deleteSelectedMediaNode,
   pastePlainText,
+  runTableCommand,
+  setSelectedImageAlign,
+  setSelectedImageWidth,
   setFontFamilyChoice,
   setFontSizePt,
   STYLE_ITEMS,
@@ -36,7 +41,6 @@ const GROUP_LABELS: Record<ToolbarGroupId, string> = {
   paragraph: "Paragraph",
   lists: "Lists",
   insert: "More insert",
-  review: "Review",
 };
 
 const ALWAYS_IN_OVERFLOW: ToolbarGroupId[] = ["clipboard", "insert"];
@@ -45,7 +49,7 @@ export function ToolbarOverflowMenu({
   hiddenIds,
   ...props
 }: ToolbarEditorProps & { hiddenIds: ToolbarGroupId[] }) {
-  const { editor, isReadOnly, onInsertTableRequest, onToggleComments } = props;
+  const { editor, isReadOnly, onInsertTableRequest, onInsertTOCRequest, onOpenTablePropertiesRequest, onInsertLinkRequest, imageInsertContext } = props;
 
   const chainFocus = () =>
     editor?.chain().focus() as {
@@ -53,7 +57,6 @@ export function ToolbarOverflowMenu({
       insertMathBlock?: () => { run: () => void };
       insertPageBreak?: () => { run: () => void };
       setTextAlign?: (align: string) => { run: () => void };
-      toggleTaskList?: () => { run: () => void };
     } | undefined;
 
   const runClipboard = (fn: () => Promise<void>) => {
@@ -83,9 +86,6 @@ export function ToolbarOverflowMenu({
                 onSelect={() => editor?.chain().focus().redo().run()}
               >
                 Redo
-              </MenuItem>
-              <MenuItem disabled={isReadOnly} onSelect={() => toast.info("Format painter — coming soon")}>
-                Format painter
               </MenuItem>
             </>
           )}
@@ -165,8 +165,8 @@ export function ToolbarOverflowMenu({
             </>
           )}
           {groupId === "color" && (
-            <MenuItem disabled={isReadOnly} onSelect={() => toast.info("Use text/highlight buttons when visible")}>
-              Text & highlight color
+            <MenuItem disabled={isReadOnly} onSelect={() => undefined}>
+              Use text & highlight buttons when visible
             </MenuItem>
           )}
           {groupId === "paragraph" && editor && (
@@ -194,45 +194,134 @@ export function ToolbarOverflowMenu({
               </MenuItem>
             </>
           )}
-          {groupId === "quickInsert" && (
-            <>
-              <MenuItem disabled={isReadOnly} onSelect={() => handleInsertLink(editor)}>
-                Link
-              </MenuItem>
-              <MenuItem disabled={isReadOnly} onSelect={() => onToggleComments?.()}>
-                Comment
-              </MenuItem>
-              <MenuItem disabled={isReadOnly} onSelect={() => toast.info("Insert image — coming soon")}>
-                Image
-              </MenuItem>
-            </>
-          )}
           {groupId === "lists" && (
             <>
-              <MenuItem disabled={isReadOnly} onSelect={() => editor?.chain().focus().toggleBulletList().run()}>
+              <MenuItem
+                disabled={isReadOnly}
+                onSelect={() => editor?.chain().focus().toggleBulletList().run()}
+              >
                 Bullet list
               </MenuItem>
-              <MenuItem disabled={isReadOnly} onSelect={() => editor?.chain().focus().toggleOrderedList().run()}>
+              <MenuItem
+                disabled={isReadOnly}
+                onSelect={() => editor?.chain().focus().toggleOrderedList().run()}
+              >
                 Numbered list
               </MenuItem>
-              <MenuItem disabled={isReadOnly} onSelect={() => chainFocus()?.toggleTaskList?.().run()}>
+              <MenuItem
+                disabled={isReadOnly}
+                onSelect={() => editor?.chain().focus().toggleTaskList().run()}
+              >
                 Checklist
               </MenuItem>
             </>
           )}
-          {groupId === "insert" && (
+          {groupId === "quickInsert" && (
             <>
-              <MenuItem disabled={isReadOnly} onSelect={() => handleInsertLink(editor)}>
+              <MenuItem disabled={isReadOnly} onSelect={() => handleInsertLink(editor, onInsertLinkRequest)}>
                 Link
               </MenuItem>
-              <MenuItem disabled={isReadOnly} onSelect={() => toast.info("Insert image — coming soon")}>
+              <MenuItem
+                disabled={isReadOnly}
+                onSelect={() => handleInsertImage(editor, imageInsertContext)}
+              >
                 Image
               </MenuItem>
               <MenuItem disabled={isReadOnly} onSelect={onInsertTableRequest}>
                 Table
               </MenuItem>
-              <MenuItem disabled={isReadOnly} onSelect={() => toast.info("Insert chart — coming soon")}>
-                Chart
+              <MenuItem disabled={isReadOnly} onSelect={() => onOpenTablePropertiesRequest?.()}>
+                Table properties
+              </MenuItem>
+              <MenuItem disabled={isReadOnly} onSelect={() => handleInsertMermaid(editor)}>
+                Diagram
+              </MenuItem>
+            </>
+          )}
+          {groupId === "insert" && (
+            <>
+              <MenuItem disabled={isReadOnly} onSelect={() => handleInsertLink(editor, onInsertLinkRequest)}>
+                Link
+              </MenuItem>
+              <MenuItem
+                disabled={isReadOnly}
+                onSelect={() => handleInsertImage(editor, imageInsertContext)}
+              >
+                Image
+              </MenuItem>
+              <MenuItem disabled={isReadOnly} onSelect={onInsertTableRequest}>
+                Table
+              </MenuItem>
+              <MenuItem disabled={isReadOnly} onSelect={onInsertTOCRequest}>
+                Table of contents
+              </MenuItem>
+              <MenuSeparator />
+              <MenuItem disabled={isReadOnly} onSelect={() => runTableCommand(editor, "addRowBefore")}>
+                Table: Add row above
+              </MenuItem>
+              <MenuItem disabled={isReadOnly} onSelect={() => runTableCommand(editor, "addRowAfter")}>
+                Table: Add row below
+              </MenuItem>
+              <MenuItem disabled={isReadOnly} onSelect={() => runTableCommand(editor, "deleteRow")}>
+                Table: Delete row
+              </MenuItem>
+              <MenuItem disabled={isReadOnly} onSelect={() => runTableCommand(editor, "addColumnBefore")}>
+                Table: Add column left
+              </MenuItem>
+              <MenuItem disabled={isReadOnly} onSelect={() => runTableCommand(editor, "addColumnAfter")}>
+                Table: Add column right
+              </MenuItem>
+              <MenuItem disabled={isReadOnly} onSelect={() => runTableCommand(editor, "deleteColumn")}>
+                Table: Delete column
+              </MenuItem>
+              <MenuItem disabled={isReadOnly} onSelect={() => runTableCommand(editor, "mergeCells")}>
+                Table: Merge cells
+              </MenuItem>
+              <MenuItem disabled={isReadOnly} onSelect={() => runTableCommand(editor, "splitCell")}>
+                Table: Split cell
+              </MenuItem>
+              <MenuItem disabled={isReadOnly} onSelect={() => runTableCommand(editor, "toggleHeaderRow")}>
+                Table: Toggle header row
+              </MenuItem>
+              <MenuItem disabled={isReadOnly} onSelect={() => runTableCommand(editor, "toggleHeaderColumn")}>
+                Table: Toggle header column
+              </MenuItem>
+              <MenuItem disabled={isReadOnly} onSelect={() => runTableCommand(editor, "toggleHeaderCell")}>
+                Table: Toggle header cell
+              </MenuItem>
+              <MenuItem disabled={isReadOnly} onSelect={() => runTableCommand(editor, "setTableCellAlignLeft")}>
+                Table: Cell align left
+              </MenuItem>
+              <MenuItem disabled={isReadOnly} onSelect={() => runTableCommand(editor, "setTableCellAlignCenter")}>
+                Table: Cell align center
+              </MenuItem>
+              <MenuItem disabled={isReadOnly} onSelect={() => runTableCommand(editor, "setTableCellAlignRight")}>
+                Table: Cell align right
+              </MenuItem>
+              <MenuItem disabled={isReadOnly} onSelect={() => runTableCommand(editor, "deleteTable")}>
+                Table: Delete table
+              </MenuItem>
+              <MenuSeparator />
+              <MenuItem disabled={isReadOnly} onSelect={() => handleInsertMermaid(editor)}>
+                Diagram
+              </MenuItem>
+              <MenuItem disabled={isReadOnly} onSelect={() => setSelectedImageAlign(editor, "left")}>
+                Image: Align left
+              </MenuItem>
+              <MenuItem disabled={isReadOnly} onSelect={() => setSelectedImageAlign(editor, "center")}>
+                Image: Align center
+              </MenuItem>
+              <MenuItem disabled={isReadOnly} onSelect={() => setSelectedImageAlign(editor, "right")}>
+                Image: Align right
+              </MenuItem>
+              <MenuItem disabled={isReadOnly} onSelect={() => setSelectedImageWidth(editor, 50)}>
+                Image: Resize to 50%
+              </MenuItem>
+              <MenuItem disabled={isReadOnly} onSelect={() => setSelectedImageWidth(editor, 75)}>
+                Image: Resize to 75%
+              </MenuItem>
+              <MenuItem disabled={isReadOnly} onSelect={() => setSelectedImageWidth(editor, 100)}>
+                Image: Resize to 100%
               </MenuItem>
               <MenuItem
                 disabled={isReadOnly}
@@ -240,19 +329,11 @@ export function ToolbarOverflowMenu({
               >
                 Equation
               </MenuItem>
+              <MenuItem disabled={isReadOnly} onSelect={() => deleteSelectedMediaNode(editor)}>
+                Delete selected media block
+              </MenuItem>
               <MenuItem disabled={isReadOnly} onSelect={() => chainFocus()?.insertPageBreak?.().run()}>
                 Page break
-              </MenuItem>
-            </>
-          )}
-          {groupId === "review" && (
-            <>
-              <MenuItem onSelect={() => onToggleComments?.()}>Show comments</MenuItem>
-              <MenuItem disabled onSelect={() => undefined}>
-                Show changes
-              </MenuItem>
-              <MenuItem disabled onSelect={() => undefined}>
-                Spelling
               </MenuItem>
             </>
           )}

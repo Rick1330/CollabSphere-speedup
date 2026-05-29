@@ -19,10 +19,32 @@ import { ColorGroup } from "./groups/ColorGroup";
 import { QuickInsertGroup } from "./groups/QuickInsertGroup";
 import { ParagraphGroup } from "./groups/ParagraphGroup";
 import { ListsGroup } from "./groups/ListsGroup";
-import { ReviewGroup } from "./groups/ReviewGroup";
 import "./toolbar.css";
 
 export type ToolbarProps = ToolbarEditorProps;
+
+/** Shared props for toolbar groups — exported for unit tests. */
+export function buildToolbarChildProps({
+  editor,
+  isReadOnly,
+  onInsertTableRequest,
+  onInsertTOCRequest,
+  onOpenTablePropertiesRequest,
+  onInsertLinkRequest,
+  onToggleComments,
+  imageInsertContext,
+}: ToolbarProps): ToolbarEditorProps {
+  return {
+    editor,
+    isReadOnly,
+    onInsertTableRequest,
+    onInsertTOCRequest,
+    onOpenTablePropertiesRequest,
+    onInsertLinkRequest,
+    onToggleComments,
+    imageInsertContext,
+  };
+}
 
 type GroupDef = {
   id: ToolbarGroupId;
@@ -33,11 +55,24 @@ export const Toolbar = memo(function Toolbar({
   editor,
   isReadOnly,
   onInsertTableRequest,
+  onInsertTOCRequest,
+  onOpenTablePropertiesRequest,
+  onInsertLinkRequest,
   onToggleComments,
+  imageInsertContext,
 }: ToolbarProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const hiddenIds = useToolbarOverflow(containerRef);
-  const props = { editor, isReadOnly, onInsertTableRequest, onToggleComments };
+  const props = buildToolbarChildProps({
+    editor,
+    isReadOnly,
+    onInsertTableRequest,
+    onInsertTOCRequest,
+    onOpenTablePropertiesRequest,
+    onInsertLinkRequest,
+    onToggleComments,
+    imageInsertContext,
+  });
 
   const groups: GroupDef[] = [
     { id: "history", render: () => <HistoryGroup {...props} /> },
@@ -48,7 +83,6 @@ export const Toolbar = memo(function Toolbar({
     { id: "quickInsert", render: () => <QuickInsertGroup {...props} /> },
     { id: "paragraph", render: () => <ParagraphGroup {...props} /> },
     { id: "lists", render: () => <ListsGroup {...props} /> },
-    { id: "review", render: () => <ReviewGroup {...props} /> },
   ];
 
   const visibleGroups = groups.filter((g) => !hiddenIds.includes(g.id));

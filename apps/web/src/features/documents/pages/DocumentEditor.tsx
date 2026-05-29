@@ -21,7 +21,6 @@ import { fetchWorkspaceSidebarContext } from "@/api/adapters/workspaces";
 import {
   fetchWorkspaceDocument,
   createDocument,
-  createDocumentVersion,
   createWorkspaceFolder,
 } from "@/api/adapters/documents";
 import { ApiError } from "@/api/client";
@@ -39,6 +38,7 @@ import {
 } from "@/features/documents/components/editor/editor-readonly-banner";
 import { DocumentLoadingOverlay } from "@/components/editor/DocumentLoadingOverlay";
 import { Toolbar } from "@/components/editor/shell/Toolbar";
+import { handleInsertImage } from "@/components/editor/shell/Toolbar/toolbar-utils";
 import { EditorContentArea } from "@/features/documents/components/editor/editor-content";
 import { CollabCaretDebug } from "@/features/documents/components/editor/collab-caret-debug";
 import { RemotePointerOverlay } from "@/features/documents/components/editor/remote-pointer-overlay";
@@ -84,7 +84,16 @@ import { EditorReviewPanel } from "@/features/documents/components/editor/editor
 import { EditorReviewFeedback } from "@/features/documents/components/editor/editor-review-feedback";
 import { EditorSubmissionHistory } from "@/features/documents/components/editor/editor-submission-history";
 import { TableInsertDialog } from "@/features/documents/components/editor/table-insert-dialog";
+import { TablePropertiesDialog } from "@/features/documents/components/editor/TablePropertiesDialog";
+import { EditorCommandPalette } from "@/features/documents/components/editor/EditorCommandPalette";
+import { EditorFindBar } from "@/features/documents/components/editor/EditorFindBar";
+import { InsertLinkDialog } from "@/features/documents/components/editor/InsertLinkDialog";
+import { EditorTableBubbleMenu } from "@/features/documents/components/editor/EditorTableBubbleMenu";
+import { InsertTOCDialog, type TOCInsertOptions } from "@/features/documents/components/editor/InsertTOCDialog";
 import { PageSetupDialog } from "@/components/editor/dialogs/PageSetupDialog";
+import { printEditorDocument } from "@/features/documents/lib/print-document";
+import { exportDocumentPdf } from "@/features/documents/lib/export-document-pdf";
+import { setEditorScrollContainer } from "@/features/documents/lib/editor-scroll-container";
 import type { SubmissionRecord } from "@/lib/mock-academic";
 import {
   approveSubmission,
@@ -686,32 +695,11 @@ const DocumentEditorPage = () => {
     openVersionHistory,
   );
 
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
-  const autosaveInFlightRef = useRef(false);
-
-  useEffect(() => {
-    if (mergedDoc) {
-      setSaveStatus("saved");
-      setLastSavedAt(new Date().toISOString());
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mergedDoc?.id, mergedDoc?.content]);
 
   const editorScrollRef = useRef<HTMLDivElement>(null);
   const writingColumnRef = useRef<HTMLDivElement>(null);
   const onThreadClickRef = useRef<(threadId: string) => void>(() => {});
-
-  const [docxImporting, setDocxImporting] = useState(false);
-  const [docxImportProgress, setDocxImportProgress] = useState<number | null>(null);
-
-  const handleDocxImportStateChange = useCallback(
-    (importState: { importing: boolean; progress: number | null }) => {
-      setDocxImporting(importState.importing);
-      setDocxImportProgress(importState.progress);
-    },
-    [],
-  );
 
   const collab = useCollaborativeDocumentEditor({
     workspaceId: isDatabaseWorkspaceId(workspaceId) ? workspaceId : "",
@@ -729,9 +717,30 @@ const DocumentEditorPage = () => {
   });
   const editor = collab.editor;
 
-  const handleDocxImportStart = useCallback(() => {
-    collab.pauseCollabForImport();
-  }, [collab]);
+  const saveStatus = useMemo((): SaveStatus => {
+    if (!isDatabaseWorkspaceId(workspaceId) || !isDatabaseWorkspaceId(documentId)) {
+      return "saved";
+    }
+    switch (collab.status) {
+      case "synced":
+        return "saved";
+      case "connecting":
+      case "connected":
+        return "saving";
+      default:
+        return "saved";
+    }
+  }, [collab.status, workspaceId, documentId]);
+
+  useEffect(() => {
+    if (collab.status === "synced") {
+      setLastSavedAt(new Date().toISOString());
+    }
+  }, [collab.status]);
+
+  useEffect(() => {
+    setLastSavedAt(null);
+  }, [mergedDoc?.id]);
 
   // ─────── Template readiness (submit gating) ───────
   const templateContract = useMemo(
@@ -757,54 +766,6 @@ const DocumentEditorPage = () => {
   }, [hydratePageWidth, hydrateZoomLevel, hydratePageSetup, hydrateDocumentPageTheme]);
 
   useEditorZoomShortcuts(state.status === "loaded");
-
-  useEffect(() => {
-    if (!editor) return;
-    let debounceTimer: number | null = null;
-    let autosaveTimer: number | null = null;
-    const AUTOSAVE_IDLE_MS = 2500;
-    const onUpdate = () => {
-      if (debounceTimer) window.clearTimeout(debounceTimer);
-      debounceTimer = window.setTimeout(() => {
-        debounceTimer = null;
-        setSaveStatus("unsaved");
-      }, 300);
-
-      if (autosaveTimer) window.clearTimeout(autosaveTimer);
-      autosaveTimer = window.setTimeout(() => {
-        autosaveTimer = null;
-
-        if (!isEditable) return;
-        if (!mergedDoc) return;
-        if (!isDatabaseWorkspaceId(workspaceId) || !isDatabaseWorkspaceId(documentId)) return;
-        if (collab.status === "offline" || collab.status === "auth_failed" || collab.status === "error") return;
-        if (autosaveInFlightRef.current) return;
-
-        autosaveInFlightRef.current = true;
-        setSaveStatus("saving");
-
-        void (async () => {
-          try {
-            await createDocumentVersion(workspaceId, mergedDoc.id, {
-              versionLabel: `auto-${Date.now().toString(36)}`,
-            });
-            setSaveStatus("saved");
-            setLastSavedAt(new Date().toISOString());
-          } catch {
-            setSaveStatus("error");
-          } finally {
-            autosaveInFlightRef.current = false;
-          }
-        })();
-      }, AUTOSAVE_IDLE_MS);
-    };
-    editor.on("update", onUpdate);
-    return () => {
-      if (debounceTimer) window.clearTimeout(debounceTimer);
-      if (autosaveTimer) window.clearTimeout(autosaveTimer);
-      editor.off("update", onUpdate);
-    };
-  }, [editor, isEditable, mergedDoc?.id, workspaceId, documentId, collab.status]);
 
   // Focus mode + comments rail + mobile drawers
   const [focusMode, setFocusMode] = useState(() => {
@@ -1025,6 +986,75 @@ const DocumentEditorPage = () => {
     if (!outer || !page) return;
     setZoomLevel(computeFitPageLevel(outer, page, zoomLevel));
   }, [zoomLevel, setZoomLevel]);
+
+  const handlePrintDocument = useCallback(() => {
+    void printEditorDocument({
+      pageSetup,
+      editor,
+      onBeforePrint: async () => {
+        printZoomRestoreRef.current = zoomLevel;
+        if (zoomLevel !== 100) setZoomLevel(100);
+      },
+      onAfterPrint: () => {
+        if (printZoomRestoreRef.current != null) {
+          setZoomLevel(printZoomRestoreRef.current);
+          printZoomRestoreRef.current = null;
+        }
+      },
+    });
+  }, [pageSetup, setZoomLevel, zoomLevel, editor]);
+
+  const handleExportPdf = useCallback(() => {
+    if (!mergedDoc || !isDatabaseWorkspaceId(workspaceId) || !isDatabaseWorkspaceId(mergedDoc.id)) {
+      toast.error("PDF export is not available for this document.");
+      return;
+    }
+    void exportDocumentPdf({
+      workspaceId,
+      documentId: mergedDoc.id,
+      documentTitle: mergedDoc.title,
+      pageSetup: {
+        format: pageSetup.format,
+        orientation: pageSetup.orientation,
+        margins: { ...pageSetup.margins },
+      },
+    });
+  }, [mergedDoc, workspaceId, pageSetup]);
+
+  const imageInsertContextForEditor = useMemo(
+    () =>
+      isDatabaseWorkspaceId(workspaceId) && Boolean(documentId) && isDatabaseWorkspaceId(documentId)
+        ? { workspaceId, documentId }
+        : undefined,
+    [workspaceId, documentId],
+  );
+
+  useEffect(() => {
+    if (state.status !== "loaded") return;
+    const onKey = (event: KeyboardEvent) => {
+      const mod = event.metaKey || event.ctrlKey;
+      if (mod && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setCommandPaletteOpen(true);
+        return;
+      }
+      if (mod && event.key.toLowerCase() === "f") {
+        event.preventDefault();
+        setFindBarOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [state.status]);
+
+  useEffect(() => {
+    if (state.status !== "loaded") {
+      setEditorScrollContainer(null);
+      return;
+    }
+    setEditorScrollContainer(editorScrollRef.current);
+    return () => setEditorScrollContainer(null);
+  }, [state.status, collab.isCollabReady]);
 
   useFocusModeShortcut(
     state.status === "loaded",
@@ -1286,8 +1316,9 @@ const DocumentEditorPage = () => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "s") {
         e.preventDefault();
-        setSaveStatus("saved");
-        setLastSavedAt(new Date().toISOString());
+        if (collab.status === "synced") {
+          setLastSavedAt(new Date().toISOString());
+        }
         toast.success("Document saved", {
           description: "All changes have been saved.",
           duration: 1800,
@@ -1309,13 +1340,31 @@ const DocumentEditorPage = () => {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [collab.status]);
 
   // Deep-link: scroll to and flash a snippet from `#anchor=` in the URL.
   useEffect(() => {
     if (!editor) return;
     const tryJump = () => {
       const hash = window.location.hash;
+      if (hash.startsWith("#cs-h-")) {
+        const heading = editor.view.dom.querySelector<HTMLElement>(`#${CSS.escape(hash.slice(1))}`);
+        if (!heading) return;
+        const scroller = editorScrollRef.current;
+        if (scroller) {
+          const elRect = heading.getBoundingClientRect();
+          const scRect = scroller.getBoundingClientRect();
+          scroller.scrollTo({
+            top: scroller.scrollTop + elRect.top - scRect.top - scroller.clientHeight * 0.2,
+            behavior: "smooth",
+          });
+        } else {
+          heading.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+        heading.classList.add("cs-heading-anchor--flash");
+        window.setTimeout(() => heading.classList.remove("cs-heading-anchor--flash"), 1300);
+        return;
+      }
       if (!hash.startsWith("#anchor=")) return;
       const snippet = decodeURIComponent(hash.slice("#anchor=".length));
       if (!snippet) return;
@@ -1349,7 +1398,17 @@ const DocumentEditorPage = () => {
   const [createTargetFolderId, setCreateTargetFolderId] = useState<string | null>(null);
   const [submitDialogOpen, setSubmitDialogOpen] = useState(false);
   const [tableDialogOpen, setTableDialogOpen] = useState(false);
+  const [tablePropertiesOpen, setTablePropertiesOpen] = useState(false);
   const [pageSetupOpen, setPageSetupOpen] = useState(false);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [findBarOpen, setFindBarOpen] = useState(false);
+  const [linkDialogOpen, setLinkDialogOpen] = useState(false);
+  const [linkDialogMode, setLinkDialogMode] = useState<"external" | "section">("external");
+  const [tocDialogOpen, setTocDialogOpen] = useState(false);
+  const tocInsertSelectionRef = useRef<{ from: number; to: number } | null>(null);
+  const printZoomRestoreRef = useRef<number | null>(null);
+  const toggleRuler = useEditorStore((s) => s.toggleRuler);
+  const toggleShowPageBreaks = useEditorStore((s) => s.toggleShowPageBreaks);
 
   const [submitPreflight, setSubmitPreflight] = useState<{
     status: "idle" | "loading" | "loaded";
@@ -1371,11 +1430,45 @@ const DocumentEditorPage = () => {
     })();
   }, [submitDialogOpen, mergedDoc?.id, workspaceId]);
 
-  const handleInsertTable = (rows: number, cols: number) => {
-    (editor?.chain().focus() as any)
-      ?.insertTable({ rows, cols, withHeaderRow: true })
-      .run();
+  const handleInsertTable = (options: {
+    rows: number;
+    cols: number;
+    withHeaderRow: boolean;
+    withHeaderColumn: boolean;
+    stripedRows: boolean;
+  }) => {
+    if (!editor || editor.isDestroyed) return;
+    const { rows, cols, withHeaderRow, withHeaderColumn, stripedRows } = options;
+    const chain = editor.chain().focus() as {
+      insertTable?: (opts: { rows: number; cols: number; withHeaderRow: boolean }) => { run: () => boolean };
+      toggleHeaderColumn?: () => { run: () => boolean };
+      updateAttributes?: (name: string, attrs: Record<string, unknown>) => { run: () => boolean };
+    };
+    const inserted = chain.insertTable?.({ rows, cols, withHeaderRow }).run();
+    if (!inserted) return;
+    if (withHeaderColumn) {
+      chain.toggleHeaderColumn?.().run();
+    }
+    chain.updateAttributes?.("table", { stripedRows }).run();
+    window.requestAnimationFrame(() => {
+      if (editor.isDestroyed) return;
+      const tableChain = editor.chain().focus() as {
+        goToNextCell?: () => { run: () => boolean };
+      };
+      if (!editor.isActive("tableCell") && !editor.isActive("tableHeader")) {
+        tableChain.goToNextCell?.().run();
+      }
+      editor.commands.focus();
+    });
   };
+
+  const openTocDialog = useCallback(() => {
+    if (editor && !editor.isDestroyed) {
+      const { from, to } = editor.state.selection;
+      tocInsertSelectionRef.current = { from, to };
+    }
+    setTocDialogOpen(true);
+  }, [editor]);
 
   const handleCreateDoc = async (title: string, templateId: string) => {
     setCreateDocOpen(false);
@@ -1838,7 +1931,6 @@ const DocumentEditorPage = () => {
   );
 
   const showCollabLoadingOverlay =
-    !docxImporting &&
     state.status === "loaded" &&
     isDatabaseWorkspaceId(workspaceId) &&
     Boolean(documentId) &&
@@ -1846,21 +1938,11 @@ const DocumentEditorPage = () => {
     collab.status !== "auth_failed" &&
     collab.status !== "error";
 
-  const collabCanvasReady = !showCollabLoadingOverlay && !docxImporting;
+  const collabCanvasReady = !showCollabLoadingOverlay;
 
   return (
     <div className="flex h-screen overflow-hidden bg-[var(--surface-2)]">
-      {docxImporting ? (
-        <DocumentLoadingOverlay
-          progress={docxImportProgress ?? 0}
-          title="Importing DOCX…"
-          statusLabelOverride={
-            docxImportProgress != null
-              ? `${Math.round(docxImportProgress)}% complete`
-              : "Uploading and converting on server…"
-          }
-        />
-      ) : showCollabLoadingOverlay ? (
+      {showCollabLoadingOverlay ? (
         <DocumentLoadingOverlay progress={collab.loadProgress} />
       ) : null}
       {isBelowLg && (
@@ -1923,9 +2005,6 @@ const DocumentEditorPage = () => {
           <MenuBar
             editor={editor}
             readOnly={!isEditable}
-            documentTitle={mergedDoc?.title}
-            workspaceId={workspaceId}
-            documentId={documentId}
             onToggleTree={handleToggleTree}
             onToggleComments={handleToggleComments}
             onToggleFocusMode={() => setFocusMode((f) => !f)}
@@ -1933,10 +2012,9 @@ const DocumentEditorPage = () => {
             onFitPage={handleFitPage}
             onOpenVersionHistory={openVersionHistory}
             onOpenPageSetup={() => setPageSetupOpen(true)}
-            onServerDocxImported={() => collab.hardReconnectAfterRestore()}
-            onDocxImportStart={handleDocxImportStart}
-            onDocxImportStateChange={handleDocxImportStateChange}
-            isCollabActive={collab.isCollabReady}
+            onOpenCommandPalette={() => setCommandPaletteOpen(true)}
+            onPrint={handlePrintDocument}
+            onExportPdf={handleExportPdf}
           />
         }
         toolbar={
@@ -1944,7 +2022,14 @@ const DocumentEditorPage = () => {
             editor={editor}
             isReadOnly={!isEditable || connectionStatus === "connecting"}
             onInsertTableRequest={() => setTableDialogOpen(true)}
+            onInsertTOCRequest={openTocDialog}
+            onOpenTablePropertiesRequest={() => setTablePropertiesOpen(true)}
+            onInsertLinkRequest={() => {
+              setLinkDialogMode("external");
+              setLinkDialogOpen(true);
+            }}
             onToggleComments={handleToggleComments}
+            imageInsertContext={imageInsertContextForEditor}
           />
         }
         banners={editorBanners}
@@ -2006,6 +2091,12 @@ const DocumentEditorPage = () => {
         }
       >
         <div className="relative flex min-h-0 flex-1 flex-col">
+          <EditorFindBar
+            editor={editor}
+            open={findBarOpen}
+            onOpenChange={setFindBarOpen}
+            scrollContainerRef={editorScrollRef}
+          />
           {focusMode ? (
             <FocusModeToolbarPill
               editor={editor}
@@ -2047,6 +2138,16 @@ const DocumentEditorPage = () => {
             <EditorSlashCommand
               editor={editor}
               onInsertTableRequest={() => setTableDialogOpen(true)}
+              onInsertImageRequest={() =>
+                handleInsertImage(
+                  editor,
+                  isDatabaseWorkspaceId(workspaceId) &&
+                    Boolean(documentId) &&
+                    isDatabaseWorkspaceId(documentId)
+                    ? { workspaceId, documentId }
+                    : undefined,
+                )
+              }
             />
           )}
           {isVersionHistoryOpen && mergedDoc && (
@@ -2075,7 +2176,19 @@ const DocumentEditorPage = () => {
         onCreateTask={
           canComment ? (snippet) => setPendingTaskSnippet(snippet) : undefined
         }
+        onOpenLinkDialog={(mode) => {
+          setLinkDialogMode(mode);
+          setLinkDialogOpen(true);
+        }}
       />
+
+      {isEditable && (
+        <EditorTableBubbleMenu
+          editor={editor}
+          enabled={Boolean(editor) && !editor.isDestroyed}
+          onOpenTableProperties={() => setTablePropertiesOpen(true)}
+        />
+      )}
 
       {/* Mobile/tablet context drawer (right side) */}
       <Sheet open={mobileCommentsOpen} onOpenChange={setMobileCommentsOpen}>
@@ -2183,7 +2296,81 @@ const DocumentEditorPage = () => {
         onConfirm={handleInsertTable}
       />
 
+      <TablePropertiesDialog
+        open={tablePropertiesOpen}
+        onOpenChange={setTablePropertiesOpen}
+        editor={editor}
+      />
+
       <PageSetupDialog open={pageSetupOpen} onOpenChange={setPageSetupOpen} />
+
+      <EditorCommandPalette
+        open={commandPaletteOpen}
+        onOpenChange={setCommandPaletteOpen}
+        editor={editor}
+        isReadOnly={!isEditable}
+        imageInsertContext={imageInsertContextForEditor}
+        onInsertTable={() => setTableDialogOpen(true)}
+        onInsertImage={() => handleInsertImage(editor, imageInsertContextForEditor)}
+        onInsertLink={() => {
+          setLinkDialogMode("external");
+          setLinkDialogOpen(true);
+        }}
+        onInsertTOC={openTocDialog}
+        onOpenFind={() => setFindBarOpen(true)}
+        onPrint={handlePrintDocument}
+        onExportPdf={handleExportPdf}
+        onOpenVersionHistory={openVersionHistory}
+        onOpenPageSetup={() => setPageSetupOpen(true)}
+        onToggleFocusMode={() => setFocusMode((f) => !f)}
+        onFitWidth={handleFitWidth}
+        onFitPage={handleFitPage}
+        onToggleRuler={toggleRuler}
+        onTogglePageBreaks={toggleShowPageBreaks}
+        onOpenTableProperties={() => setTablePropertiesOpen(true)}
+      />
+
+      <InsertLinkDialog
+        open={linkDialogOpen}
+        onOpenChange={setLinkDialogOpen}
+        editor={editor}
+        initialMode={linkDialogMode}
+      />
+
+      <InsertTOCDialog
+        open={tocDialogOpen}
+        onOpenChange={setTocDialogOpen}
+        onConfirm={(opts: TOCInsertOptions) => {
+          if (!editor || editor.isDestroyed) return;
+          const saved = tocInsertSelectionRef.current;
+          const at = saved?.from ?? editor.state.selection.from;
+          const ok = (
+            editor
+              .chain()
+              .focus()
+              .setTextSelection(at) as {
+              insertTOC?: (attrs?: Record<string, unknown> & { at?: number }) => { run: () => boolean };
+            }
+          )
+            .insertTOC?.({
+              includedLevels: opts.includedLevels,
+              style: opts.style,
+              showPageNumbers: opts.showPageNumbers,
+              clickableLinks: opts.clickableLinks,
+              at,
+            })
+            .run();
+          if (!ok) {
+            toast.error("Could not insert table of contents");
+            return;
+          }
+          tocInsertSelectionRef.current = null;
+          window.requestAnimationFrame(() => {
+            const tocEl = editor.view.dom.querySelector('[data-type="toc-block"]');
+            tocEl?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+          });
+        }}
+      />
     </div>
   );
 };

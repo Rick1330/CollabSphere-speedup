@@ -1,18 +1,6 @@
-import { useRef, useState, type ChangeEvent } from "react";
 import type { Editor } from "@tiptap/react";
 import { Search } from "lucide-react";
 import { toast } from "sonner";
-import {
-  formatDocxServerImportError,
-  importDocxFile,
-  type ImportWarning,
-} from "@/features/documents/lib/docx-import";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import {
   Menu,
   MenuContent,
@@ -38,9 +26,6 @@ import {
 
 export type MenuBarProps = {
   editor?: Editor | null;
-  documentTitle?: string;
-  workspaceId?: string;
-  documentId?: string;
   readOnly?: boolean;
   onToggleTree?: () => void;
   onToggleComments?: () => void;
@@ -49,13 +34,9 @@ export type MenuBarProps = {
   onFitPage?: () => void;
   onOpenVersionHistory?: () => void;
   onOpenPageSetup?: () => void;
-  onServerDocxImported?: () => void;
-  onDocxImportStart?: () => void;
-  onDocxImportStateChange?: (state: {
-    importing: boolean;
-    progress: number | null;
-  }) => void;
-  isCollabActive?: boolean;
+  onOpenCommandPalette?: () => void;
+  onPrint?: () => void;
+  onExportPdf?: () => void;
   className?: string;
 };
 
@@ -64,157 +45,22 @@ const MENU_TRIGGER_CLASS =
 
 function FileMenu({
   editor,
-  documentTitle,
-  workspaceId,
-  documentId,
   readOnly,
   onToggleTree,
   onOpenVersionHistory,
   onOpenPageSetup,
-  onServerDocxImported,
-  onDocxImportStart,
-  onDocxImportStateChange,
-  isCollabActive,
+  onPrint,
+  onExportPdf,
 }: Pick<
   MenuBarProps,
-  | "onToggleTree"
-  | "onOpenVersionHistory"
-  | "onOpenPageSetup"
-  | "readOnly"
-  | "workspaceId"
-  | "documentId"
-  | "onServerDocxImported"
-  | "onDocxImportStart"
-  | "onDocxImportStateChange"
-  | "isCollabActive"
+  "onToggleTree" | "onOpenVersionHistory" | "onOpenPageSetup" | "onPrint" | "onExportPdf" | "readOnly"
 > & {
   editor?: Editor | null;
-  documentTitle?: string;
 }) {
   const disabled = !editor;
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const importAbortRef = useRef<AbortController | null>(null);
-  const [importing, setImporting] = useState(false);
-  const [importProgress, setImportProgress] = useState<number | null>(null);
-  const [importWarnings, setImportWarnings] = useState<ImportWarning[] | null>(null);
-  const setPageSetup = useEditorStore((s) => s.setPageSetup);
-  const setDocumentTypographyProfile = useEditorStore(
-    (s) => s.setDocumentTypographyProfile,
-  );
-
-  const downloadMarkdown = () => {
-    if (!editor) return;
-    const content = editor.getText();
-    const safeTitle = (documentTitle ?? "document").trim() || "document";
-    const fileName = `${safeTitle}.md`;
-
-    const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
-    const url = globalThis.URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = fileName;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    globalThis.URL.revokeObjectURL(url);
-    toast.success("Markdown exported");
-  };
-
-  const handleImportDocx = () => {
-    if (readOnly) {
-      toast.error("Cannot import — document is read-only");
-      return;
-    }
-    if (importing) return;
-    fileInputRef.current?.click();
-  };
-
-  const onDocxSelected = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file || !editor) return;
-
-    if (
-      !window.confirm(
-        "Import DOCX will replace the entire document body. Continue?",
-      )
-    ) {
-      return;
-    }
-
-    importAbortRef.current?.abort();
-    const controller = new AbortController();
-    importAbortRef.current = controller;
-    setImporting(true);
-    setImportProgress(0);
-    onDocxImportStateChange?.({ importing: true, progress: 0 });
-    onDocxImportStart?.();
-
-    try {
-      const result = await importDocxFile(file, {
-        workspaceId,
-        documentId,
-        signal: controller.signal,
-        onProgress: (progress) => {
-          setImportProgress(progress);
-          onDocxImportStateChange?.({ importing: true, progress });
-        },
-      });
-      setPageSetup(result.pageSetup);
-      setDocumentTypographyProfile("word-import");
-      if (result.mode === "server" && onServerDocxImported) {
-        onServerDocxImported();
-      } else if (result.mode === "client" && isCollabActive) {
-        throw new Error(
-          "Client import cannot run while collaboration is active. Use server import or disconnect first.",
-        );
-      } else {
-        editor.commands.setContent(result.content);
-      }
-      if (result.warnings.length > 0) {
-        setImportWarnings(result.warnings);
-        toast.warning(`Imported with ${result.warnings.length} warning(s)`, {
-          description: result.warnings
-            .slice(0, 2)
-            .map((w) => w.message)
-            .join("; "),
-          action: {
-            label: "View all",
-            onClick: () => setImportWarnings(result.warnings),
-          },
-        });
-      } else {
-        toast.success("DOCX imported");
-      }
-    } catch (error) {
-      if (controller.signal.aborted) {
-        toast.info("DOCX import cancelled");
-      } else {
-        console.error("[docx-import]", error);
-        const detail =
-          error instanceof Error
-            ? formatDocxServerImportError(error.message)
-            : "DOCX import failed";
-        toast.error(detail);
-      }
-    } finally {
-      setImporting(false);
-      setImportProgress(null);
-      onDocxImportStateChange?.({ importing: false, progress: null });
-      importAbortRef.current = null;
-    }
-  };
 
   return (
-    <>
     <Menu>
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        className="hidden"
-        onChange={(e) => void onDocxSelected(e)}
-      />
       <MenuTrigger className={MENU_TRIGGER_CLASS}>File</MenuTrigger>
       <MenuContent>
         <MenuItem onSelect={() => toast.info("New document — use Documents page")}>
@@ -223,20 +69,13 @@ function FileMenu({
         </MenuItem>
         <MenuItem onSelect={() => toast.info("Duplicate — coming soon")}>Duplicate</MenuItem>
         <MenuSeparator />
-        <MenuItem disabled={disabled || readOnly || importing} onSelect={handleImportDocx}>
-          {importing
-            ? importProgress != null
-              ? `Importing DOCX… ${Math.round(importProgress)}%`
-              : "Importing DOCX…"
-            : "Import DOCX…"}
-        </MenuItem>
         <MenuItem onSelect={() => onOpenPageSetup?.()}>Page setup…</MenuItem>
         <MenuSeparator />
-        <MenuItem disabled={disabled} onSelect={() => window.print()}>
-          Export PDF
+        <MenuItem disabled={disabled} onSelect={() => onPrint?.()}>
+          Print…
         </MenuItem>
-        <MenuItem disabled={disabled} onSelect={downloadMarkdown}>
-          Export Markdown
+        <MenuItem disabled={disabled} onSelect={() => onExportPdf?.()}>
+          Export PDF
         </MenuItem>
         <MenuSeparator />
         <MenuItem onSelect={() => onOpenVersionHistory?.()}>
@@ -246,21 +85,6 @@ function FileMenu({
         <MenuItem onSelect={() => onToggleTree?.()}>Toggle document tree</MenuItem>
       </MenuContent>
     </Menu>
-    <Dialog open={importWarnings != null} onOpenChange={(open) => !open && setImportWarnings(null)}>
-      <DialogContent className="sm:max-w-md max-h-[70vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Import warnings</DialogTitle>
-        </DialogHeader>
-        <ul className="list-disc space-y-1 pl-4 text-sm text-muted-foreground">
-          {importWarnings?.map((w, i) => (
-            <li key={`${w.type}-${i}`}>
-              <span className="font-medium text-foreground">{w.type}:</span> {w.message}
-            </li>
-          ))}
-        </ul>
-      </DialogContent>
-    </Dialog>
-    </>
   );
 }
 
@@ -303,15 +127,6 @@ function EditMenu({ editor }: { editor: Editor | null | undefined }) {
         <MenuItem disabled={!editor} onSelect={() => runClipboard(() => pastePlainText(editor!))}>
           Paste without formatting
           <MenuShortcut>Ctrl+Shift+V</MenuShortcut>
-        </MenuItem>
-        <MenuSeparator />
-        <MenuItem onSelect={() => toast.info("Find & replace — coming soon")}>
-          Find
-          <MenuShortcut>Ctrl+F</MenuShortcut>
-        </MenuItem>
-        <MenuItem onSelect={() => toast.info("Find & replace — coming soon")}>
-          Replace
-          <MenuShortcut>Ctrl+H</MenuShortcut>
         </MenuItem>
       </MenuContent>
     </Menu>
@@ -386,53 +201,12 @@ function ViewMenu({
   );
 }
 
-function InsertMenu() {
-  return (
-    <Menu>
-      <MenuTrigger className={MENU_TRIGGER_CLASS}>Insert</MenuTrigger>
-      <MenuContent>
-        <MenuItem onSelect={() => toast.info("Use toolbar or / slash menu")}>Table</MenuItem>
-        <MenuItem onSelect={() => toast.info("Use toolbar")}>Image</MenuItem>
-        <MenuItem onSelect={() => toast.info("Use toolbar")}>Link</MenuItem>
-      </MenuContent>
-    </Menu>
-  );
-}
-
-function FormatMenu() {
-  return (
-    <Menu>
-      <MenuTrigger className={MENU_TRIGGER_CLASS}>Format</MenuTrigger>
-      <MenuContent>
-        <MenuItem onSelect={() => toast.info("Use toolbar formatting")}>Bold</MenuItem>
-        <MenuItem onSelect={() => toast.info("Use toolbar formatting")}>Italic</MenuItem>
-        <MenuItem onSelect={() => toast.info("Use toolbar formatting")}>Clear formatting</MenuItem>
-      </MenuContent>
-    </Menu>
-  );
-}
-
 function ToolsMenu() {
   return (
     <Menu>
       <MenuTrigger className={MENU_TRIGGER_CLASS}>Tools</MenuTrigger>
       <MenuContent>
         <MenuItem onSelect={() => toast.info("Word count — see status bar")}>Word count</MenuItem>
-        <MenuItem onSelect={() => toast.info("Spell check — coming soon")}>Spelling</MenuItem>
-      </MenuContent>
-    </Menu>
-  );
-}
-
-function ReviewMenu({ onOpenVersionHistory }: Pick<MenuBarProps, "onOpenVersionHistory">) {
-  return (
-    <Menu>
-      <MenuTrigger className={MENU_TRIGGER_CLASS}>Review</MenuTrigger>
-      <MenuContent>
-        <MenuItem onSelect={() => toast.info("Track changes — coming in a later phase")}>
-          Track changes
-        </MenuItem>
-        <MenuItem onSelect={() => onOpenVersionHistory?.()}>Version history</MenuItem>
       </MenuContent>
     </Menu>
   );
@@ -456,9 +230,6 @@ function HelpMenu() {
 
 export function MenuBar({
   editor,
-  documentTitle,
-  workspaceId,
-  documentId,
   readOnly,
   onToggleTree,
   onToggleComments,
@@ -467,10 +238,9 @@ export function MenuBar({
   onFitPage,
   onOpenVersionHistory,
   onOpenPageSetup,
-  onServerDocxImported,
-  onDocxImportStart,
-  onDocxImportStateChange,
-  isCollabActive,
+  onOpenCommandPalette,
+  onPrint,
+  onExportPdf,
   className,
 }: MenuBarProps) {
   return (
@@ -481,17 +251,12 @@ export function MenuBar({
       <div className="flex min-w-0 items-stretch overflow-x-auto">
         <FileMenu
           editor={editor}
-          documentTitle={documentTitle}
-          workspaceId={workspaceId}
-          documentId={documentId}
           readOnly={readOnly}
           onToggleTree={onToggleTree}
           onOpenVersionHistory={onOpenVersionHistory}
           onOpenPageSetup={onOpenPageSetup}
-          onServerDocxImported={onServerDocxImported}
-          onDocxImportStart={onDocxImportStart}
-          onDocxImportStateChange={onDocxImportStateChange}
-          isCollabActive={isCollabActive}
+          onPrint={onPrint}
+          onExportPdf={onExportPdf}
         />
         <EditMenu editor={editor} />
         <ViewMenu
@@ -501,10 +266,7 @@ export function MenuBar({
           onFitWidth={onFitWidth}
           onFitPage={onFitPage}
         />
-        <InsertMenu />
-        <FormatMenu />
         <ToolsMenu />
-        <ReviewMenu onOpenVersionHistory={onOpenVersionHistory} />
         <HelpMenu />
       </div>
       <div className="ml-auto flex shrink-0 items-center pr-2">
@@ -514,7 +276,7 @@ export function MenuBar({
             MENU_TRIGGER_CLASS,
             "inline-flex items-center gap-1.5 rounded-sm px-2",
           )}
-          onClick={() => toast.info("Command palette — coming soon (Ctrl+K)")}
+          onClick={() => onOpenCommandPalette?.()}
         >
           <Search size={14} strokeWidth={1.75} aria-hidden />
           <span className="hidden sm:inline">Search actions</span>

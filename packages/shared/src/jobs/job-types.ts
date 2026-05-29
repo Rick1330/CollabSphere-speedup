@@ -30,36 +30,15 @@ export const JobTypes = {
 
 export type JobTypeName = (typeof JobTypes)[keyof typeof JobTypes];
 
-export interface EmailVerificationJobData {
-  userId: string;
-  email: string;
-  verificationToken: string;
-  fullName: string;
-}
-
-export interface EmailPasswordResetJobData {
-  userId: string;
-  email: string;
-  resetToken: string;
-  fullName: string;
-}
-
-export interface EmailInvitationJobData {
-  invitationId: string;
-  workspaceId: string;
-  email: string;
-  inviterName: string;
-  workspaceName: string;
-  token: string;
-}
-
-export interface EmailNotificationJobData {
-  recipientId: string;
-  notificationId: string;
-  type: string;
-  title: string;
-  body: string | null;
-  url: string | null;
+export interface ExportPageSetup {
+  format: "letter" | "a4" | "legal";
+  orientation: "portrait" | "landscape";
+  margins: {
+    top: number;
+    right: number;
+    bottom: number;
+    left: number;
+  };
 }
 
 export interface ExportJobData {
@@ -68,6 +47,7 @@ export interface ExportJobData {
   workspaceId: string;
   requestedBy: string;
   format: "pdf" | "markdown";
+  pageSetup?: ExportPageSetup;
 }
 
 export interface ImportDocxJobData {
@@ -78,62 +58,8 @@ export interface ImportDocxJobData {
   inputPath: string;
 }
 
-export interface IndexDocumentJobData {
-  documentId: string;
-  workspaceId: string;
-}
-
-export interface IndexTaskJobData {
-  taskId: string;
-  workspaceId: string;
-}
-
-export interface PurgeExpiredTokensJobData {
-  batchSize?: number;
-}
-
-export interface ExpireInvitationsJobData {
-  batchSize?: number;
-}
-
-export interface PurgeSoftDeletedJobData {
-  olderThanDays: number;
-  batchSize?: number;
-}
-
-export interface PurgeOldNotificationsJobData {
-  olderThanDays: number;
-  batchSize?: number;
-}
-
-export type VersionSnapshotReason = "auto" | "manual" | "submitted" | "approved" | "before_restore";
-
-export interface VersionSnapshotJobData {
-  documentId: string;
-  workspaceId: string;
-  triggeredBy: string;
-  reason: VersionSnapshotReason;
-}
-
 export type JobPayloadByType = {
-  [JobTypes.EMAIL_VERIFICATION]: EmailVerificationJobData;
-  [JobTypes.EMAIL_PASSWORD_RESET]: EmailPasswordResetJobData;
-  [JobTypes.EMAIL_INVITATION]: EmailInvitationJobData;
-  [JobTypes.EMAIL_NOTIFICATION]: EmailNotificationJobData;
   [JobTypes.EXPORT_PDF]: ExportJobData;
   [JobTypes.EXPORT_MARKDOWN]: ExportJobData;
   [JobTypes.IMPORT_DOCX_HTML]: ImportDocxJobData;
-  [JobTypes.INDEX_DOCUMENT]: IndexDocumentJobData;
-  [JobTypes.INDEX_TASK]: IndexTaskJobData;
-  [JobTypes.PURGE_EXPIRED_TOKENS]: PurgeExpiredTokensJobData;
-  [JobTypes.EXPIRE_INVITATIONS]: ExpireInvitationsJobData;
-  [JobTypes.PURGE_SOFT_DELETED]: PurgeSoftDeletedJobData;
-  [JobTypes.PURGE_OLD_NOTIFICATIONS]: PurgeOldNotificationsJobData;
-  [JobTypes.VERSION_SNAPSHOT]: VersionSnapshotJobData;
 };
-
-export interface TypedJob<T extends JobTypeName = JobTypeName> {
-  type: T;
-  queue: QueueName;
-  data: JobPayloadByType[T];
-}

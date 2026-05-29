@@ -15,7 +15,6 @@ import {
   Subscript as SubscriptIcon,
   Superscript as SuperscriptIcon,
   Underline as UnderlineIcon,
-  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { dispatchEditorCommentCompose } from "@/features/documents/lib/editor-comment-events";
@@ -28,9 +27,9 @@ interface InlineCommentTriggerProps {
   /** Hide bubble while comment compose or task dialog is open — without unmounting. */
   hideWhilePending?: boolean;
   onCreateTask?: (snippet: string) => void;
+  onOpenLinkDialog?: (mode: "external" | "section") => void;
 }
 
-type PanelMode = "main" | "link";
 type PaletteMode = "text" | "highlight" | null;
 
 const MIN_SELECTION_LENGTH = 2;
@@ -272,11 +271,10 @@ export const DocumentInlineCommentTrigger = ({
   enabled,
   hideWhilePending = false,
   onCreateTask,
+  onOpenLinkDialog,
 }: InlineCommentTriggerProps) => {
-  const [panel, setPanel] = useState<PanelMode>("main");
   const [openPalette, setOpenPalette] = useState<PaletteMode>(null);
   const [moreOpen, setMoreOpen] = useState(false);
-  const [linkUrl, setLinkUrl] = useState("");
   const [, setTick] = useState(0);
   const selectionSnippetRef = useRef("");
   const bubbleRootRef = useRef<HTMLDivElement>(null);
@@ -284,7 +282,6 @@ export const DocumentInlineCommentTrigger = ({
   const bump = useCallback(() => setTick((n) => n + 1), []);
 
   const resetSubPanels = useCallback(() => {
-    setPanel("main");
     setOpenPalette(null);
     setMoreOpen(false);
   }, []);
@@ -375,29 +372,15 @@ export const DocumentInlineCommentTrigger = ({
     queueMicrotask(() => onCreateTask(snippet));
   }, [onCreateTask, resetSubPanels]);
 
-  const openLinkPanel = useCallback(() => {
-    if (!editor) return;
-    const previous = (editor.getAttributes("link").href as string | undefined) ?? "";
-    setLinkUrl(previous);
-    setPanel("link");
-    setOpenPalette(null);
-    setMoreOpen(false);
-  }, [editor]);
-
-  const applyLink = useCallback(() => {
-    if (!editor) return;
-    const url = linkUrl.trim();
-    if (!url) {
-      (editor.chain().focus().extendMarkRange("link") as ReturnType<Editor["chain"]>)
-        .unsetLink()
-        .run();
-    } else {
-      (editor.chain().focus().extendMarkRange("link") as ReturnType<Editor["chain"]>)
-        .setLink({ href: url })
-        .run();
-    }
-    setPanel("main");
-  }, [editor, linkUrl]);
+  const openLinkPanel = useCallback(
+    (mode: "external" | "section" = "external") => {
+      if (!editor) return;
+      setOpenPalette(null);
+      setMoreOpen(false);
+      onOpenLinkDialog?.(mode);
+    },
+    [editor, onOpenLinkDialog],
+  );
 
   const applyChangeCase = useCallback(
     (mode: "upper" | "lower" | "capitalize") => {
@@ -442,37 +425,7 @@ export const DocumentInlineCommentTrigger = ({
         aria-label="Text formatting"
         className="selection-bubble-menu relative flex flex-col rounded-lg border border-[#E5E7EB] bg-white p-1 shadow-[0_4px_16px_rgba(0,0,0,0.12)]"
       >
-        {panel === "link" ? (
-          <div className="flex items-center gap-1 px-0.5 py-0.5 min-w-[240px]">
-            <Link2 className="h-3.5 w-3.5 text-stone-500 shrink-0 ml-1" aria-hidden="true" />
-            <input
-              type="url"
-              value={linkUrl}
-              onChange={(event) => setLinkUrl(event.target.value)}
-              placeholder="https://..."
-              className="flex-1 h-7 px-2 text-xs border border-[#E5E7EB] rounded focus:outline-none focus:ring-1 focus:ring-teal-500/40"
-              autoFocus
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  applyLink();
-                }
-                if (event.key === "Escape") {
-                  event.preventDefault();
-                  setPanel("main");
-                }
-              }}
-            />
-            <BubbleBtn label="Apply link" onPress={applyLink}>
-              <Check className="h-3.5 w-3.5" aria-hidden="true" />
-            </BubbleBtn>
-            <BubbleBtn label="Cancel link" onPress={() => setPanel("main")}>
-              <X className="h-3.5 w-3.5" aria-hidden="true" />
-            </BubbleBtn>
-          </div>
-        ) : (
-          <>
-            <div className="flex items-center gap-0.5">
+        <div className="flex items-center gap-0.5">
               <BubbleBtn
                 label="Bold (Ctrl+B)"
                 isActive={isActive("bold")}
@@ -537,10 +490,19 @@ export const DocumentInlineCommentTrigger = ({
               <BubbleBtn
                 label="Insert link (Ctrl+Shift+K)"
                 isActive={isActive("link")}
-                onPress={openLinkPanel}
+                onPress={() => openLinkPanel("external")}
               >
                 <Link2 className="h-3.5 w-3.5" aria-hidden="true" />
               </BubbleBtn>
+              {onOpenLinkDialog ? (
+                <BubbleBtn
+                  label="Link to section"
+                  onPress={() => openLinkPanel("section")}
+                  className="w-auto px-1.5 text-[10px] font-medium"
+                >
+                  §
+                </BubbleBtn>
+              ) : null}
 
               <BubbleBtn label="Add comment" onPress={handleCommentClick}>
                 <MessageSquarePlus className="h-3.5 w-3.5" aria-hidden="true" />
@@ -575,14 +537,12 @@ export const DocumentInlineCommentTrigger = ({
               </div>
             </div>
 
-            {openPalette && (
-              <ColorPaletteRow
-                mode={openPalette}
-                editor={editor}
-                onClose={() => setOpenPalette(null)}
-              />
-            )}
-          </>
+        {openPalette && (
+          <ColorPaletteRow
+            mode={openPalette}
+            editor={editor}
+            onClose={() => setOpenPalette(null)}
+          />
         )}
       </div>
     </BubbleMenu>

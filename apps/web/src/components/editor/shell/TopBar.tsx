@@ -4,7 +4,6 @@ import {
   ArrowLeft,
   ChevronRight,
   Download,
-  FileDown,
   History,
   Lock,
   Maximize2,
@@ -12,11 +11,9 @@ import {
   Minimize2,
   MoreHorizontal,
   PanelLeft,
-  Share2,
   Trash2,
   Unlock,
 } from "lucide-react";
-import { toast } from "sonner";
 import {
   Badge,
   IconButton,
@@ -238,15 +235,6 @@ export function TopBar({
 
         {submitSlot}
 
-        <button
-          type="button"
-          className="cs-editor-topbar__share cs-kit-focus hidden sm:inline-flex"
-          onClick={() => toast.info("Share dialog — coming soon")}
-        >
-          <Share2 size={14} strokeWidth={1.75} aria-hidden />
-          Share
-        </button>
-
         {onToggleComments && (
           <div className="relative">
             <IconButton
@@ -295,13 +283,9 @@ export function TopBar({
               <MenuShortcut>Ctrl+Alt+H</MenuShortcut>
             </MenuItem>
             <MenuSeparator />
-            <MenuItem onSelect={() => toast.info("Export coming soon")}>
+            <MenuItem onSelect={() => window.print()}>
               <Download size={16} className="text-[var(--text-muted)]" />
               Export as PDF
-            </MenuItem>
-            <MenuItem onSelect={() => toast.info("Export coming soon")}>
-              <FileDown size={16} className="text-[var(--text-muted)]" />
-              Export as Markdown
             </MenuItem>
             {canLock && (
               <>
