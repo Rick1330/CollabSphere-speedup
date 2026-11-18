@@ -21,3 +21,5 @@ The development command starts the local infrastructure and application services
 - [Implementation status](IMPLEMENTATION_STATUS.md)
 - [Architecture overview](docs/architecture/current-state.md)
 - [Product and technical specifications](docs/spec/README.md)
+
+The implementation and architecture documents above are point-in-time notes. Verify current behavior against the source and current CI before treating older gap lists as active work.

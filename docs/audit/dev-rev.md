@@ -1,4 +1,6 @@
 # Deep Investigation: Agent Rules System, Frontend Quality, and the System You Should Build
+
+> **Historical audit, 12 May 2026.** This point-in-time review may not match the current implementation. Treat inventories, gaps, and recommendations below as historical context; verify present behavior against the source and current CI.
 This is the consolidated analysis covering agent rules, frontend quality, session memory handling, and the system you should build going forward. Structured in 8 parts — each independently usable.
 ---
 ## Part 1 — What you actually have (verified inventory)
@@ -128,7 +130,7 @@ Working with multiple agents (Claude, GPT-4, Codex, Devin, Copilot) reveals cons
 2. **They write rules as tests where possible.** A constraint that can be enforced by ESLint, TypeScript, or a custom CI script removes the agent's ability to violate it. CodeScene/Sonar/DeepScan are *external rule enforcers* — your agent rules should converge with them, not diverge.
 3. **They treat the code as the canonical source after week N of building.** Day-0 plans are reference material. Week-N reality is truth. Strong builders update the plan to match the code, not the other way around.
 4. **They build a "context budget" mindset.** Every token the agent spends reading dead docs is a token not spent reasoning about the actual problem. Pruning your docs is as important as growing them.
-5. **They use multiple agent tools strategically.** Lovable for UI scaffolding (best at design quality), Claude Code/Cursor for refactoring (best at multi-file context), Codex/Devin for narrow well-specified tasks (best at tight execution loops), Copilot for inline completion. You're already doing this — just normalize it.
+5. **They use tools deliberately.** Visual design tools help with UI prototyping, code assistants help with refactoring, and automated checks provide fast feedback. The specific tools matter less than clear handoffs and verification.
 6. **They keep a session-state external to chat.** Notion, Obsidian, a dedicated doc, or a `.agent/` directory in the repo. The chat is ephemeral. The state isn't.
 7. **They version their rules.** Strong rules evolve. The verify-email PR taught you about pre-push hooks — that lesson should be encoded as a rule in the next session, not lost.
 ---
@@ -279,7 +281,7 @@ What you experience:
 - Agent sessions are interrupted (by you, by token limits, by tool changes)
 - Context is lost between sessions
 - The next session needs to "catch up"
-- Different agents (Lovable, Claude, Devin) don't share state
+- Different contributors and tools do not share state automatically
 - Your handoff convention works but is manual
 This is the universal solo-AI builder problem. Here's what works.
 ### 5.2 The four layers of session state
@@ -312,7 +314,7 @@ Add `docs/ai/skills/core/session-continuity.md`:
 Maintain coherent agent state across session interruptions, tool changes, and context resets.
 ## When to Use
 - Starting a new session
-- Switching agent tools (Lovable → Claude, Claude → Devin)
+- Switching tools while preserving project context
 - Resuming after >24h gap
 - Detecting that current session has degraded (memory burst, contradictions)
 ## Required Inputs
@@ -394,14 +396,14 @@ Maintain coherent agent state across session interruptions, tool changes, and co
 - packages/database/prisma/schema.prisma (no changes, but auth tables relevant)
 ```
 This is your **persistent session memory**. Every important session ends with one of these.
-### 5.5 Tool-bridging (Lovable → Claude → Devin)
+### 5.5 Tool-bridging between contributors
 When you switch tools, you lose chat memory but you don't have to lose project memory. The bridge is:
 1. End-of-session handoff doc (above)
 2. Tool-agnostic prompt for the next tool
-Example: when you've been in Lovable building UI and want to switch to Claude/Devin for backend work, you write a `tool-handoff.md`:
+Example: when work moves from a visual design environment to backend implementation, write a `tool-handoff.md`:
 ```markdown
-# Handoff: Lovable → Claude
-## What I built in Lovable
+# Handoff: UI design to implementation
+## What is already built in the visual design environment
 - Frontend: Vite + Tailwind + shadcn at apps/web
 - All major routes scaffolded with mock data
 - Adapter layer in src/api/adapters/
@@ -410,8 +412,8 @@ Example: when you've been in Lovable building UI and want to switch to Claude/De
 - Read apps/web/docs/frontend-architecture.md
 - The adapter pattern is canonical: don't bypass it
 - Mocks are temporary; will be swapped for real adapters when backend lands
-## What Claude should NOT do
-- Re-implement components Lovable already built
+## What the next contributor should not do
+- Re-implement components that are already built
 - Change the adapter pattern
 - Modify shell/routing without explicit ask
 ## Next intended action
@@ -443,7 +445,7 @@ Linear, Vercel, Stripe, Notion frontends share these characteristics that yours 
 - **Lazy loading routes:** `const Tasks = lazy(() => import('./features/tasks/pages/Tasks'))` — currently you load everything eagerly.
 - **LCP/INP/CLS budgets** measured via Lighthouse CI in PR. If LCP regresses by >10%, fail.
 #### Component documentation
-- **Storybook** is the missing piece. World-class teams document every primitive and every feature component visually. Lovable + Storybook is the workflow. Your repo has the components but nothing showcases them.
+- **Storybook** is the missing piece. Document primitives and feature components visually, then use visual regression checks to catch design drift.
 - **Visual regression** via Chromatic on Storybook = catches design drift before merge.
 #### Animation discipline
 - **Centralized motion tokens.** World-class teams have a `tokens/motion.ts` defining `duration.fast`, `duration.medium`, `easing.standard`, etc. — components reference tokens, not raw values. You currently have framer-motion sprinkled with `stiffness: 300, damping: 20` literals.
@@ -749,7 +751,7 @@ Create `docs/ai/templates/SESSION_LOG_TEMPLATE.md`:
 # Session: <Topic>
 ## Date: YYYY-MM-DD
 ## Duration: ~Nh
-## Agent(s): <Lovable | Claude | Devin | Copilot | Antigravity>
+## Agent(s): <names or tools used>
 ## PR(s): #NNN
 ## Issue(s): #NNN
 ## Status: <in_progress | handed_off | done>
@@ -892,7 +894,7 @@ Create `docs/ai/templates/SESSION_LOG_TEMPLATE.md`:
 # Session: <Topic>
 ## Date: YYYY-MM-DD
 ## Duration: ~Nh
-## Agent(s): <Lovable | Claude | Devin | Copilot | Antigravity>
+## Agent(s): <names or tools used>
 ## PR(s): #NNN
 ## Issue(s): #NNN
 ## Status: <in_progress | handed_off | done>
@@ -965,7 +967,7 @@ Move `docs/spec/07-architecture/07.6-adrs.md` to `docs/adrs/*` (one file per dec
 Rule: any non-default behavior is an ADR or it doesn't ship. Verify-email's 400/410 overrides should have been ADR-003 and ADR-004.
 ### 7.9 Tool-bridge handoffs
 Add `docs/ai/tool-handoffs/` directory with handoffs between agent tools. Example filenames:
-- `2026-04-15-lovable-to-claude-frontend-scaffold.md`
+- `2026-04-15-frontend-scaffold-handoff.md`
 - `2026-04-25-claude-to-antigravity-verify-email.md`
 - `2026-04-28-antigravity-to-claude-post-merge-cleanup.md`
 Each one ~50 lines. Tells the receiving agent what was done, what to respect, what to avoid.
@@ -1009,7 +1011,7 @@ These aren't moral failings. They're the natural consequence of comprehensive up
 If you adopt the Phase 0 scope + the rule system additions in Part 7:
 - **Future stories cost less.** Foundations are stable; agents stop fighting framework absence and test-runner mismatch.
 - **Session interruptions stop hurting.** current-state.md + session log + context bundles = persistent memory.
-- **Tool switches stop hurting.** Tool-handoff docs preserve intent across Lovable → Claude → Devin transitions.
+- **Tool switches stop hurting.** Handoff docs preserve intent when contributors change.
 - **Quality gates stop being post-hoc.** Lint rules + husky + CI catch issues before review tools do.
 - **Rules become inviolable.** Code-as-spec precedence + drift detection + ADR discipline = no more silent divergence.
 - **The 1200 tasks become reference material.** Story bodies survive; task lists become disposable advisory content.
@@ -1029,7 +1031,7 @@ Each ends with a decision matrix. The accumulated decisions are roughly 40 quest
 3. **Testing approach** (10 sub-decisions in that report's §6)
 4. **Infra approach** (8 sub-decisions in that report's §7)
 5. **Rule system additions** (the ~10 file additions in Part 7 of this report)
-6. **Tool-bridge convention** (Lovable + Claude + Devin handoff docs)
+6. **Tool-bridge convention** (tool-neutral contributor handoff docs)
 7. **Session log discipline** (per-session entries — yes/no)
 8. **ADR discipline going forward** (every override gets one — yes/no)
 The simplest path forward: **answer the 8 themes first.** Once those are settled, I write the first Phase 0 prompt (NestJS migration) the same way I wrote the verify-email round prompts — copy-pasteable, scoped, with verification baked in, with the new rule system additions referenced inline.
@@ -1664,7 +1666,7 @@ Your repo today has:
 - ❌ No template versioning UX
 - ❌ No suggestion / track-changes mode
 - ❌ No comment-on-selection (only doc-level comments)
-This is the **realistic gap.** The frontend looks polished because Lovable made the chrome look good. The depth isn't there yet.
+This is the **realistic gap.** The frontend shell is polished, but feature depth is still incomplete.
 ### 11.8 What you should actually do — phased plan
 I'm going to be opinionated here. Trying to build all of this in one push will repeat the verify-email PR pattern at 100x scale. You need to phase it carefully.
 #### Phase A: Spec re-architecture (1 week, no code)
@@ -3691,7 +3693,7 @@ This is **fixable** — but only if you accept the pattern and stop adding scope
 Treating this as a final synthesis:
 1. **You're a serious solo builder with extraordinary planning rigor.** The doc/spec/agent-ref architecture is better than most VC-backed startups. You don't lack ambition or quality bar.
 2. **You've over-invested in upfront planning relative to execution velocity.** 1200+ tasks, 18 projects, comprehensive specs — but 4 endpoints implemented and the test suite uses three different runners. The asymmetry is what's blocking you.
-3. **Your AI tooling workflow is sophisticated but unsystematic.** You move between Lovable / Claude / Devin / antigravity. Each session works individually. Sessions don't compound because state is implicit. Formalizing this is the highest-leverage process change.
+3. **Your AI-assisted workflow is sophisticated but unsystematic.** Work moves between tools, but sessions do not compound because project state is implicit. Formalizing handoffs is the highest-leverage process change.
 4. **Your code quality is uneven by surface.** Frontend is polished. Backend is hand-rolled. Tests are split. CI works but doesn't enforce coverage. Each surface tells a story about how much iteration that surface has had.
 5. **Your domain model is genuinely strong.** Schema, error codes, state machines, role models — this layer is closer to world-class than any other. Don't lose this. Build features on top of this foundation.
 6. **Your differentiation is doc↔task linking + academic workflows.** Not generic productivity. Not Linear. Not Notion. Pick this lane and excel; let everything else be "good enough."
