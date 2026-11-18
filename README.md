@@ -1,77 +1,23 @@
 # CollabSphere
 
-CollabSphere is a realtime collaboration workspace platform. `apps/web` now runs as the real Vite + React SPA on Vercel, while downstream stories continue to layer in backend integration, auth/session truth, and product-complete behavior on top of that platform. The backend stack remains NestJS, Hocuspocus, BullMQ, PostgreSQL, Redis, and local Docker-backed developer services.
+CollabSphere is an open-source workspace for teams to write documents, organize tasks, and collaborate in real time.
 
-## Local Development
+The repository contains a Vite + React web app, a NestJS API, a Hocuspocus collaboration service, a BullMQ worker, and shared PostgreSQL, Prisma, and Redis infrastructure. Core document collaboration and team workflows have been exercised locally by the maintainer. This README does not claim production readiness.
 
-### Prerequisites
+## Run locally
 
-- Node.js 20 LTS or newer
-- pnpm 9.x or newer
-- Docker Desktop or a compatible Docker runtime with Compose
-- Git
-
-### Current setup flow
-
-The current repo state uses Docker Compose for local infrastructure and `pnpm dev` for app processes. That now starts the Vite web runtime in `apps/web` alongside the backend services.
-
-1. Install dependencies:
+Requirements: Node.js 20+, pnpm 9, and Docker with Compose.
 
 ```bash
 pnpm install
-```
-
-2. Copy the local infrastructure env template:
-
-```bash
 cp .env.example .env
-```
-
-3. Start required Docker services:
-
-```bash
-docker compose up -d
-```
-
-Optional MinIO:
-
-```bash
-docker compose --profile minio up -d
-```
-
-4. Verify service health:
-
-```bash
-docker compose ps
-```
-
-5. Start the app processes:
-
-```bash
 pnpm dev
 ```
 
-### Local service set
+The development command starts the local infrastructure and application services. See [CONTRIBUTING.md](CONTRIBUTING.md) for configuration, troubleshooting, validation commands, and contribution workflow.
 
-Required local Docker services:
+## Project documentation
 
-- PostgreSQL
-- Redis
-- MailHog
-
-Optional local Docker service:
-
-- MinIO
-
-Notes:
-
-- Docker Compose reads `.env` for local infrastructure port and credential overrides.
-- Keep app runtime-only overrides in `.env.local`; do not commit it.
-- If a default port is already in use, update the matching `*_PORT` value in `.env` before starting Compose.
-- MailHog UI is available at `http://localhost:8025` with the default ports.
-- If `8025` is already in use, set `MAILHOG_UI_PORT` in `.env`, then rerun `docker compose up -d`.
-- If the SMTP port `1025` conflicts locally, set `MAILHOG_SMTP_PORT` in `.env` before restarting Compose.
-
-### Need more detail?
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for troubleshooting, validation checks, and contribution workflow details.
+- [Implementation status](IMPLEMENTATION_STATUS.md)
+- [Architecture overview](docs/architecture/current-state.md)
+- [Product and technical specifications](docs/spec/README.md)
