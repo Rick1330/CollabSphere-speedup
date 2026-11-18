@@ -1,7 +1,7 @@
 # Session: <Topic>
 ## Date: YYYY-MM-DD
 ## Duration: ~Nh
-## Agent(s): <Lovable | Claude | Devin | Copilot | Antigravity>
+## Agent(s): <names or tools used>
 ## PR(s): #NNN
 ## Issue(s): #NNN
 ## Status: <in_progress | handed_off | done>
