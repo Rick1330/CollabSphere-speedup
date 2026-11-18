@@ -1,6 +1,6 @@
 # CollabSphere
 
-CollabSphere is an open-source workspace for teams to write documents, organize tasks, and collaborate in real time.
+CollabSphere is an open-source workspace for teams to write documents, organize tasks, and collaborate in real time. This is the active, redesigned and substantially rebuilt version of the project; the original [CollabSphere repository](https://github.com/Rick1330/collabsphere) is archived after I ran out of time to continue it during my final year project. Use this repository for current code, issues, and development.
 
 The repository contains a Vite + React web app, a NestJS API, a Hocuspocus collaboration service, a BullMQ worker, and shared PostgreSQL, Prisma, and Redis infrastructure. Core document collaboration and team workflows have been exercised locally by the maintainer. This README does not claim production readiness.
 

@@ -115,7 +115,7 @@ At least one of the following secrets must be configured:
 
 The deploy workflow validates token auth (`vercel whoami`) and project access (Vercel project API) before Azure deployment mutation steps. It also fails fast if `VERCEL_TOKEN_ROLLOVER` duplicates `VERCEL_TOKEN`, because that is not a real fallback and recreates the same outage mode when the shared token is revoked. If all configured tokens fail auth preflight, the run exits early with a token-rotation error.
 
-The repo also includes a dedicated `Vercel Token Health` GitHub Actions workflow for proactive verification without performing a full staging deploy. The scheduled run validates the `staging` environment, and `workflow_dispatch` can target `staging` or `production` only for commits already merged to `main`.
+The repo also includes a dedicated `Vercel Token Health` GitHub Actions workflow for manual verification without performing a full staging deploy. It is available through `workflow_dispatch` for commits already merged to `main`; scheduled runs are disabled until deployment credentials are configured.
 
 The deploy workflow posts a compact Discord notification after each staging or production run using the environment-scoped `DEPLOY_NOTIFICATION_WEBHOOK_URL` secret.
 
@@ -267,7 +267,7 @@ If failure happens at `Resolve and validate Vercel deploy token`:
 - `VERCEL_TOKEN` and `VERCEL_TOKEN_ROLLOVER` may be duplicates of the same token value
 - the token may authenticate but no longer have access to `VERCEL_PROJECT_ID` in `VERCEL_ORG_ID`
 
-Use the `Vercel Token Health` workflow to verify the current environment secret contract without waiting for the next merge-to-main deploy.
+Use the manually dispatched `Vercel Token Health` workflow to verify the environment secret contract after the required GitHub environment credentials are configured. Staging deployment is also manual until that setup is complete.
 
 ### Azure region creation fails
 
